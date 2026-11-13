@@ -1983,6 +1983,22 @@ function crewHoldForm(j,t){const me=myTech();
       logEvent(msg,{ev:"flag",jobId:j.id});const boss=Object.keys(roles).filter(u=>roles[u]&&roles[u].role==="boss"&&u!==myId);if(boss.length)logEvent(msg,{ev:"notice",notify:boss,title:"On hold from the crew",jobId:j.id});
       toast("Sent to your lead and superintendent");});}
 function nextAfter(me,j,t,d){try{return withJob(Object.assign({},j,{tasks:tasksOf(j).map(x=>x.id===t.id?Object.assign({},x,{doneOn:d}):x)}),()=>{memo={};const a=assignOn(me.id,d);const tk=a?taskFor(a,me.id,d):null;return a?{j:a,t:tk}:null;});}catch(e){return null;}finally{memo={};}}
+/* the job you finished stops being "yours" while it waits for review */
+function nextJobAfter(me,j,d){try{return withJob(Object.assign({},j,{doneOn:d}),()=>{memo={};const a=assignOn(me.id,d);const tk=a?taskFor(a,me.id,d):null;return a?{j:a,t:tk}:null;});}catch(e){return null;}finally{memo={};}}
+/* after Done: take the next thing lined up, or ask a lead / the super for one */
+function whatsNext(doneLabel,nx){const me=myTech(),d=TODAY();if(!me)return;
+  const ms=mgrUids(),label=nx?(nx.t?nx.t.name+" · "+nx.j.name:nx.j.name):"";
+  const ping=async extra=>{const msg=me.name+" finished "+doneLabel+" and needs a next task"+(extra?" ("+extra+")":"")+".";
+    if(ms.length)logEvent(msg,{ev:"notice",notify:ms,title:"Needs next task"});logEvent(msg,{ev:"done"});toast("Sent to your lead and super");};
+  const accept=async()=>{try{if(nx.t)await setTaskState(nx.j,nx.t,{state:"working",at:Date.now(),by:myId||""});
+      const msg=me.name+" started "+label;logEvent(msg,{ev:"working",jobId:nx.j.id});if(ms.length)logEvent(msg,{ev:"notice",notify:ms,title:"Started next task",jobId:nx.j.id});toast("Started "+label);}catch(err){writeErr(err);}};
+  openView("Nice work. What's next?",[h("div",{class:"full stack"},
+    h("p",{class:"status",style:"margin:0"},"✓ "+doneLabel+" is done and your lead and super were told."),
+    nx?h("div",{class:"wcard next",style:"margin:0"},h("div",{class:"wlbl"},"Lined up for you"),h("div",{class:"wtitle sm"},nx.t?nx.t.name:nx.j.name),h("div",{class:"status"},[nx.t?nx.j.name:"Whole job",nx.j.site,(()=>{const c=workingOn(nx.j,d).filter(x=>x!==me.id&&(!nx.t||(taskFor(nx.j,x,d)||{}).id===nx.t.id));return c.length?"with "+crewNames(c):"";})()].filter(Boolean).join(" · ")))
+      :h("div",{class:"wcard",style:"margin:0"},h("div",{class:"wtitle sm"},"Nothing lined up for you yet"),h("div",{class:"status"},"Let your lead and super know you're free.")),
+    nx?h("button",{type:"button",class:"btn bigbtn",onclick:async()=>{closeSheet();await accept();}},"▶ Accept and start"):h("button",{type:"button",class:"btn bigbtn",onclick:async()=>{closeSheet();await ping("");}},"📣 Ask for my next task"),
+    nx?h("button",{type:"button",class:"btn ghost",onclick:async()=>{closeSheet();await ping("has "+label+" lined up but wants to check");}},"📣 Ask lead / super instead"):null,
+    h("button",{type:"button",class:"linkbtn",onclick:closeSheet},"Not now"))]);}
 function renderMyWork(v){const d=TODAY(),me=myTech(),t=today();
   v.append(h("div",{class:"dayline"},h("strong",{},fmt(t,{weekday:"long",month:"short",day:"numeric"})),h("span",{class:"status"},hoursTxt(d)),notifState()==="default"?h("button",{type:"button",class:"linkbtn",onclick:()=>enableAlerts()},"Turn on alerts"):null));
   {const mj=me?assignOn(me.id,d):null,mt=mj?taskFor(mj,me.id,d):null,shown=mj&&mt&&CAN_POST()&&needsScan(mj)&&!offRec(me.id,d)&&isWeekday(d);
@@ -1993,7 +2009,11 @@ function renderMyWork(v){const d=TODAY(),me=myTech(),t=today();
     let x=addDays(t,1);for(let i=0;i<10;i++,x=addDays(x,1)){const s=iso(x);if(!isWeekday(s)||offRec(me.id,s))continue;const a=assignOn(me.id,s),tk=a?taskFor(a,me.id,s):null;
       v.append(h("div",{class:"wcard next"},h("div",{class:"wlbl"},"Next work day · "+fmt(x,{weekday:"long",month:"short",day:"numeric"})),h("div",{class:"wtitle"},a?(tk?tk.name:a.name):"No assignment yet"),a&&tk?h("div",{class:"status"},a.name):null));break;}
     workFooter(v);return;}
-  const j=assignOn(me.id,d),tk=j?taskFor(j,me.id,d):null;
+  let j=assignOn(me.id,d),tk=j?taskFor(j,me.id,d):null;
+  if(j&&jobFin(j)){const fj=j,nx=nextJobAfter(me,j,d);v.append(h("div",{class:"status",style:"margin:0 0 8px"},"✓ "+fj.name+" is marked complete and waiting for your lead to close it."));
+    j=nx&&nx.j.id!==fj.id?nx.j:null;tk=j?taskFor(j,me.id,d):null;
+    if(!j){v.append(h("div",{class:"wcard"},h("div",{class:"wlbl"},"Right now"),h("div",{class:"wtitle"},"Nothing lined up"),h("p",{class:"status"},"Let your lead and super know you're free."),
+      CAN_POST()?h("button",{type:"button",class:"btn",onclick:()=>whatsNext(fj.name,null)},"📣 Ask for my next task"):null));workFooter(v);return;}}
   if(!j){const w=waitingItems(d).find(x=>x.crew.includes(me.id));
     v.append(h("div",{class:"wcard"},h("div",{class:"wlbl"},w?"Up next for you":"Right now"),h("div",{class:"wtitle"},w?targetLabel(w.job,w.task):"No task assigned"),
       h("p",{class:"status"},w?"Waiting: "+waitTxt(w).toLowerCase()+". Your lead will start you when it's ready.":"Check in with your lead for your next task.")));workFooter(v);return;}
@@ -2014,7 +2034,7 @@ function renderMyWork(v){const d=TODAY(),me=myTech(),t=today();
       doneBtn.disabled=true;try{await setTaskState(j,tk,{state:"done",on:d,at:Date.now(),by:myId||""});
         const msg=me.name+" finished "+targetLabel(j,tk);logEvent(msg,{ev:"done",jobId:j.id});const ms=mgrUids();if(ms.length)logEvent(msg,{ev:"notice",notify:ms,title:"Task finished",jobId:j.id});
         if(ms.length&&tasksOf(j).every(x=>x.id===tk.id||x.doneOn))logEvent("Every task on "+j.name+" is done. Close the job when it's ready.",{ev:"notice",notify:ms,title:"Job ready to close",jobId:j.id});
-        toast("Nice work. Here's what's next.");}catch(err){writeErr(err);doneBtn.disabled=false;}}},"✓ Done");
+        const nx=nextAfter(me,j,tk,d);setTimeout(()=>whatsNext(tk.name,nx&&!(nx.j.id===j.id&&nx.t&&nx.t.id===tk.id)?nx:null),300);}catch(err){writeErr(err);doneBtn.disabled=false;}}},"✓ Done");
     card.append(h("div",{class:"wbtns"},
       h("button",{type:"button",class:"wbtn go","aria-pressed":String(state==="working"),disabled:state==="held",onclick:async()=>{try{await setTaskState(j,tk,{state:"working",at:Date.now(),by:myId||""});logEvent(me.name+" is working on "+targetLabel(j,tk),{ev:"start",jobId:j.id});toast("You're on it");}catch(err){writeErr(err);}}},state==="hold"?"▶ Back to work":"▶ Working on it"),
       h("button",{type:"button",class:"wbtn hold",disabled:state==="hold"||state==="held",onclick:()=>crewHoldForm(j,tk)},"⏸ On hold"),
@@ -2035,7 +2055,7 @@ function finishJobForm(j){const open=tasksOf(j).filter(t=>!t.doneOn);
   openSheet("Job complete?",[h("p",{class:"status full",style:"margin:0"},h("strong",{style:"color:var(--ink)"},j.name),". This tells your lead and super the whole job is finished so they can check it and close it."),
     open.length?h("p",{class:"full",style:"margin:0;color:var(--over)"},open.length+" task"+(open.length>1?"s are":" is")+" still open: "+open.map(t=>t.name).join(", ")+"."):null,
     field({id:"fjNote",label:"Anything they should know (optional)",value:"",full:true,placeholder:"e.g. All cables landed and tested, labels on"})].filter(Boolean),
-    async()=>{try{await crewFinishJob(j,val("fjNote"));toast("Sent to your lead and super");}catch(err){writeErr(err);return false;}});}
+    async()=>{try{await crewFinishJob(j,val("fjNote"));const me=myTech(),nx=me?nextJobAfter(me,j,TODAY()):null;setTimeout(()=>whatsNext(j.name,nx&&nx.j.id!==j.id?nx:null),350);}catch(err){writeErr(err);return false;}});}
 function workFooter(v){v.append(h("div",{class:"wfoot"},
   CAN_POST()?h("button",{type:"button",class:"btn ghost",onclick:()=>flagForm()},"⚑ Report a problem"):null,
   CAN_POST()?h("button",{type:"button",class:"btn ghost",onclick:()=>callInForm()},"Call in"):null,
