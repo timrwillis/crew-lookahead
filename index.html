@@ -1974,6 +1974,8 @@ function crewHoldForm(j,t){const me=myTech();
 function nextAfter(me,j,t,d){try{return withJob(Object.assign({},j,{tasks:tasksOf(j).map(x=>x.id===t.id?Object.assign({},x,{doneOn:d}):x)}),()=>{memo={};const a=assignOn(me.id,d);const tk=a?taskFor(a,me.id,d):null;return a?{j:a,t:tk}:null;});}catch(e){return null;}finally{memo={};}}
 function renderMyWork(v){const d=TODAY(),me=myTech(),t=today();
   v.append(h("div",{class:"dayline"},h("strong",{},fmt(t,{weekday:"long",month:"short",day:"numeric"})),h("span",{class:"status"},hoursTxt(d)),notifState()==="default"?h("button",{type:"button",class:"linkbtn",onclick:()=>enableAlerts()},"Turn on alerts"):null));
+  {const mj=me?assignOn(me.id,d):null,mt=mj?taskFor(mj,me.id,d):null,shown=mj&&mt&&CAN_POST()&&needsScan(mj)&&!offRec(me.id,d)&&isWeekday(d);
+    if(!shown&&CAN_POST()&&scanJobs().length)v.append(h("button",{type:"button",class:"btn",style:"width:100%;margin:0 0 10px",onclick:scanAny},isLaptop()?"⌨ Scan a cable":"📷 Scan a cable"));}
   if(!me){v.append(h("div",{class:"wcard"},h("strong",{},"Link your name first"),h("p",{class:"status"},"Pick your name on the crew list so your tasks show up here."),h("button",{class:"btn",type:"button",onclick:profileForm},"Set up my profile")));return;}
   const o=offRec(me.id,d);
   if(!isWeekday(d)||o){v.append(h("div",{class:"wcard"},h("div",{class:"wlbl"},"Today"),h("div",{class:"wtitle"},o?"You're off · "+(o.type||"Off"):"No work scheduled today")));
@@ -2949,7 +2951,7 @@ function handleWedgeScan(v){
   if(ckOpen&&!$("#scrim").hidden){applyScanToCk(ckOpen.jid,ckOpen.cid,v);return;}
   let j=null;if(!$("#scrim").hidden&&/· cables|cable dates/.test($("#sheetTitle").textContent||""))j=S.jobs.find(x=>($("#sheetTitle").textContent||"").startsWith(x.name+" ·"));
   if(!j&&(tab==="tasks"||tab==="jobs")&&taskJob)j=S.jobs.find(x=>x.id===taskJob);
-  if(!j&&tab==="home"&&!MGR()){const me=myTech();j=me?assignOn(me.id,TODAY()):null;}
+  if(!j&&tab==="home"&&!MGR()){const me=myTech();j=me?assignOn(me.id,TODAY()):null;if(!(j&&cablesOf(j).length)){const js=scanJobs();j=js.length===1?js[0]:null;if(js.length>1){scanAnyThen(v);return;}}}
   if(j&&cablesOf(j).length){scanFindCable(j.id,v);return;}
   toast("Scanned "+v.slice(0,40)+". Open a job's cables to use the scanner.");}
 document.addEventListener("keydown",e=>{
@@ -3006,7 +3008,16 @@ async function copyText(txt,msg){try{await navigator.clipboard.writeText(txt);}c
 function ckTable(j){const head=["Cable","Cable Serial #","Cable QR code URL","Source Patch Panel Serial #","Dest Patch Panel Serial #",...CK_ITEMS.flatMap((_,i)=>["#"+(i+1)+" Owner","#"+(i+1)+" Date","#"+(i+1)+" Remarks"])];
   return [head,...cablesOf(j).map(c=>{const ck=ckOf(j,c.id);return [c.name,ck.serial||"",ck.qr||"",ck.src||"",ck.dst||"",...CK_ITEMS.flatMap((_,i)=>{const it=(ck.items||{})[i+1];return it&&it.at?[ckWho(it),ckDate(it.at),it.remark||""]:["","",""];})];})];}
 /* scan a cable's serial or label to jump straight to it */
-const needsScan=j=>!!j&&!isQuick(j)&&cablesOf(j).length>0&&(j.scanCk===true||(j.scanCk!==false&&cablesOf(j).some(c=>ckScanN(ckOf(j,c.id))>0)));
+const needsScan=j=>!!j&&!isQuick(j)&&cablesOf(j).length>0&&(j.scanCk===true||!!j.scanSteps||stepsOf(j).some(st=>/^scan_/.test(st.id))||(j.scanCk!==false&&cablesOf(j).some(c=>ckScanN(ckOf(j,c.id))>0)));
+/* open jobs with cables to scan; anyone on the crew can scan, assigned or not */
+const scanJobs=()=>S.jobs.filter(j=>!j.doneOn&&needsScan(j));
+function scanAny(){const js=scanJobs(),me=myTech(),mine=me?assignOn(me.id,TODAY()):null;
+  if(!js.length){toast("No jobs need cable scanning right now.");return;}
+  if(js.length===1){scanFindCable(js[0].id);return;}
+  const list=js.slice().sort((a,b)=>(mine&&b.id===mine.id?1:0)-(mine&&a.id===mine.id?1:0)||natCmp(a.name,b.name));
+  openView("Which job?",[h("div",{class:"full stack"},list.map(j=>{const cs=cablesOf(j),n=cs.filter(c=>ckScanN(ckOf(j,c.id))===4).length;
+    return h("button",{type:"button",class:"moreitem",onclick:()=>{closeSheet();setTimeout(()=>scanFindCable(j.id),60);}},h("span",{},"📷"),h("span",{},h("strong",{},j.name),h("small",{},[mine&&j.id===mine.id?"Your job today":"",n+"/"+cs.length+" fully scanned",j.site].filter(Boolean).join(" · "))),h("span",{class:"status"},"›"));}))]);}
+function scanAnyThen(code){const js=scanJobs();openView("Which job is this cable on?",[h("div",{class:"full stack"},h("div",{class:"mono status"},code),js.map(j=>h("button",{type:"button",class:"moreitem",onclick:()=>{closeSheet();setTimeout(()=>scanFindCable(j.id,code),60);}},h("span",{},"🧵"),h("span",{},h("strong",{},j.name),h("small",{},j.site||"")),h("span",{class:"status"},"›"))))]);}
 function scanBar(j){const cs=cablesOf(j),sc=cs.filter(c=>ckScanN(ckOf(j,c.id))===4).length,ckd=cs.filter(c=>ckItemN(ckOf(j,c.id))===5).length,bad=cs.filter(c=>ckProblems(ckOf(j,c.id)).length).length;
   return h("div",{class:"scanbar"},h("button",{type:"button",class:"btn",onclick:()=>scanFindCable(j.id)},(isLaptop()?"⌨ Scan a cable":"📷 Scan a cable")),
     h("span",{class:"status"},sc+"/"+cs.length+" fully scanned · "+ckd+"/"+cs.length+" check lists done"+(bad?" · ":"")),
