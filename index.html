@@ -1060,11 +1060,22 @@ function priControl(j){const p=priOf(j);
   const sel=h("select",{class:"prisel pri"+p,id:"pri-"+j.id,"aria-label":"Priority",onclick:e=>e.stopPropagation(),onkeydown:e=>e.stopPropagation()},PRI_SEL().map(([k,l])=>h("option",{value:k,selected:+k===p},l+" priority")));
   sel.addEventListener("change",async()=>{try{await db.collection("jobs").doc(j.id).update({pri:+sel.value,updatedAt:Date.now()});toast("Priority set to "+PRI[sel.value]);}catch(err){writeErr(err);}});
   return sel;}
-async function setDone(j,on){try{await db.collection("jobs").doc(j.id).update(on?{doneOn:TODAY(),doneBy:myId||"",updatedAt:Date.now()}:{doneOn:"",updatedAt:Date.now()});toast(on?j.name+" marked done":j.name+" reopened");}catch(err){writeErr(err);}}
+async function setDone(j,on){try{await db.collection("jobs").doc(j.id).update(on?{doneOn:TODAY(),doneBy:myId||"",updatedAt:Date.now()}:{doneOn:"","marks._job":null,updatedAt:Date.now()});toast(on?j.name+" marked done":j.name+" reopened");}catch(err){writeErr(err);}}
 /* every task finished (or every cable step, if there are no tasks) but nobody closed the job yet */
-const readyToClose=j=>{if(!j||j.doneOn||isQuick(j))return false;const tk=tasksOf(j);if(tk.length)return tk.every(t=>t.doneOn);const pg=jobProgress(j);return !!pg&&pg.pct===100;};
-function closePrompt(j){return h("div",{class:"closebar"},h("span",{},h("strong",{},"✓ All tasks are done."),h("span",{class:"status"}," Close the job to move it to Done.")),
-  MGR()?h("button",{type:"button",class:"btn small",onclick:e=>{e.stopPropagation();setDone(j,true);}},"Mark job done"):null);}
+/* crew can say a whole job is finished; it waits for a lead or the super to close it */
+const jobFin=j=>{const m=(j&&j.marks||{})._job;return m&&m.state==="done"&&!j.doneOn?m:null;};
+async function crewFinishJob(j,note){const me=myTech(),open=tasksOf(j).filter(t=>!t.doneOn);
+  await db.collection("jobs").doc(j.id).update({"marks._job":{state:"done",at:Date.now(),by:myId||"",note:note||"",open:open.length},updatedAt:Date.now()});
+  const who=(me&&me.name)||meName(),msg=who+" marked "+j.name+" complete"+(open.length?" ("+open.length+" task"+(open.length>1?"s":"")+" still open)":"")+(note?": "+note:"")+". Review it and close the job.";
+  logEvent(who+" marked "+j.name+" complete",{ev:"done",jobId:j.id});const ms=mgrUids();if(ms.length)logEvent(msg,{ev:"notice",notify:ms,title:"Job complete · review",jobId:j.id});}
+async function reopenCrewFinish(j){const f=jobFin(j);try{await db.collection("jobs").doc(j.id).update({"marks._job":null,updatedAt:Date.now()});
+  if(f&&f.by&&f.by!==myId)logEvent(meName()+" says "+j.name+" isn't finished yet. Keep going or check with your lead.",{ev:"notice",notify:[f.by],title:"Job not closed",jobId:j.id});toast("Sent back");}catch(err){writeErr(err);}}
+const readyToClose=j=>{if(!j||j.doneOn||isQuick(j))return false;if(jobFin(j))return true;const tk=tasksOf(j);if(tk.length)return tk.every(t=>t.doneOn);const pg=jobProgress(j);return !!pg&&pg.pct===100;};
+function closePrompt(j){const f=jobFin(j);
+  return h("div",{class:"closebar"},h("span",{},h("strong",{},f?"✓ "+realName(f.by)+" marked this job complete":"✓ All tasks are done."),
+      h("span",{class:"status"},f?" · "+fmtS(iso(new Date(f.at)),{weekday:"short",month:"short",day:"numeric"})+" "+fmtTime(f.at)+(f.open?" · "+f.open+" task"+(f.open>1?"s":"")+" were still open":"")+(f.note?" · “"+f.note+"”":"")+". Check it and close the job.":" Close the job to move it to Done.")),
+    MGR()?h("span",{style:"display:flex;gap:6px;flex-wrap:wrap"},h("button",{type:"button",class:"btn small",onclick:e=>{e.stopPropagation();setDone(j,true);}},"Close job"),
+      f?h("button",{type:"button",class:"btn ghost small",onclick:e=>{e.stopPropagation();reopenCrewFinish(j);}},"Not done yet"):null):null);}
 function jobPct(j){if(j.doneOn)return 100;const pg=jobProgress(j);if(pg)return pg.pct;const tk=tasksOf(j);if(tk.length)return Math.round(tk.filter(t=>t.doneOn).length*100/tk.length);return null;}
 function renderJobs(v){
   const nDone=realJobs().filter(j=>j.doneOn).length;
@@ -1077,8 +1088,8 @@ function renderJobs(v){
     if(qs.length)v.append(h("div",{class:"stack",style:"margin-bottom:14px"},qs.map(quickCard)));
     else if(MGR())v.append(h("div",{class:"status",style:"margin-bottom:14px"},"None open. Use these for one-off asks that aren't part of a job."));
     const rc=realJobs().filter(readyToClose);
-    if(rc.length)v.append(h("div",{class:"stack",style:"margin-bottom:14px"},h("h2",{style:"margin:4px 0 0"},"Finished, not closed yet"),rc.map(j=>h("div",{class:"closebar"},h("span",{},h("strong",{},j.name),h("span",{class:"status"}," · all tasks done")),
-      h("span",{style:"display:flex;gap:6px"},h("button",{type:"button",class:"btn ghost small",onclick:()=>{taskJob=j.id;setTab("tasks",true);}},"Look"),MGR()?h("button",{type:"button",class:"btn small",onclick:()=>setDone(j,true)},"Mark job done"):null)))));
+    if(rc.length)v.append(h("div",{class:"stack",style:"margin-bottom:14px"},h("h2",{style:"margin:4px 0 0"},"Finished, not closed yet"),rc.map(j=>h("div",{class:"closebar"},h("span",{},h("strong",{},j.name),h("span",{class:"status"},jobFin(j)?" · marked complete by "+realName(jobFin(j).by)+(jobFin(j).note?" · “"+jobFin(j).note+"”":""):" · all tasks done")),
+      h("span",{style:"display:flex;gap:6px;flex-wrap:wrap"},h("button",{type:"button",class:"btn ghost small",onclick:()=>{taskJob=j.id;setTab("tasks",true);}},"Look"),MGR()?h("button",{type:"button",class:"btn small",onclick:()=>setDone(j,true)},"Close job"):null,MGR()&&jobFin(j)?h("button",{type:"button",class:"btn ghost small",onclick:()=>reopenCrewFinish(j)},"Not done yet"):null)))));
     v.append(h("h2",{style:"margin:4px 0 6px"},"Jobs"));}
   let list=realJobs().filter(j=>j.start&&(done?!!j.doneOn:!j.doneOn));
   if(done)list.sort((a,b)=>a.doneOn<b.doneOn?1:-1);else list.sort(byPri);
@@ -1088,7 +1099,7 @@ function renderJobs(v){
   const groups=[],byP={};list.forEach(j=>{const k=j.projectId||"";if(!byP[k]){byP[k]=[];groups.push(k);}byP[k].push(j);});
   groups.forEach(k=>{const pj=projById(k);if(groups.length>1||pj)v.append(h("div",{class:"month",style:"margin-top:10px"},pj?pj.name:"No project"));
     v.append(h("div",{class:"jlist"},byP[k].map(j=>{const pct=jobPct(j);
-      const tags=[readyToClose(j)?"✓ All tasks done":"",heldOn(j,t)?"On hold":"",runningLong(j)?"Running long":"",!done&&j.start>t?"Starts "+fmtS(j.start):"",done?"Finished "+fmtS(j.doneOn):""].filter(Boolean).join(" · ");
+      const tags=[readyToClose(j)?(jobFin(j)?"✓ Crew says done":"✓ All tasks done"):"",heldOn(j,t)?"On hold":"",runningLong(j)?"Running long":"",!done&&j.start>t?"Starts "+fmtS(j.start):"",done?"Finished "+fmtS(j.doneOn):""].filter(Boolean).join(" · ");
       return h("button",{type:"button",class:"jrow",onclick:()=>{taskJob=j.id;setTab("tasks",true);}},
         h("span",{class:"rail p"+priOf(j)}),
         h("span",{class:"nm"},j.name||"Untitled job",h("small",{},tags||[j.scope,j.site].filter(Boolean).join(" · ")||PRI[priOf(j)]+" priority")),
@@ -2010,12 +2021,21 @@ function renderMyWork(v){const d=TODAY(),me=myTech(),t=today();
       doneBtn));
     if(needsScan(j))card.append(h("button",{type:"button",class:"btn",style:"width:100%;margin-top:8px",onclick:()=>scanFindCable(j.id)},(isLaptop()?"⌨ Scan a cable":"📷 Scan a cable")));
     if(step)card.append(h("button",{type:"button",class:"btn ghost",style:"width:100%;margin-top:8px",onclick:()=>cableTracker(j.id)},"Check off cables"));}
+  if(CAN_POST()&&!j.doneOn&&!isQuick(j)){const f=jobFin(j);
+    if(f)card.append(h("div",{class:"wleft",style:"margin-top:8px"},h("strong",{},"✓ Job marked complete"),h("div",{class:"status"},"Sent to your lead and super for review"+(f.by!==myId?" by "+realName(f.by):"")+"."),
+      f.by===myId?h("button",{type:"button",class:"btn ghost small",style:"margin-top:6px",onclick:async()=>{try{await db.collection("jobs").doc(j.id).update({"marks._job":null,updatedAt:Date.now()});toast("Undone");}catch(err){writeErr(err);}}},"Undo"):null));
+    else card.append(h("button",{type:"button",class:"btn ghost",style:"width:100%;margin-top:8px",onclick:()=>finishJobForm(j)},"🏁 Whole job complete"));}
   v.append(card);
   if(tk){const nx=nextAfter(me,j,tk,d);
     v.append(h("div",{class:"wcard next"},h("div",{class:"wlbl"},"Next up"),nx?h("div",{},h("div",{class:"wtitle sm"},nx.t?nx.t.name:nx.j.name),h("div",{class:"status"},nx.t?nx.j.name:"Whole job")):h("div",{class:"status"},"Nothing lined up yet. Your lead will assign you.")));}
   const myFlags=S.asks.filter(a=>isFlag(a)&&a.by===myId&&a.status!=="done");
   if(myFlags.length)v.append(h("div",{class:"wcard"},h("div",{class:"wlbl"},"Your open flags"),myFlags.map(f=>h("div",{class:"status",style:"color:var(--ink)"},(f.reason||"Problem")+(f.jobId?" · "+jobName(f.jobId):"")+" · "+(f.to==="boss"?"with the superintendent":"with your lead")+(f.reply?" · Reply: "+f.reply:"")))));
   workFooter(v);}
+function finishJobForm(j){const open=tasksOf(j).filter(t=>!t.doneOn);
+  openSheet("Job complete?",[h("p",{class:"status full",style:"margin:0"},h("strong",{style:"color:var(--ink)"},j.name),". This tells your lead and super the whole job is finished so they can check it and close it."),
+    open.length?h("p",{class:"full",style:"margin:0;color:var(--over)"},open.length+" task"+(open.length>1?"s are":" is")+" still open: "+open.map(t=>t.name).join(", ")+"."):null,
+    field({id:"fjNote",label:"Anything they should know (optional)",value:"",full:true,placeholder:"e.g. All cables landed and tested, labels on"})].filter(Boolean),
+    async()=>{try{await crewFinishJob(j,val("fjNote"));toast("Sent to your lead and super");}catch(err){writeErr(err);return false;}});}
 function workFooter(v){v.append(h("div",{class:"wfoot"},
   CAN_POST()?h("button",{type:"button",class:"btn ghost",onclick:()=>flagForm()},"⚑ Report a problem"):null,
   CAN_POST()?h("button",{type:"button",class:"btn ghost",onclick:()=>callInForm()},"Call in"):null,
