@@ -1,0 +1,172 @@
+rules_version = '2';
+
+// Crew Lookahead security rules.
+// The first person to sign in becomes the owner (team/config.ownerUid).
+// Only the owner can make someone a Superintendent ("boss") or Lead.
+// Owner, Superintendent and Leads approve new people and manage jobs, techs, time off and material.
+// Approved crew can read jobs, tasks, documents, messages and material, post messages and asks,
+// update material counts, edit their own profile and request time off. Crew only see their OWN
+// time off and requests. People waiting for approval (or anyone who just makes an account)
+// see nothing except their own profile.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function me() { return request.auth.uid; }
+    function cfgPath() { return /databases/$(database)/documents/team/config; }
+    function rolesPath() { return /databases/$(database)/documents/team/roles; }
+    function crewPath() { return /databases/$(database)/documents/team/crew; }
+
+    function isOwner() {
+      return signedIn() && exists(cfgPath()) && get(cfgPath()).data.ownerUid == me();
+    }
+    function roleOf() {
+      return exists(rolesPath())
+        ? get(rolesPath()).data.get('roles', {}).get(me(), {}).get('role', '')
+        : '';
+    }
+    function isMgr() {
+      return isOwner() || (signedIn() && roleOf() in ['boss', 'lead']);
+    }
+    // approved crew; temporary helpers lose access after members[uid].until (milliseconds)
+    function memberOk() {
+      return exists(crewPath())
+        && get(crewPath()).data.get('members', {}).keys().hasAny([me()])
+        && (get(crewPath()).data.members[me()].get('until', 0) == 0
+            || request.time.toMillis() < get(crewPath()).data.members[me()].get('until', 0));
+    }
+    function isMember() {
+      return isMgr() || (signedIn() && (roleOf() == 'crew' || memberOk()));
+    }
+    function onlyKeys(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+
+    // Team setup. config only holds who the owner is; the rest is for approved members.
+    match /team/config {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.ownerUid == me();
+    }
+    match /team/roles {
+      allow read: if isMember();
+      allow write: if isOwner();
+    }
+    // Google Chat webhook link: leads and the super only
+    match /team/hooks {
+      allow read, write: if isMgr();
+    }
+    match /team/crew {
+      allow read: if isMember();
+      allow write: if isMgr();
+    }
+
+    // Each person's own profile (people waiting for approval fill this in).
+    match /people/{uid} {
+      allow read: if isMember() || (signedIn() && uid == me());
+      allow create, update: if signedIn() && uid == me();
+      allow delete: if isOwner();
+    }
+
+    match /jobs/{id} {
+      allow read: if isMember();
+      allow write: if isMgr();
+      // crew can mark cables off, nothing else on a job
+      allow update: if isMember() && onlyKeys(['marks', 'updatedAt']);
+    }
+    match /projects/{id} {
+      allow read: if isMember();
+      allow write: if isMgr();
+    }
+    function techUid(tid) {
+      return get(/databases/$(database)/documents/techs/$(tid)).data.get('uid', '');
+    }
+    match /timeoff/{id} {
+      // leads and the super see everyone's; crew only their own (uid = their login)
+      allow read: if isMgr() || (isMember() && resource.data.uid == me());
+      allow write: if isMgr();
+      // crew log their own call-ins, sick days and recharge hours right away (no approval needed)
+      allow create: if isMember() && request.resource.data.by == me()
+        && request.resource.data.type in ['Call-in', 'Sick', 'Recharge']
+        && techUid(request.resource.data.techId) == me();
+      allow delete: if isMember() && resource.data.by == me()
+        && resource.data.type in ['Call-in', 'Sick', 'Recharge'];
+      // check off your own time off as filed in the Google Form / Workday
+      allow update: if isMember() && onlyKeys(['filed', 'updatedAt'])
+        && techUid(resource.data.techId) == me();
+    }
+
+    match /techs/{id} {
+      allow read: if isMember();
+      allow write: if isMgr();
+      // an approved crew member adds their own profile
+      allow create: if isMember() && request.resource.data.uid == me();
+      // edit your own profile (not your active status)
+      allow update: if signedIn() && resource.data.get('uid', '') == me()
+        && onlyKeys(['name', 'role', 'phone', 'skills', 'certs', 'notes', 'updatedAt']);
+      // claim an existing crew-list entry that nobody has claimed yet
+      allow update: if isMember() && resource.data.get('uid', '') == ''
+        && request.resource.data.uid == me()
+        && onlyKeys(['uid', 'name', 'role', 'phone', 'skills', 'notes', 'updatedAt']);
+    }
+
+    // documents: anyone on the crew can add; the person who added it or a lead can change or remove it
+    match /files/{id} {
+      allow read: if isMember();
+      allow create: if isMember() && request.resource.data.by == me();
+      allow update, delete: if isMgr() || (isMember() && resource.data.by == me());
+    }
+    // live Google Sheet feeds: readable by anyone holding the long random key (never listed); members keep them up to date
+    match /feeds/{id} {
+      allow get: if true;
+      allow list: if isMgr();
+      allow create, update: if isMember();
+      allow delete: if isMgr();
+    }
+    match /fileparts/{id} {
+      allow read: if isMember();
+      allow create: if isMember();
+      allow delete: if isMgr();
+    }
+    // recently deleted: anyone can put something here when they delete it; leads restore or clear it
+    match /trash/{id} {
+      allow read: if isMember();
+      allow create: if isMember() && request.resource.data.by == me();
+      allow update, delete: if isMgr();
+    }
+
+    match /material/{id} {
+      allow read: if isMember();
+      allow write: if isMgr();
+      allow update: if isMember() && onlyKeys(['qty', 'updatedAt', 'updatedBy']);
+    }
+
+    match /messages/{id} {
+      allow read: if isMember();
+      allow create: if isMember() && request.resource.data.by == me();
+      // mark done, or acknowledge / clear a notification (acks.<uid>)
+      allow update: if isMember() && onlyKeys(['done', 'doneBy', 'doneAt', 'acks']);
+      allow delete: if isMgr() || (isMember() && resource.data.by == me());
+    }
+
+    match /asks/{id} {
+      allow read: if isMember();
+      allow create: if isMember() && request.resource.data.by == me();
+      allow update: if isMgr()
+        || (isMember() && resource.data.by == me())
+        || (isMember() && onlyKeys(['reply', 'replyBy', 'replyAt']))
+        || (isMember() && onlyKeys(['acks']));
+      allow delete: if isMgr() || (isMember() && resource.data.by == me());
+    }
+
+    match /offreq/{id} {
+      // leads and the super see all requests; crew only the ones they filed
+      allow read: if isMgr() || (isMember() && resource.data.by == me());
+      allow create: if isMember() && request.resource.data.by == me()
+        && request.resource.data.status == 'pending';
+      allow update: if isMgr();
+      allow update: if isMember() && resource.data.by == me() && onlyKeys(['filed', 'updatedAt']);
+      allow delete: if isMgr() || (isMember() && resource.data.by == me());
+    }
+  }
+}
