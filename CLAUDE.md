@@ -1,6 +1,6 @@
 # Crew Lookahead — notes for Claude
 
-Crew/manpower planning app for Tim's low-voltage crew (lead: Tim Willis, super: Shawn Koelliker).
+Crew/manpower planning app for Tim's low-voltage crew (Tim is the lead; there is also a super and crew).
 Live at https://timrwillis.github.io/crew-lookahead (GitHub Pages from `main` of timrwillis/crew-lookahead, public repo).
 
 ## Files
