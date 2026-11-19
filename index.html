@@ -1485,7 +1485,7 @@ async function openDoc(f,back){
     openView(f.name,[h("div",{class:"full docview"},isImg(f)?h("img",{src:u,alt:f.name}):null,
       h("div",{style:"display:flex;gap:8px;flex-wrap:wrap"},h("a",{class:"btn",href:u,target:"_blank",rel:"noopener"},"Open full screen"),h("a",{class:"btn ghost",href:u,download:f.name},"Download"),back?h("button",{type:"button",class:"btn ghost",onclick:back},"‹ Back to documents"):null,
         canDelDoc(f)?h("button",{type:"button",class:"btn ghost",style:"color:var(--bad,#b42318)",onclick:async()=>{if(!confirm("Delete "+f.name+"?"))return;await delDocs([f]);if(back)back();else closeSheet();}},"🗑 Delete"):null),
-      h("div",{class:"status"},[jobName(f.jobId),f.taskId?(tasksOf(S.jobs.find(j=>j.id===f.jobId)||{}).find(t=>t.id===f.taskId)||{}).name:"",(names[f.by]||"Someone")+" · "+ago(f.at),f.size?Math.round(f.size/1024)+" KB":""].filter(Boolean).join(" · ")))]);}
+      h("div",{class:"status"},[jobName(f.jobId),f.taskId?(tasksOf(S.jobs.find(j=>j.id===f.jobId)||{}).find(t=>t.id===f.taskId)||{}).name:"",((f.takenBy?(names[f.takenBy]||realName(f.takenBy))+" (sent to "+(names[f.by]||"")+")":names[f.by])||"Someone")+" · "+ago(f.at),f.size?Math.round(f.size/1024)+" KB":""].filter(Boolean).join(" · ")))]);}
   catch(e){toast("Couldn't open that file. Check your connection.");}}
 function addLinkForm(jobId,taskId,back){openSheet("Add a link",[h("p",{class:"status full",style:"margin:0"},"For big prints or files kept in Google Drive, SharePoint, Procore or Bluebeam. Paste the share link."),
   field({id:"lkName",label:"Name",value:"",full:true,placeholder:"e.g. Level 2 cable plan rev C"}),field({id:"lkUrl",label:"Link",type:"url",value:"",full:true,placeholder:"https://…"})],
@@ -1504,7 +1504,7 @@ function docsSheet(jobId,taskId){const j=S.jobs.find(x=>x.id===jobId)||{name:""}
   const draw=()=>{box.textContent="";const list=docsFor(jobId,taskId);
     box.append(h("div",{style:"display:flex;gap:8px;flex-wrap:wrap"},CAN_POST()?h("button",{type:"button",class:"btn",onclick:()=>pickFiles(jobId,taskId,draw)},"Upload photo or file"):null,CAN_POST()?h("button",{type:"button",class:"btn ghost",onclick:()=>addLinkForm(jobId,taskId,()=>docsSheet(jobId,taskId))},"Add a link"):null));
     box.append(h("div",{class:"panel",style:"padding:4px 12px"},list.length?list.map(f=>{const mine=f.by===myId;
-      return h("div",{class:"drow2"},thumb(f),h("button",{type:"button",class:"linkbtn nm",style:"text-align:left;text-decoration:none;color:var(--ink)",onclick:()=>openDoc(f)},f.name,h("small",{},(f.kind==="link"?"Link":extOf(f))+" · "+(names[f.by]||"Someone")+" · "+ago(f.at)+(f.pinned?" · pinned":""))),
+      return h("div",{class:"drow2"},thumb(f),h("button",{type:"button",class:"linkbtn nm",style:"text-align:left;text-decoration:none;color:var(--ink)",onclick:()=>openDoc(f)},f.name,h("small",{},(f.kind==="link"?"Link":extOf(f))+" · "+((f.takenBy?(names[f.takenBy]||realName(f.takenBy))+" (sent to "+(names[f.by]||"")+")":names[f.by])||"Someone")+" · "+ago(f.at)+(f.pinned?" · pinned":""))),
         h("span",{style:"display:flex;gap:4px"},MGR()?h("button",{type:"button",class:"btn ghost small",onclick:async()=>{try{await db.collection("files").doc(f.id).update({pinned:!f.pinned});}catch(e){writeErr(e);}}},f.pinned?"Unpin":"Pin"):null,
           MGR()||mine?h("button",{type:"button",class:"btn ghost small",onclick:async()=>{try{await softDelete("files",f.id,f.name);}catch(e){writeErr(e);}}},"Delete"):null));}):h("div",{class:"status",style:"padding:10px 0"},"No documents yet. Add photos, prints, PDFs or links.")));
     box.append(h("p",{class:"status",style:"margin:0"},"Photos are shrunk to save space. Files up to 15 MB; bigger prints work best as a link."));};
@@ -1538,13 +1538,13 @@ function docsGallery(jobId,taskId){const j=S.jobs.find(x=>x.id===jobId)||{name:"
     if(galKind==="dup"){const extra=groups.flatMap(g=>g.slice(1)).filter(canDelDoc);
       dupBar.append(h("p",{class:"status",style:"margin:0"},"These were added more than once (same cable scan, or same file). The newest of each is first."),
         extra.length?h("div",{},h("button",{type:"button",class:"btn",onclick:async()=>{if(!confirm("Delete "+extra.length+" older cop"+(extra.length===1?"y":"ies")+" and keep the newest of each?"))return;await delDocs(extra,()=>{drawKinds();drawGrid();});}},"Keep newest, delete "+extra.length+" older cop"+(extra.length===1?"y":"ies"))):null);}
-    const list=docsFor(jobId,galTask==null?undefined:galTask).filter(f=>(!galKind||(galKind==="dup"?inDup.has(f.id):kindOf(f)===galKind))&&words.every(w=>[f.name,taskName(f),names[f.by]||"",extOf(f)||"",f.kind==="link"?"link":""].join(" ").toLowerCase().includes(w)))
+    const list=docsFor(jobId,galTask==null?undefined:galTask).filter(f=>(!galKind||(galKind==="dup"?inDup.has(f.id):kindOf(f)===galKind))&&words.every(w=>[f.name,taskName(f),(f.takenBy?(names[f.takenBy]||realName(f.takenBy))+" (sent to "+(names[f.by]||"")+")":names[f.by])||"",extOf(f)||"",f.kind==="link"?"link":""].join(" ").toLowerCase().includes(w)))
       .sort((a,b)=>(b.pinned?1:0)-(a.pinned?1:0)||b.at-a.at);
     count.textContent=list.length+" of "+docsFor(jobId).length;grid.textContent="";
     if(!list.length)grid.append(h("div",{class:"status",style:"grid-column:1/-1;padding:10px 0"},docsFor(jobId).length?"Nothing matches.":"No documents yet. Upload photos, prints or PDFs."));
     if(galKind==="dup")list.sort((a,b)=>dupKey(a).localeCompare(dupKey(b))||b.at-a.at);
     list.forEach(f=>grid.append(h("div",{class:"gcell"},h("button",{type:"button",class:"doc",title:f.name,onclick:()=>openDoc(f,()=>docsGallery(jobId,galTask==null?undefined:galTask))},thumb(f),
-      h("span",{class:"nm"},(f.pinned?"📌 ":"")+(inDup.has(f.id)?"⧉ ":"")+f.name),h("small",{},[taskName(f),(names[f.by]||"")+" · "+ago(f.at)].filter(Boolean).join(" · "))),
+      h("span",{class:"nm"},(f.pinned?"📌 ":"")+(inDup.has(f.id)?"⧉ ":"")+f.name),h("small",{},[taskName(f),((f.takenBy?(names[f.takenBy]||realName(f.takenBy))+" (sent to "+(names[f.by]||"")+")":names[f.by])||"")+" · "+ago(f.at)].filter(Boolean).join(" · "))),
       canDelDoc(f)?h("button",{type:"button",class:"gdel","aria-label":"Delete "+f.name,title:"Delete",onclick:async e=>{e.stopPropagation();if(!confirm("Delete "+f.name+"?"))return;await delDocs([f],()=>{drawKinds();drawGrid();});}},"🗑"):null)));}
   const up=()=>{const tid=galTask&&galTask!=="__all"?galTask:"";pickFiles(jobId,tid,drawGrid);};
   box.append(h("div",{style:"display:flex;gap:8px;flex-wrap:wrap"},CAN_POST()?h("button",{type:"button",class:"btn",onclick:up},"Upload photo or file"):null,
@@ -2002,7 +2002,9 @@ function whatsNext(doneLabel,nx){const me=myTech(),d=TODAY();if(!me)return;
 function renderMyWork(v){const d=TODAY(),me=myTech(),t=today();
   v.append(h("div",{class:"dayline"},h("strong",{},fmt(t,{weekday:"long",month:"short",day:"numeric"})),h("span",{class:"status"},hoursTxt(d)),notifState()==="default"?h("button",{type:"button",class:"linkbtn",onclick:()=>enableAlerts()},"Turn on alerts"):null));
   {const mj=me?assignOn(me.id,d):null,mt=mj?taskFor(mj,me.id,d):null,shown=mj&&mt&&CAN_POST()&&needsScan(mj)&&!offRec(me.id,d)&&isWeekday(d);
-    if(!shown&&CAN_POST()&&scanJobs().length)v.append(h("button",{type:"button",class:"btn",style:"width:100%;margin:0 0 10px",onclick:scanAny},isLaptop()?"⌨ Scan a cable":"📷 Scan a cable"));}
+    if(CAN_POST()&&scanJobs().length)v.append(h("div",{style:"display:flex;gap:8px;margin:0 0 10px"},
+      shown?null:h("button",{type:"button",class:"btn",style:"flex:1",onclick:scanAny},isLaptop()?"⌨ Scan a cable":"📷 Scan a cable"),
+      h("button",{type:"button",class:"btn ghost",style:shown?"flex:1":"",onclick:uploadScansAny},"📤 Upload photos")));}
   if(!me){v.append(h("div",{class:"wcard"},h("strong",{},"Link your name first"),h("p",{class:"status"},"Pick your name on the crew list so your tasks show up here."),h("button",{class:"btn",type:"button",onclick:profileForm},"Set up my profile")));return;}
   const o=offRec(me.id,d);
   if(!isWeekday(d)||o){v.append(h("div",{class:"wcard"},h("div",{class:"wlbl"},"Today"),h("div",{class:"wtitle"},o?"You're off · "+(o.type||"Off"):"No work scheduled today")));
@@ -2715,11 +2717,11 @@ function materialImport(){
 }
 
 /* ---- tracker ---- */
-async function setMarks(j,pairs,on){if(!pairs.length)return;
+async function setMarks(j,pairs,on,byUid){if(!pairs.length)return;const by=byUid||myId||"";
   const upd={updatedAt:Date.now()};
   j.marks=Object.assign({},j.marks||{});
   pairs.forEach(([cid,sid])=>{const raw=rawMark(j,cid,sid),keep=raw&&raw.parts&&raw.parts.length;
-    const val=on?(keep?Object.assign({},raw,{done:true,at:Date.now(),by:myId||""}):{at:Date.now(),by:myId||""}):(keep?Object.assign({},raw,{done:false}):null);
+    const val=on?(keep?Object.assign({},raw,{done:true,at:Date.now(),by}):{at:Date.now(),by}):(keep?Object.assign({},raw,{done:false}):null);
     j.marks[cid]=Object.assign({},j.marks[cid]||{},{[sid]:val});upd["marks."+cid+"."+sid]=val;});
   try{await db.collection("jobs").doc(j.id).update(upd);
     {const bySid={};pairs.forEach(([cid,sid])=>{(bySid[sid]=bySid[sid]||[]).push(cid);});
@@ -2946,9 +2948,12 @@ function keepPhotoAsk(c,lines){return new Promise(resolve=>{
     h("p",{class:"status",style:"margin:0 0 10px"},"Save the photo anyway, or delete it?"),
     h("div",{style:"display:flex;gap:8px;flex-wrap:wrap"},h("button",{type:"button",class:"btn",onclick:()=>done(false)},"🗑 Delete photo"),h("button",{type:"button",class:"btn ghost",onclick:()=>done(true)},"Save photo")));
   document.body.append(wrap);setTimeout(()=>{const b=pop.querySelector("button");b&&b.focus();},30);});}
-async function applyCodesToCk(jid,cid,codes,photo,hint){const j=S.jobs.find(x=>x.id===jid),c=j&&cablesOf(j).find(x=>x.id===cid);if(!c||!codes.length)return[];
-  const prev=ckOf(j,cid);
-  const cur=Object.assign({},prev),now=Date.now(),me=myId||"",set=(f,val)=>{cur[f]=val;cur[f+"By"]=me;cur[f+"At"]=now;},filled=[],warn=[];
+async function applyCodesToCk(jid,cid,codes,photo,hint,opts){const j=S.jobs.find(x=>x.id===jid),c=j&&cablesOf(j).find(x=>x.id===cid);if(!c||!codes.length)return[];
+  opts=opts||{};const prev=ckOf(j,cid);
+  /* photos someone sent you: the scan is credited to them, the log says you uploaded it */
+  const me=opts.by||myId||"",byTech=opts.by?(S.techs.find(t=>t.uid===opts.by)||{}).id||"":(myTech()||{}).id||"",
+    who=opts.by&&opts.by!==myId?meName()+" uploaded "+realName(opts.by)+"'s photo and":meName(),takenBy=opts.by&&opts.by!==myId?{takenBy:opts.by}:{};
+  const cur=Object.assign({},prev),now=Date.now(),set=(f,val)=>{cur[f]=val;cur[f+"By"]=me;cur[f+"At"]=now;},filled=[],warn=[];
   for(const raw of codes){const v=String(raw).trim(),k=scanKind(v);
     if(k==="qr"){set("qr",v);filled.push("qr");const sn=snFromUrl(v);if(sn&&(!cur.serial||hint==="serial")){set("serial",sn);filled.push("serial");}}
     else if(k==="pp"){/* no row picked: MPO panels are the destination end, LC panels the source end; otherwise first scan = source */
@@ -2962,13 +2967,14 @@ async function applyCodesToCk(jid,cid,codes,photo,hint){const j=S.jobs.find(x=>x
     if(hit.length){const lines=hit.map(f=>CK_LABEL[f][0].toUpperCase()+CK_LABEL[f].slice(1)+" "+String(prev[f]).slice(-24)+(prev[f+"By"]?" · "+realName(prev[f+"By"]):"")+(prev[f+"At"]?" · "+fmt(new Date(prev[f+"At"]),{month:"numeric",day:"numeric"})+" "+fmtTime(prev[f+"At"]):""));
       /* no photo on this cable yet: just keep it. Already has one: ask */
       const hasPhoto=docsFor(jid).some(f=>f.cableId===cid&&isImg(f));
-      if(!hasPhoto||await keepPhotoAsk(c,lines)){const id=await savePhotoToCable(j,c,photo,hit);
-        if(id){cur.photos=[...(cur.photos||[]),{id,at:now,by:me,what:hit}];await saveCk(j,cid,cur);logEvent(meName()+" saved another photo of "+c.name+" ("+hit.map(f=>CK_LABEL[f]).join(" + ")+")",{ev:"cables",jobId:jid});toast(hasPhoto?"Photo saved to "+c.name:"Already scanned. Photo saved to "+c.name+" (it had none).");}}
+      if(opts.batch&&hasPhoto&&!opts.keepRepeat){opts.out={repeat:true,lines};return[];}
+      if(!hasPhoto||opts.keepRepeat||await keepPhotoAsk(c,lines)){const id=await savePhotoToCable(j,c,photo,hit,takenBy);
+        if(id){cur.photos=[...(cur.photos||[]),{id,at:now,by:me,what:hit}];await saveCk(j,cid,cur);opts.out={saved:hit,again:true};logEvent(who+" saved another photo of "+c.name+" ("+hit.map(f=>CK_LABEL[f]).join(" + ")+")",{ev:"cables",jobId:jid});toast(hasPhoto?"Photo saved to "+c.name:"Already scanned. Photo saved to "+c.name+" (it had none).");}}
       else toast("Photo deleted. Nothing changed on "+c.name+".");
       if(liveSheet)liveSheet();return[];}}
   /* all four scans in and matching → item 1 (validate serial, QR, SRC & Dest) is done by whoever finished the scans */
   let autoItem=false,autoStep=null;
-  if(uniq.length&&ckScanN(cur)===4&&!ckProblems(cur).length&&!(cur.items&&cur.items[1]&&cur.items[1].at)){cur.items=Object.assign({},cur.items||{});cur.items[1]={by:me,techId:(myTech()||{}).id||"",at:now,remark:"All 4 scans match",auto:true};autoItem=true;}
+  if(uniq.length&&ckScanN(cur)===4&&!ckProblems(cur).length&&!(cur.items&&cur.items[1]&&cur.items[1].at)){cur.items=Object.assign({},cur.items||{});cur.items[1]={by:me,techId:byTech,at:now,remark:"All 4 scans match",auto:true};autoItem=true;}
   const autoSteps=[];
   if(uniq.length&&!ckProblems(cur).length){const sC=scanStepFor(j,"cable"),sS=scanStepFor(j,"src"),sD=scanStepFor(j,"dst"),want=new Set();
     if(sC&&cur.serial&&cur.qr)want.add(sC);
@@ -2976,16 +2982,17 @@ async function applyCodesToCk(jid,cid,codes,photo,hint){const j=S.jobs.find(x=>x
     else{if(sS&&cur.src)want.add(sS);if(sD&&cur.dst)want.add(sD);}
     want.forEach(id=>{if(!markOf(j,cid,id)){const st=stepsOf(j).find(x=>x.id===id);if(st)autoSteps.push(st);}});}
   autoStep=autoSteps[0]||null;
-  if(photo&&uniq.length){const id=await savePhotoToCable(j,c,photo,uniq);if(id){cur.photos=[...(cur.photos||[]),{id,at:now,by:me,what:uniq}];uniq.forEach(f=>{cur[f+"Photo"]=id;});}}
-  if(uniq.length){await saveCk(j,cid,cur);logEvent(meName()+" scanned "+uniq.map(f=>CK_LABEL[f]).join(" + ")+" for "+c.name+(photo?" (photo saved)":""),{ev:"cables",jobId:jid});}
-  for(const st of autoSteps)await setMarks(j,[[cid,st.id]],true);
+  if(photo&&uniq.length){const id=await savePhotoToCable(j,c,photo,uniq,takenBy);if(id){cur.photos=[...(cur.photos||[]),{id,at:now,by:me,what:uniq}];uniq.forEach(f=>{cur[f+"Photo"]=id;});}}
+  opts.out=Object.assign(opts.out||{},{saved:uniq,warn,steps:autoSteps.map(st=>st.name)});
+  if(uniq.length){await saveCk(j,cid,cur);logEvent(who+" scanned "+uniq.map(f=>CK_LABEL[f]).join(" + ")+" for "+c.name+(photo?" (photo saved)":""),{ev:"cables",jobId:jid});}
+  for(const st of autoSteps)await setMarks(j,[[cid,st.id]],true,opts.by);
   if(autoItem)logEvent(meName()+" validated "+c.name+": serial, QR, source and destination all scanned and matching",{ev:"cables",jobId:jid});
-  warn.forEach(w=>toast(w));if(uniq.length)toast("Saved "+uniq.map(f=>CK_LABEL[f]).join(" + ")+(autoSteps.length?" · "+autoSteps.map(st=>st.name+" ✓").join(" · "):"")+(autoItem?" · item 1 ✓":""));
+  if(!opts.batch){warn.forEach(w=>toast(w));if(uniq.length)toast("Saved "+uniq.map(f=>CK_LABEL[f]).join(" + ")+(autoSteps.length?" · "+autoSteps.map(st=>st.name+" ✓").join(" · "):"")+(autoItem?" · item 1 ✓":""));}
   if(liveSheet)liveSheet();return uniq;}
 /* the picture goes in the job's documents, named after the cable, with who took it */
-async function savePhotoToCable(j,c,blob,what){const d=new Date(),stamp=iso(d)+" "+String(d.getHours()).padStart(2,"0")+String(d.getMinutes()).padStart(2,"0");
+async function savePhotoToCable(j,c,blob,what,more){const d=new Date(),stamp=iso(d)+" "+String(d.getHours()).padStart(2,"0")+String(d.getMinutes()).padStart(2,"0");
   const name=c.name+" · "+what.map(f=>CK_LABEL[f]).join(" + ")+" · "+stamp+".jpg";
-  try{const ids=await uploadFiles([new File([blob],name,{type:blob.type||"image/jpeg"})],j.id,"",{cableId:c.id,scanOf:what,quiet:true});return ids[0]||"";}catch(e){return "";}}
+  try{const ids=await uploadFiles([new File([blob],name,{type:blob.type||"image/jpeg"})],j.id,"",Object.assign({cableId:c.id,scanOf:what,quiet:true},more||{}));return ids[0]||"";}catch(e){return "";}}
 async function applyScanToCk(jid,cid,raw){return applyCodesToCk(jid,cid,[raw],null,"");}
 function handleWedgeScan(v){
   if(ckOpen&&!$("#scrim").hidden){applyScanToCk(ckOpen.jid,ckOpen.cid,v);return;}
@@ -3057,9 +3064,53 @@ function scanAny(){const js=scanJobs(),me=myTech(),mine=me?assignOn(me.id,TODAY(
   const list=js.slice().sort((a,b)=>(mine&&b.id===mine.id?1:0)-(mine&&a.id===mine.id?1:0)||natCmp(a.name,b.name));
   openView("Which job?",[h("div",{class:"full stack"},list.map(j=>{const cs=cablesOf(j),n=cs.filter(c=>ckScanN(ckOf(j,c.id))===4).length;
     return h("button",{type:"button",class:"moreitem",onclick:()=>{closeSheet();setTimeout(()=>scanFindCable(j.id),60);}},h("span",{},"📷"),h("span",{},h("strong",{},j.name),h("small",{},[mine&&j.id===mine.id?"Your job today":"",n+"/"+cs.length+" fully scanned",j.site].filter(Boolean).join(" · "))),h("span",{class:"status"},"›"));}))]);}
+/* ===== UPLOAD SCAN PHOTOS: photos someone texted or emailed you, read and filed to the right cables ===== */
+function findCableByCodes(j,codes){const keys=new Set();codes.forEach(v=>{v=String(v).trim();keys.add(v);const sn=snFromUrl(v);if(sn)keys.add(sn);});
+  return cablesOf(j).find(c=>{const ck=ckOf(j,c.id);return keys.has(String(ck.serial||"").trim())||keys.has(String(ck.qr||"").trim())||keys.has((c.name||"").trim());})||null;}
+function uploadScans(jid){const j0=S.jobs.find(x=>x.id===jid);if(!j0)return;
+  const people=S.techs.filter(t=>t.uid&&!t.helperOff).sort((a,b)=>natCmp(a.name,b.name));
+  const who=h("select",{id:"usWho",class:"full-in","aria-label":"Who took the photos"},h("option",{value:myId||""},"Me ("+meName()+")"),people.filter(t=>t.uid!==myId).map(t=>h("option",{value:t.uid},t.name)));
+  const file=h("input",{type:"file",accept:"image/*",multiple:true,style:"display:none"});
+  const list=h("div",{class:"stack"}),status=h("div",{class:"status"});
+  const pickBtn=h("button",{type:"button",class:"btn bigbtn",onclick:()=>file.click()},"📤 Choose photos");
+  openView("Upload scan photos",[h("div",{class:"full stack"},
+    h("p",{class:"status",style:"margin:0"},"For photos someone texted or emailed you. Save them to this phone or computer first, then choose them here. Each one is read for the cable serial, label QR and enclosure codes and filed to its cable."),
+    h("label",{class:"field full"},h("span",{class:"flabel"},"Who took them? (they get credit for the scan)"),who),pickBtn,file,status,list)]);
+  const row=(f,state,title,sub,acts)=>{const r=h("div",{class:"panel",style:"display:flex;gap:10px;align-items:center;padding:8px"},
+      h("img",{src:URL.createObjectURL(f),alt:"",style:"width:56px;height:56px;object-fit:cover;border-radius:8px;flex:0 0 auto"}),
+      h("div",{style:"flex:1;min-width:0"},h("strong",{style:"display:block"},(state==="ok"?"✓ ":state==="warn"?"⚠ ":state==="bad"?"✕ ":"… ")+title),sub?h("div",{class:"status",style:"overflow-wrap:anywhere"},sub):null,acts&&acts.length?h("div",{style:"display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"},acts):null));return r;};
+  /* a photo that didn't match: pick its cable right on the row */
+  const pickCable=(jid,f,codes,by,done)=>{const j=S.jobs.find(x=>x.id===jid),cs=cablesOf(j);
+    const sel=h("select",{class:"full-in","aria-label":"Cable for this photo",style:"min-width:0;flex:1"},h("option",{value:""},"Pick the cable…"),
+      cs.map(c=>h("option",{value:c.id},c.name+(ckOf(j,c.id).serial?" · has S/N":"")+(rowOf(c)?" · "+rowOf(c):""))));
+    const go=h("button",{type:"button",class:"btn small",onclick:async()=>{const c=cs.find(x=>x.id===sel.value);if(!c){sel.focus();return;}go.disabled=true;go.textContent="Saving…";
+      const o={by,batch:true,keepRepeat:true};
+      if(codes.length)await applyCodesToCk(jid,c.id,codes,f,"serial",o);
+      else{const id=await savePhotoToCable(j,c,f,["photo"],by!==myId?{takenBy:by}:{});if(id){const ck=Object.assign({},ckOf(j,c.id));ck.photos=[...(ck.photos||[]),{id,at:Date.now(),by,what:[]}];await saveCk(j,c.id,ck);}o.out={saved:[],photoOnly:true};}
+      done(c,o.out||{});}},"Save");
+    return h("div",{style:"display:flex;gap:6px;width:100%"},sel,go);};
+  file.addEventListener("change",async()=>{const files=[...file.files];file.value="";if(!files.length)return;const by=who.value||myId||"";
+    pickBtn.disabled=true;let n=0,ok=0,need=0;
+    for(const f of files){n++;status.textContent="Reading photo "+n+" of "+files.length+"…";
+      const slot=row(f,"wait","Reading…");list.append(slot);let codes=[];
+      try{codes=await decodePhoto(f);}catch(e){}
+      const j=S.jobs.find(x=>x.id===jid),c=codes.length?findCableByCodes(j,codes):null;
+      const redo=(title,sub,acts,state)=>{const r=row(f,state,title,sub,acts);slot.replaceWith(r);return r;};
+      const ask=(msg,state)=>{let el;el=redo(msg,codes.length?codes.join(" · "):"No barcode or QR found",[pickCable(jid,f,codes,by,(c2,out)=>uploadResult(el,c2,out))],state);need++;};
+      const uploadResult=(el,c2,out)=>{const r=row(f,"ok",c2.name,out.photoOnly?"Photo saved to the cable":out.saved&&out.saved.length?"Saved "+out.saved.map(x=>CK_LABEL[x]).join(" + ")+(out.steps&&out.steps.length?" · "+out.steps.map(x=>x+" ✓").join(" · "):""):"Photo saved (already scanned)");el.replaceWith(r);el=r;};
+      if(!codes.length){ask("Couldn't read a code","bad");continue;}
+      if(!c){ask("Not matched to a cable yet","warn");continue;}
+      const o={by,batch:true};await applyCodesToCk(jid,c.id,codes,f,"",o);const out=o.out||{};
+      if(out.repeat){let el;el=redo(c.name+" · already scanned",out.lines.join(" · "),[h("button",{type:"button",class:"btn ghost small",onclick:async()=>{const o2={by,batch:true,keepRepeat:true};await applyCodesToCk(jid,c.id,codes,f,"",o2);uploadResult(el,c,o2.out||{});}},"Save photo anyway")],"warn");continue;}
+      ok++;redo(c.name,(out.saved&&out.saved.length?"Saved "+out.saved.map(x=>CK_LABEL[x]).join(" + "):"Photo saved")+(out.steps&&out.steps.length?" · "+out.steps.map(x=>x+" ✓").join(" · "):"")+(out.warn&&out.warn.length?" · "+out.warn.join(" "):""),null,out.warn&&out.warn.length?"warn":"ok");}
+    status.textContent="Done: "+ok+" of "+files.length+" filed"+(need?" · "+need+" need you to pick the cable":"")+".";pickBtn.disabled=false;pickBtn.textContent="📤 Choose more photos";
+    if(ok)logEvent(meName()+" uploaded "+ok+" scan photo"+(ok>1?"s":"")+(by!==myId?" from "+realName(by):"")+" to "+j0.name,{ev:"cables",jobId:jid});});}
+function uploadScansAny(){const js=scanJobs();if(!js.length){toast("No jobs need cable scanning right now.");return;}if(js.length===1){uploadScans(js[0].id);return;}
+  openView("Which job are the photos for?",[h("div",{class:"full stack"},js.map(j=>h("button",{type:"button",class:"moreitem",onclick:()=>{closeSheet();setTimeout(()=>uploadScans(j.id),60);}},h("span",{},"📤"),h("span",{},h("strong",{},j.name),h("small",{},j.site||"")),h("span",{class:"status"},"›"))))]);}
 function scanAnyThen(code){const js=scanJobs();openView("Which job is this cable on?",[h("div",{class:"full stack"},h("div",{class:"mono status"},code),js.map(j=>h("button",{type:"button",class:"moreitem",onclick:()=>{closeSheet();setTimeout(()=>scanFindCable(j.id,code),60);}},h("span",{},"🧵"),h("span",{},h("strong",{},j.name),h("small",{},j.site||"")),h("span",{class:"status"},"›"))))]);}
 function scanBar(j){const cs=cablesOf(j),sc=cs.filter(c=>ckScanN(ckOf(j,c.id))===4).length,ckd=cs.filter(c=>ckItemN(ckOf(j,c.id))===5).length,bad=cs.filter(c=>ckProblems(ckOf(j,c.id)).length).length;
   return h("div",{class:"scanbar"},h("button",{type:"button",class:"btn",onclick:()=>scanFindCable(j.id)},(isLaptop()?"⌨ Scan a cable":"📷 Scan a cable")),
+    h("button",{type:"button",class:"btn ghost",title:"Photos someone sent you",onclick:()=>uploadScans(j.id)},"📤 Upload photos"),
     h("span",{class:"status"},sc+"/"+cs.length+" fully scanned · "+ckd+"/"+cs.length+" check lists done"+(bad?" · ":"")),
     hasKeyboardScanner()?h("span",{class:"status",title:"USB or Bluetooth barcode scanners work on this page: just scan"},"⌨ Handheld scanner ready"):null,bad?h("span",{style:"color:var(--over);font-weight:600;font-size:.82rem"},"⚠ "+bad+" to fix"):null);}
 async function scanFindCable(jid,pre){let codes,photo=null;
