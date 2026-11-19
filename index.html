@@ -3134,6 +3134,41 @@ function scanAny(){const js=scanJobs(),me=myTech(),mine=me?assignOn(me.id,TODAY(
 /* ===== UPLOAD SCAN PHOTOS: photos someone texted or emailed you, read and filed to the right cables ===== */
 function findCableByCodes(j,codes){const keys=new Set();codes.forEach(v=>{v=String(v).trim();keys.add(v);const sn=snFromUrl(v);if(sn)keys.add(sn);});
   return cablesOf(j).find(c=>{const ck=ckOf(j,c.id);return keys.has(String(ck.serial||"").trim())||keys.has(String(ck.qr||"").trim())||keys.has((c.name||"").trim());})||null;}
+/* choose a cable: first asks how to find it (To / From / BLK name / row), then type part of it to narrow the list.
+   Resolves {c, end} where end is "dst" (found by To), "src" (found by From) or "". */
+const CABLE_FIND=[["to","📍 To (destination)","Where it ends: the 2nd line on the cable label"],["from","🏁 From (source)","Where it starts: the 1st line on the cable label"],["name","🏷 BLK name","The cable's name in the app"],["row","↔ Row","The row it runs to"]];
+function chooseCable(j,opts){opts=opts||{};return new Promise(resolve=>{
+  const wrap=h("div",{class:"popwrap"}),pop=h("div",{class:"pop",role:"dialog","aria-modal":"true","aria-label":"Which cable?",style:"max-height:88vh;display:flex;flex-direction:column"});wrap.append(pop);
+  let mode="",q="";const done=v=>{wrap.remove();resolve(v);};
+  const flat=v=>String(v||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+  const val=(c,m)=>m==="row"?rowOf(c):m==="name"?c.name:(c[m]||"");
+  const body=h("div",{style:"overflow:auto;flex:1;min-height:0"});
+  const search=h("input",{type:"search",class:"full-in",autocomplete:"off","aria-label":"Type part of it"});
+  search.addEventListener("input",()=>{q=search.value;list();});
+  const modes=h("div",{class:"seg-ctl",style:"margin:6px 0;max-width:100%;overflow-x:auto"});
+  const setMode=m=>{mode=m;q="";search.value="";const d=CABLE_FIND.find(x=>x[0]===m);
+    search.placeholder=m==="to"||m==="from"?"Type part of it, e.g. PP13 or 4-13":m==="row"?"Row number, e.g. 14":"e.g. BLK 11";
+    modes.textContent="";CABLE_FIND.forEach(([k,l])=>modes.append(h("button",{type:"button","aria-pressed":String(k===m),onclick:()=>setMode(k)},l.replace(/ \(.*\)/,""))));
+    hint.textContent=d[2]+".";top.style.display="";list();setTimeout(()=>search.focus(),30);};
+  const hint=h("div",{class:"status",style:"margin-bottom:6px"});
+  const top=h("div",{style:"display:none"},modes,hint,search);
+  const list=()=>{body.textContent="";const cs=cablesOf(j),f=flat(q);
+    if(!cs.some(c=>val(c,mode))){body.append(h("p",{class:"status"},"None of this job's cables have a "+(CABLE_FIND.find(x=>x[0]===mode)||[])[1].replace(/^\S+ /,"")+" filled in. Try another way."));return;}
+    const hits=cs.filter(c=>!f||flat(val(c,mode)).includes(f)||(mode==="row"&&flat(val(c,mode)).replace(/^row/,"")===f)).sort((a,b)=>natCmp(String(val(a,mode)||"~"),String(val(b,mode)||"~"))||natCmp(a.name,b.name));
+    if(!hits.length){body.append(h("p",{class:"status"},"No cable matches \""+q+"\"."));return;}
+    hits.slice(0,80).forEach(c=>{const ck=ckOf(j,c.id),main=val(c,mode)||"—";
+      const sub=[mode!=="name"?c.name:"",mode!=="row"?rowOf(c):"",mode!=="from"&&c.from?"From "+c.from:"",mode!=="to"&&c.to?"To "+c.to:"",ck.serial?"has S/N":"",opts.isPP&&mode==="to"&&ck.dst?"dest already scanned":"",opts.isPP&&mode==="from"&&ck.src?"source already scanned":""].filter(Boolean).join(" · ");
+      body.append(h("button",{type:"button",class:"moreitem",style:"margin-top:6px",onclick:()=>done({c,end:mode==="to"?"dst":mode==="from"?"src":""})},
+        h("span",{},"🧵"),h("span",{style:"min-width:0"},h("strong",{style:"overflow-wrap:anywhere"},main),h("small",{},sub)),h("span",{class:"status"},"›")));});
+    if(hits.length>80)body.append(h("p",{class:"status"},"Showing 80 of "+hits.length+". Type more to narrow it down."));};
+  const ask=h("div",{class:"stack"},h("p",{class:"status",style:"margin:0"},"How do you want to find the cable?"),
+    CABLE_FIND.map(([k,l,d])=>h("button",{type:"button",class:"moreitem",onclick:()=>{ask.remove();setMode(k);}},h("span",{},l.split(" ")[0]),h("span",{},h("strong",{},l.replace(/^\S+ /,"")),h("small",{},d)),h("span",{class:"status"},"›"))));
+  pop.append(h("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:8px"},h("strong",{},"Which cable?"),h("button",{type:"button",class:"iconbtn","aria-label":"Close",onclick:()=>done(null)},"✕")),
+    opts.codes&&opts.codes.length?h("div",{class:"mono status",style:"overflow-wrap:anywhere;font-size:.78rem;margin:4px 0"},opts.codes.join(" · ")):null,
+    opts.isPP?h("div",{class:"status",style:"margin-bottom:6px"},"This is an enclosure code. Finding the cable by To saves it as the destination enclosure, by From as the source."):null,
+    top,ask,body);
+  wrap.addEventListener("click",e=>{if(e.target===wrap)done(null);});
+  document.body.append(wrap);});}
 function uploadScans(jid){const j0=S.jobs.find(x=>x.id===jid);if(!j0)return;
   const people=S.techs.filter(t=>t.uid&&!t.helperOff).sort((a,b)=>natCmp(a.name,b.name));
   const who=h("select",{id:"usWho",class:"full-in","aria-label":"Who took the photos"},h("option",{value:myId||""},"Me ("+meName()+")"),people.filter(t=>t.uid!==myId).map(t=>h("option",{value:t.uid},t.name)));
@@ -3147,15 +3182,17 @@ function uploadScans(jid){const j0=S.jobs.find(x=>x.id===jid);if(!j0)return;
       h("img",{src:URL.createObjectURL(f),alt:"",style:"width:56px;height:56px;object-fit:cover;border-radius:8px;flex:0 0 auto"}),
       h("div",{style:"flex:1;min-width:0"},h("strong",{style:"display:block"},(state==="ok"?"✓ ":state==="warn"?"⚠ ":state==="bad"?"✕ ":"… ")+title),sub?h("div",{class:"status",style:"overflow-wrap:anywhere"},sub):null,acts&&acts.length?h("div",{style:"display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"},acts):null));return r;};
   /* a photo that didn't match: pick its cable right on the row */
-  const pickCable=(jid,f,codes,by,done)=>{const j=S.jobs.find(x=>x.id===jid),cs=cablesOf(j);
-    const sel=h("select",{class:"full-in","aria-label":"Cable for this photo",style:"min-width:0;flex:1"},h("option",{value:""},"Pick the cable…"),
-      cs.map(c=>h("option",{value:c.id},c.name+(ckOf(j,c.id).serial?" · has S/N":"")+(rowOf(c)?" · "+rowOf(c):""))));
-    const go=h("button",{type:"button",class:"btn small",onclick:async()=>{const c=cs.find(x=>x.id===sel.value);if(!c){sel.focus();return;}go.disabled=true;go.textContent="Saving…";
+  /* a photo that didn't match: pick its cable right on the row (asks how to find it: by To, From, BLK name or row) */
+  const pickCable=(jid,f,codes,by,done)=>{const j=S.jobs.find(x=>x.id===jid);
+    const isPP=codes.some(v=>scanKind(String(v).trim())==="pp");
+    const go=h("button",{type:"button",class:"btn small",style:"flex:1",onclick:async()=>{const pick=await chooseCable(j,{codes,isPP});if(!pick)return;const c=pick.c;
+      go.disabled=true;go.textContent="Saving to "+c.name+"…";
       const o={by,batch:true,keepRepeat:true};
-      if(codes.length)await applyCodesToCk(jid,c.id,codes,f,"serial",o);
+      /* found by its To / From end: an enclosure code is that end */
+      if(codes.length)await applyCodesToCk(jid,c.id,codes,f,isPP&&pick.end?pick.end:"serial",o);
       else{const id=await savePhotoToCable(j,c,f,["photo"],by!==myId?{takenBy:by}:{});if(id){const ck=Object.assign({},ckOf(j,c.id));ck.photos=[...(ck.photos||[]),{id,at:Date.now(),by,what:[]}];await saveCk(j,c.id,ck);}o.out={saved:[],photoOnly:true};}
-      done(c,o.out||{});}},"Save");
-    return h("div",{style:"display:flex;gap:6px;width:100%"},sel,go);};
+      done(c,o.out||{});}},"🔎 Pick the cable…");
+    return h("div",{style:"display:flex;gap:6px;width:100%"},go);};
   file.addEventListener("change",async()=>{const files=[...file.files];file.value="";if(!files.length)return;const by=who.value||myId||"";
     pickBtn.disabled=true;let n=0,ok=0,need=0;
     for(let f of files){n++;status.textContent="Reading photo "+n+" of "+files.length+"…";
