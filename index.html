@@ -629,6 +629,13 @@ input.full-in.mono{font-family:var(--f-mono)}
 .sbtn.stepcab .tick{width:1.3em;flex:none;text-align:center;font-size:1.1rem}
 .gmove{right:auto;left:4px}
 .skillpick.folders .skill{font-weight:600}
+
+/* documents: folder list + breadcrumbs */
+.flist{display:grid;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--panel)}
+.frow{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:10px;align-items:center;width:100%;padding:11px 12px;min-height:50px;border:0;border-top:1px solid var(--line);background:none;color:var(--ink);font:inherit;text-align:left;cursor:pointer}
+.frow:first-child{border-top:0}.frow:hover{background:var(--soft)}
+.frow .fic{font-size:1.35rem}.frow .fnm{font-weight:600;overflow-wrap:anywhere}
+.crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:2px;font-size:.95rem}.crumbs .linkbtn{font-weight:600}
 </style>
 </head>
 <body>
@@ -1519,10 +1526,10 @@ async function openDoc(f,back){
         canDelDoc(f)?h("button",{type:"button",class:"btn ghost",style:"color:var(--bad,#b42318)",onclick:async()=>{if(!confirm("Delete "+f.name+"?"))return;await delDocs([f]);if(back)back();else closeSheet();}},"🗑 Delete"):null),
       h("div",{class:"status"},[jobName(f.jobId),f.taskId?(tasksOf(S.jobs.find(j=>j.id===f.jobId)||{}).find(t=>t.id===f.taskId)||{}).name:"",((f.takenBy?(names[f.takenBy]||realName(f.takenBy))+" (sent to "+(names[f.by]||"")+")":names[f.by])||"Someone")+" · "+ago(f.at),f.size?Math.round(f.size/1024)+" KB":""].filter(Boolean).join(" · ")))]);}
   catch(e){toast("Couldn't open that file. Check your connection.");}}
-function addLinkForm(jobId,taskId,back){openSheet("Add a link",[h("p",{class:"status full",style:"margin:0"},"For big prints or files kept in Google Drive, SharePoint, Procore or Bluebeam. Paste the share link."),
+function addLinkForm(jobId,taskId,back,folder){openSheet("Add a link",[h("p",{class:"status full",style:"margin:0"},"For big prints or files kept in Google Drive, SharePoint, Procore or Bluebeam. Paste the share link."),
   field({id:"lkName",label:"Name",value:"",full:true,placeholder:"e.g. Level 2 cable plan rev C"}),field({id:"lkUrl",label:"Link",type:"url",value:"",full:true,placeholder:"https://…"})],
   async()=>{const url=val("lkUrl");if(!/^https?:\/\//i.test(url)){formErr("Paste a link that starts with https://");return false;}
-    await db.collection("files").add({kind:"link",name:val("lkName")||url.replace(/^https?:\/\//,"").slice(0,40),url,jobId,taskId:taskId||"",by:myId||"",at:Date.now()});logEvent("Link added: "+(val("lkName")||url)+" · "+jobName(jobId),{ev:"doc",jobId});
+    await db.collection("files").add(Object.assign({kind:"link",name:val("lkName")||url.replace(/^https?:\/\//,"").slice(0,40),url,jobId,taskId:taskId||"",by:myId||"",at:Date.now()},folder?{folder}:{}));logEvent("Link added: "+(val("lkName")||url)+" · "+jobName(jobId),{ev:"doc",jobId});
     if(back)setTimeout(back,50);});}
 function pickFiles(jobId,taskId,after,extra){const inp=h("input",{type:"file",multiple:true,accept:"image/*,application/pdf,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.dwg,.dxf,.ppt,.pptx",style:"display:none"});
   inp.addEventListener("change",async()=>{await uploadFiles([...inp.files],jobId,taskId,extra?Object.assign({},extra):undefined);inp.remove();if(after)after();});document.body.append(inp);inp.click();}
@@ -1549,67 +1556,107 @@ function dupKey(f){if(f.cableId&&f.scanOf)return"scan:"+f.cableId+":"+[].concat(
 function dupGroups(list){const g={};list.forEach(f=>{const k=dupKey(f);(g[k]=g[k]||[]).push(f);});return Object.values(g).filter(a=>a.length>1).map(a=>a.sort((x,y)=>y.at-x.at));}
 async function delDocs(list,after){let n=0;for(const f of list){try{await softDelete("files",f.id,f.name);n++;}catch(e){writeErr(e);break;}}if(n)toast("Deleted "+n+" file"+(n===1?"":"s")+". Leads can restore them from Recently deleted.");if(after)after();}
 /* gallery: every photo, print and file on a job, searchable */
-let galQ="",galKind="",galTask=null,galFolder="",galNewFolders=[];
-/* document folders: the standard three, plus any a lead adds to the job (job.docFolders), plus any already used on a file */
+let galQ="",galKind="",galTask=null,galPath="",galJob="",galNewFolders=[];
+/* ===== DOCUMENTS: a filing cabinet =====
+   Opens on the folders, not the photos. Folders hold files and other folders (subfolders), like a computer.
+   A file's folder is a path such as "Prints/Level 2" (files.folder). Folders: the standard three, any a lead
+   adds to the job (job.docFolders, also paths), any made this visit, and any already used on a file. */
 const DOC_FOLDERS=["Prints","Cable info","Misc"];
-const docFoldersOf=j=>[...new Set([...DOC_FOLDERS,...((j&&j.docFolders)||[]),...galNewFolders,...docsFor((j||{}).id).map(f=>f.folder).filter(Boolean)])];
-function moveDocForm(f,j,after){const wrap=h("div",{class:"popwrap"}),pop=h("div",{class:"pop",role:"dialog","aria-modal":"true","aria-label":"Move to folder"});wrap.append(pop);
+const pathJoin=(a,b)=>a?a+"/"+b:b;
+const pathName=p=>String(p||"").split("/").pop();
+function docFoldersOf(j){const set=new Set();
+  [...DOC_FOLDERS,...((j&&j.docFolders)||[]),...galNewFolders.filter(x=>x.j===(j||{}).id).map(x=>x.p),...docsFor((j||{}).id).map(f=>f.folder).filter(Boolean)]
+    .forEach(p=>{const parts=String(p).split("/").filter(Boolean);parts.forEach((_,i)=>set.add(parts.slice(0,i+1).join("/")));});
+  return [...set];}
+const subFolders=(j,path)=>docFoldersOf(j).filter(p=>p.startsWith(path?path+"/":"")&&p.split("/").length===(path?path.split("/").length+1:1))
+  .sort((a,b)=>{const ia=DOC_FOLDERS.indexOf(a),ib=DOC_FOLDERS.indexOf(b);return (ia<0?99:ia)-(ib<0?99:ib)||natCmp(a,b);});
+const inFolderDeep=(f,path)=>!!f.folder&&(f.folder===path||f.folder.startsWith(path+"/"));
+function moveDocForm(f,j,after){const wrap=h("div",{class:"popwrap"}),pop=h("div",{class:"pop",role:"dialog","aria-modal":"true","aria-label":"Move to folder",style:"max-height:85vh;overflow:auto"});wrap.append(pop);
   const close=()=>wrap.remove();wrap.addEventListener("click",e=>{if(e.target===wrap)close();});
-  const go=async fo=>{close();try{await db.collection("files").doc(f.id).update({folder:fo});f.folder=fo;toast(fo?"Moved to "+fo:"Taken out of its folder");if(after)after();}catch(err){writeErr(err);}};
+  const go=async fo=>{close();try{await db.collection("files").doc(f.id).update({folder:fo});f.folder=fo;toast(fo?"Moved to "+fo.split("/").join(" › "):"Taken out of its folder");if(after)after();}catch(err){writeErr(err);}};
+  const tree=docFoldersOf(j).sort(natCmp);
   pop.append(h("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:8px"},h("strong",{},"Move “"+f.name+"” to…"),h("button",{type:"button",class:"iconbtn","aria-label":"Close",onclick:close},"✕")),
-    h("div",{class:"stack",style:"gap:6px;margin-top:8px"},docFoldersOf(j).map(fo=>h("button",{type:"button",class:"moreitem","aria-pressed":String(f.folder===fo),onclick:()=>go(fo)},h("span",{},"📁"),h("span",{},h("strong",{},fo)),h("span",{class:"status"},f.folder===fo?"here now":"›"))),
-      f.folder?h("button",{type:"button",class:"linkbtn",style:"justify-self:start",onclick:()=>go("")},"Take it out of “"+f.folder+"”"):null));
+    h("div",{class:"stack",style:"gap:4px;margin-top:8px"},tree.map(fo=>{const depth=fo.split("/").length-1;
+      return h("button",{type:"button",class:"moreitem","aria-pressed":String(f.folder===fo),style:"margin-left:"+(depth*18)+"px;width:calc(100% - "+(depth*18)+"px)",onclick:()=>go(fo)},h("span",{},depth?"↳📁":"📁"),h("span",{},h("strong",{},pathName(fo))),h("span",{class:"status"},f.folder===fo?"here now":"›"));}),
+      f.folder?h("button",{type:"button",class:"linkbtn",style:"justify-self:start",onclick:()=>go("")},"Take it out of its folder"):null));
   document.body.append(wrap);}
 function docsGallery(jobId,taskId){const j=S.jobs.find(x=>x.id===jobId)||{name:""};galTask=taskId===undefined?null:taskId;
-  const box=h("div",{class:"full stack"}),grid=h("div",{class:"gal"}),count=h("span",{class:"status"});
-  const q=h("input",{type:"search",placeholder:"Search name, task or who added it",value:galQ,"aria-label":"Search documents",style:"flex:1 1 200px;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink)"});
-  q.addEventListener("input",()=>{galQ=q.value;drawGrid();});
+  if(galJob!==jobId){galJob=jobId;galPath="";galQ="";galKind="";}
+  const box=h("div",{class:"full stack"}),view=h("div",{class:"stack",style:"gap:10px"});
+  const q=h("input",{type:"search",placeholder:"Search all documents",value:galQ,"aria-label":"Search documents",class:"full-in",style:"flex:1 1 200px"});
+  q.addEventListener("input",()=>{galQ=q.value;draw();});
   const kinds=[["","All"],["img","Photos"],["file","Files & PDFs"],["link","Links"]];
-  const kindBox=h("div",{class:"skillpick"});
-  const tsel=h("select",{"aria-label":"Which task",style:"font:inherit;padding:7px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink)"},
-    h("option",{value:"__all"},"Whole job, every task"),h("option",{value:""},"Job only (no task)"),tasksOf(j).map(t=>h("option",{value:t.id},t.name)));
-  tsel.value=galTask==null?"__all":galTask;tsel.addEventListener("change",()=>{galTask=tsel.value==="__all"?null:tsel.value;drawGrid();});
   const taskName=f=>f.taskId?(tasksOf(j).find(t=>t.id===f.taskId)||{}).name||"":"";
   const kindOf=f=>f.kind==="link"?"link":isImg(f)?"img":"file";
-  const dupBar=h("div",{class:"stack"}),folderBox=h("div",{class:"skillpick folders"}),upTo=h("span",{class:"status"});
-  if(galFolder&&galFolder!=="__none"&&!docFoldersOf(j).includes(galFolder))galFolder="";
-  function drawFolders(){folderBox.textContent="";const all=docsFor(jobId),cnt=fo=>all.filter(f=>(f.folder||"")===fo).length,none=cnt("");
-    const chip=(k,l)=>folderBox.append(h("button",{type:"button",class:"skill","aria-pressed":String(galFolder===k),onclick:()=>{galFolder=k;drawFolders();drawGrid();}},l));
-    chip("","All ("+all.length+")");docFoldersOf(j).forEach(fo=>chip(fo,"📁 "+fo+" ("+cnt(fo)+")"));if(none)chip("__none","Not in a folder ("+none+")");
-    if(CAN_POST()){const nb=h("button",{type:"button",class:"skill",style:"border-style:dashed",onclick:()=>{nb.replaceWith(newIn,addB);newIn.focus();}},"+ New folder");
-      const newIn=h("input",{type:"text",class:"full-in","aria-label":"New folder name",placeholder:"Folder name",style:"max-width:180px;padding:5px 8px;font-size:.85rem"});
-      const add=async()=>{const nm=newIn.value.trim().slice(0,40);if(!nm){drawFolders();return;}
-        if(!docFoldersOf(j).some(x=>x.toLowerCase()===nm.toLowerCase())){
-          if(MGR()&&j.id){try{await db.collection("jobs").doc(j.id).update({docFolders:[...((j.docFolders)||[]),nm],updatedAt:Date.now()});j.docFolders=[...((j.docFolders)||[]),nm];}catch(err){writeErr(err);return;}}
-          else galNewFolders.push(nm);}
-        galFolder=docFoldersOf(j).find(x=>x.toLowerCase()===nm.toLowerCase())||nm;drawFolders();drawGrid();};
-      newIn.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();add();}});const addB=h("button",{type:"button",class:"btn small",onclick:add},"Add");
-      folderBox.append(nb);}
-    upTo.textContent=CAN_POST()?(galFolder&&galFolder!=="__none"?"Uploads go into 📁 "+galFolder:"Pick a folder above to upload straight into it."):"";}
-  function drawKinds(){kindBox.textContent="";const nd=dupGroups(docsFor(jobId)).reduce((a,g)=>a+g.length-1,0);if(galKind==="dup"&&!nd)galKind="";
-    [...kinds,...(nd?[["dup","Duplicates ("+nd+")"]]:[])].forEach(([k,l])=>kindBox.append(h("button",{type:"button",class:"skill","aria-pressed":String(galKind===k),onclick:()=>{galKind=k;drawKinds();drawGrid();}},l)));}
-  function drawGrid(){const words=galQ.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    const groups=dupGroups(docsFor(jobId)),inDup=new Set(groups.flat().map(f=>f.id));
-    dupBar.textContent="";
-    if(galKind==="dup"){const extra=groups.flatMap(g=>g.slice(1)).filter(canDelDoc);
-      dupBar.append(h("p",{class:"status",style:"margin:0"},"These were added more than once (same cable scan, or same file). The newest of each is first."),
-        extra.length?h("div",{},h("button",{type:"button",class:"btn",onclick:async()=>{if(!confirm("Delete "+extra.length+" older cop"+(extra.length===1?"y":"ies")+" and keep the newest of each?"))return;await delDocs(extra,()=>{drawKinds();drawGrid();});}},"Keep newest, delete "+extra.length+" older cop"+(extra.length===1?"y":"ies"))):null);}
-    const list=docsFor(jobId,galTask==null?undefined:galTask).filter(f=>(!galFolder||(galFolder==="__none"?!f.folder:f.folder===galFolder))&&(!galKind||(galKind==="dup"?inDup.has(f.id):kindOf(f)===galKind))&&words.every(w=>[f.name,taskName(f),(f.takenBy?(names[f.takenBy]||realName(f.takenBy))+" (sent to "+(names[f.by]||"")+")":names[f.by])||"",extOf(f)||"",f.kind==="link"?"link":""].join(" ").toLowerCase().includes(w)))
-      .sort((a,b)=>(b.pinned?1:0)-(a.pinned?1:0)||b.at-a.at);
-    count.textContent=list.length+" of "+docsFor(jobId).length;grid.textContent="";
-    if(!list.length)grid.append(h("div",{class:"status",style:"grid-column:1/-1;padding:10px 0"},docsFor(jobId).length?"Nothing matches.":"No documents yet. Upload photos, prints or PDFs."));
-    if(galKind==="dup")list.sort((a,b)=>dupKey(a).localeCompare(dupKey(b))||b.at-a.at);
+  const who=f=>(f.takenBy?(names[f.takenBy]||realName(f.takenBy))+" (sent to "+(names[f.by]||"")+")":names[f.by])||"";
+  const docs=()=>docsFor(jobId,galTask==null?undefined:galTask);
+  const open=p=>{galPath=p;galKind="";draw();const sh=$(".sheet");if(sh)sh.scrollTop=0;};
+  /* file tiles (only shown inside a folder or when searching) */
+  function tiles(list,showPath){const groups=dupGroups(docsFor(jobId)),inDup=new Set(groups.flat().map(f=>f.id)),grid=h("div",{class:"gal"});
     list.forEach(f=>grid.append(h("div",{class:"gcell"},h("button",{type:"button",class:"doc",title:f.name,onclick:()=>openDoc(f,()=>docsGallery(jobId,galTask==null?undefined:galTask))},thumb(f),
-      h("span",{class:"nm"},(f.pinned?"📌 ":"")+(inDup.has(f.id)?"⧉ ":"")+f.name),h("small",{},[!galFolder&&f.folder?"📁 "+f.folder:"",taskName(f),((f.takenBy?(names[f.takenBy]||realName(f.takenBy))+" (sent to "+(names[f.by]||"")+")":names[f.by])||"")+" · "+ago(f.at)].filter(Boolean).join(" · "))),
-      canDelDoc(f)?h("button",{type:"button",class:"gdel gmove","aria-label":"Move "+f.name+" to a folder",title:"Move to a folder",onclick:e=>{e.stopPropagation();moveDocForm(f,j,()=>{drawFolders();drawGrid();});}},"📁"):null,
-      canDelDoc(f)?h("button",{type:"button",class:"gdel","aria-label":"Delete "+f.name,title:"Delete",onclick:async e=>{e.stopPropagation();if(!confirm("Delete "+f.name+"?"))return;await delDocs([f],()=>{drawKinds();drawGrid();});}},"🗑"):null)));}
-  const up=()=>{const tid=galTask&&galTask!=="__all"?galTask:"";pickFiles(jobId,tid,()=>{drawFolders();drawGrid();},galFolder&&galFolder!=="__none"?{folder:galFolder}:undefined);};
-  box.append(h("div",{style:"display:flex;gap:8px;flex-wrap:wrap"},CAN_POST()?h("button",{type:"button",class:"btn",onclick:up},"Upload photo or file"):null,
-      CAN_POST()?h("button",{type:"button",class:"btn ghost",onclick:()=>addLinkForm(jobId,galTask||"",()=>docsGallery(jobId,galTask==null?undefined:galTask))},"Add a link"):null,
-      h("button",{type:"button",class:"btn ghost",onclick:()=>docsSheet(jobId,galTask==null?undefined:galTask)},"Pin or delete")),
-    folderBox,upTo,h("div",{style:"display:flex;gap:8px;flex-wrap:wrap;align-items:center"},q,tasksOf(j).length?tsel:null),kindBox,dupBar,count,grid);
-  drawFolders();drawKinds();drawGrid();
-  openView("Documents · "+j.name,[box]);liveSheet=()=>{drawFolders();drawGrid();};$(".sheet").classList.add("wide");}
+      h("span",{class:"nm"},(f.pinned?"📌 ":"")+(inDup.has(f.id)?"⧉ ":"")+f.name),h("small",{},[showPath?(f.folder?"📁 "+f.folder.split("/").join(" › "):"Not in a folder"):"",taskName(f),who(f)+" · "+ago(f.at)].filter(Boolean).join(" · "))),
+      canDelDoc(f)?h("button",{type:"button",class:"gdel gmove","aria-label":"Move "+f.name+" to a folder",title:"Move to a folder",onclick:e=>{e.stopPropagation();moveDocForm(f,j,draw);}},"📁"):null,
+      canDelDoc(f)?h("button",{type:"button",class:"gdel","aria-label":"Delete "+f.name,title:"Delete",onclick:async e=>{e.stopPropagation();if(!confirm("Delete "+f.name+"?"))return;await delDocs([f],draw);}},"🗑"):null)));
+    return grid;}
+  const folderRow=(path,label,n,icon)=>h("button",{type:"button",class:"frow",onclick:()=>open(path)},h("span",{class:"fic","aria-hidden":"true"},icon||"📁"),h("span",{class:"fnm"},label),h("span",{class:"status"},n+" item"+(n===1?"":"s")),h("span",{class:"status"},"›"));
+  function newFolderBtn(){if(!CAN_POST()||galPath==="__none")return null;
+    const nb=h("button",{type:"button",class:"btn ghost small",onclick:()=>{nb.replaceWith(row);inp.focus();}},galPath?"+ New subfolder":"+ New folder");
+    const inp=h("input",{type:"text",class:"full-in","aria-label":"Folder name",placeholder:galPath?"Subfolder name":"Folder name",style:"max-width:200px;padding:5px 8px;font-size:.85rem"});
+    const add=async()=>{const nm=inp.value.replace(/\//g,"-").trim().slice(0,40);if(!nm){draw();return;}const path=pathJoin(galPath,nm);
+      if(!docFoldersOf(j).some(x=>x.toLowerCase()===path.toLowerCase())){
+        if(MGR()&&j.id){const nf=[...((j.docFolders)||[]),path];try{await db.collection("jobs").doc(j.id).update({docFolders:nf,updatedAt:Date.now()});j.docFolders=nf;}catch(err){writeErr(err);return;}}
+        else galNewFolders.push({j:jobId,p:path});}
+      open(docFoldersOf(j).find(x=>x.toLowerCase()===path.toLowerCase())||path);};
+    inp.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();add();}});
+    const row=h("span",{style:"display:inline-flex;gap:6px;align-items:center"},inp,h("button",{type:"button",class:"btn small",onclick:add},"Add"));
+    return nb;}
+  function draw(){view.textContent="";const all=docs(),words=galQ.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if(galPath&&galPath!=="__none"&&!docFoldersOf(j).includes(galPath))galPath="";
+    /* searching: matching files from every folder */
+    if(words.length){const list=all.filter(f=>words.every(w=>[f.name,f.folder,taskName(f),who(f),extOf(f)||"",f.kind==="link"?"link":""].join(" ").toLowerCase().includes(w))).sort((a,b)=>b.at-a.at);
+      view.append(h("div",{class:"status"},list.length+" found in all folders"),list.length?tiles(list,true):h("p",{class:"status"},"Nothing matches."));return;}
+    /* where you are: Documents › Prints › Level 2 */
+    const crumbs=h("div",{class:"crumbs"},h("button",{type:"button",class:"linkbtn",onclick:()=>open("")},"📂 Documents"));
+    if(galPath==="__none")crumbs.append(h("span",{}," › "),h("strong",{},"Not in a folder"));
+    else if(galPath){const parts=galPath.split("/");parts.forEach((p,i)=>{crumbs.append(h("span",{}," › "));
+      crumbs.append(i===parts.length-1?h("strong",{},p):h("button",{type:"button",class:"linkbtn",onclick:()=>open(parts.slice(0,i+1).join("/"))},p));});}
+    view.append(crumbs);
+    const here=galPath==="__none"?all.filter(f=>!f.folder):galPath?all.filter(f=>f.folder===galPath):[];
+    const subs=galPath==="__none"?[]:subFolders(j,galPath);
+    /* actions for this spot */
+    const tid=galTask&&galTask!=="__all"?galTask:"",fo=galPath&&galPath!=="__none"?galPath:"";
+    const isCustom=fo&&((j.docFolders)||[]).includes(fo)&&!DOC_FOLDERS.includes(fo);
+    const empty=fo&&!all.some(f=>inFolderDeep(f,fo))&&!subs.length;
+    view.append(h("div",{style:"display:flex;gap:6px;flex-wrap:wrap;align-items:center"},
+      CAN_POST()&&fo?h("button",{type:"button",class:"btn small",onclick:()=>pickFiles(jobId,tid,draw,{folder:fo})},"⬆ Upload here"):null,
+      CAN_POST()&&fo?h("button",{type:"button",class:"btn ghost small",onclick:()=>addLinkForm(jobId,tid,()=>docsGallery(jobId,galTask==null?undefined:galTask),fo)},"🔗 Add a link"):null,
+      newFolderBtn(),
+      MGR()&&isCustom&&empty?h("button",{type:"button",class:"btn ghost small",onclick:async()=>{const nf=(j.docFolders||[]).filter(x=>x!==fo&&!x.startsWith(fo+"/"));try{await db.collection("jobs").doc(j.id).update({docFolders:nf,updatedAt:Date.now()});j.docFolders=nf;open(fo.includes("/")?fo.slice(0,fo.lastIndexOf("/")):"");toast("Folder removed");}catch(err){writeErr(err);}}},"Remove empty folder"):null,
+      moreBtn("Documents",[["📌","Pin or delete files",()=>docsSheet(jobId,galTask==null?undefined:galTask)],
+        dupGroups(docsFor(jobId)).length?["⧉","Find duplicates",()=>{galKind="dup";galPath="";galQ="";docsGallery(jobId,galTask==null?undefined:galTask);}]:null])));
+    /* duplicates view (from the ⋯ menu) */
+    if(galKind==="dup"){const groups=dupGroups(docsFor(jobId)),extra=groups.flatMap(g=>g.slice(1)).filter(canDelDoc);
+      view.append(h("p",{class:"status",style:"margin:0"},"Added more than once (same cable scan, or same file). Newest of each first."),
+        extra.length?h("div",{},h("button",{type:"button",class:"btn",onclick:async()=>{if(!confirm("Delete "+extra.length+" older cop"+(extra.length===1?"y":"ies")+" and keep the newest of each?"))return;await delDocs(extra,()=>{galKind="";draw();});}},"Keep newest, delete "+extra.length+" older cop"+(extra.length===1?"y":"ies"))):null,
+        tiles(groups.flat(),true),h("button",{type:"button",class:"linkbtn",onclick:()=>{galKind="";draw();}},"‹ Back to folders"));return;}
+    /* folders first */
+    const fl=h("div",{class:"flist"});
+    subs.forEach(p=>fl.append(folderRow(p,pathName(p),all.filter(f=>f.folder===p).length+subFolders(j,p).length)));
+    if(!galPath){const none=all.filter(f=>!f.folder).length;if(none)fl.append(folderRow("__none","Not in a folder",none,"🗂"));}
+    if(fl.childNodes.length)view.append(fl);
+    /* then the files in this folder */
+    if(galPath){let list=here.slice().sort((a,b)=>(b.pinned?1:0)-(a.pinned?1:0)||b.at-a.at);
+      const kn=new Set(list.map(kindOf));
+      if(kn.size>1){const kb=h("div",{class:"skillpick"});kinds.filter(([k])=>!k||kn.has(k)).forEach(([k,l])=>kb.append(h("button",{type:"button",class:"skill","aria-pressed":String(galKind===k),onclick:()=>{galKind=k;draw();}},l)));view.append(kb);}
+      if(galKind)list=list.filter(f=>kindOf(f)===galKind);
+      view.append(list.length?tiles(list,false):h("p",{class:"status",style:"margin:0"},subs.length?"":"This folder is empty."+(CAN_POST()?" Tap Upload here to add photos, prints or PDFs.":"")));}
+    else view.append(h("p",{class:"status",style:"margin:0"},all.length?"Open a folder to see its files.":"No documents yet. Open a folder and tap Upload here."));}
+  const tsel=tasksOf(j).length?h("select",{"aria-label":"Which task",style:"font:inherit;padding:7px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink)"},
+    h("option",{value:"__all"},"Every task"),h("option",{value:""},"Job only (no task)"),tasksOf(j).map(t=>h("option",{value:t.id},t.name))):null;
+  if(tsel){tsel.value=galTask==null?"__all":galTask;tsel.addEventListener("change",()=>{galTask=tsel.value==="__all"?null:tsel.value;draw();});}
+  box.append(h("div",{style:"display:flex;gap:8px;flex-wrap:wrap;align-items:center"},q,tsel),view);
+  draw();
+  openView("Documents · "+j.name,[box]);liveSheet=draw;$(".sheet").classList.add("wide");}
 
 /* ===== QUICK TASKS ===== */
 /* how urgent, separate from Now / Later (when it starts). Client requests are flagged and sort first within a level */
