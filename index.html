@@ -2851,13 +2851,15 @@ function scanCode(title,hint){return new Promise(resolve=>{
   const typed=h("input",{type:"text",class:"full-in",placeholder:hasKeyboardScanner()?"Scan with the handheld scanner, or type":"Or type / paste it here","aria-label":"Type the code",autocomplete:"off"});
   typed.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();e.stopPropagation();const v=typed.value.trim();if(v)finish([v],null);}});
   const file=h("input",Object.assign({type:"file",accept:"image/*",style:"display:none"},isLaptop()?{}:{capture:"environment"}));
-  let qr=null,done=false,busy=false;
+  let qr=null,done=false,busy=false,live=false;
+  const liveBtn=h("button",{type:"button",class:"btn ghost",onclick:()=>{liveBtn.remove();startLive();}},"🎥 Use live scanner");
   const stopCam=async()=>{try{if(qr&&qr.isScanning)await qr.stop();}catch(e){}try{qr&&qr.clear();}catch(e){}};
   const finish=async(codes,photo)=>{if(done)return;done=true;scanDialogOpen=false;await stopCam();wrap.remove();codes=(codes||[]).filter(Boolean);
     if(codes.length){try{navigator.vibrate&&navigator.vibrate(80);}catch(e){}beep();}resolve({codes,photo:photo||null});};
   pop.append(h("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:8px"},h("strong",{},title),h("button",{type:"button",class:"iconbtn","aria-label":"Close",onclick:()=>finish([],null)},"✕")),
-    h("div",{class:"status",style:"margin:2px 0 8px"},isLaptop()?"Scan "+hint+" with the handheld scanner, or upload a photo of it.":"Get the S/N barcode and the label QR in one picture to fill both at once."),area,ctl,msg,
-    h("div",{style:"display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"},h("button",{type:"button",class:"btn small",onclick:()=>file.click()},isLaptop()?"🖼 Upload a photo":"📸 Take a photo (reads every code in it)"),file),
+    h("div",{class:"status",style:"margin:2px 0 8px"},isLaptop()?"Scan "+hint+" with the handheld scanner, or upload a photo of it.":"Take a close photo with the S/N barcode and the label QR both in it. It fills both at once."),area,ctl,msg,
+    h("div",{style:"display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"},h("button",{type:"button",class:"btn"+(isLaptop()?" small":""),onclick:()=>file.click()},isLaptop()?"🖼 Upload a photo":"📸 Take a photo"),file,
+      isLaptop()?null:liveBtn),
     h("div",{style:"display:flex;gap:8px;margin-top:8px"},typed,h("button",{type:"button",class:"btn ghost small",onclick:()=>{const v=typed.value.trim();if(v)finish([v],null);}},"Use")));
   document.body.append(wrap);scanDialogOpen=true;
   if(hasKeyboardScanner())setTimeout(()=>typed.focus(),50);
@@ -2868,6 +2870,10 @@ function scanCode(title,hint){return new Promise(resolve=>{
       finish(codes,f);}
     catch(e){busy=false;msg.textContent="Couldn't read that photo. Try again or type the code.";}});
   if(isLaptop()){area.style.display="none";msg.textContent="Waiting for the scanner…";loadScanLib().catch(()=>{});return;}
+  /* phones and tablets: straight to the camera for a photo; the live scanner is the backup */
+  area.style.display="none";msg.textContent="Opening the camera… If it doesn't open, tap Take a photo.";loadScanLib().catch(()=>{});
+  try{file.click();}catch(e){}
+  setTimeout(()=>{if(!done&&!busy)msg.textContent="Tap Take a photo, or use the live scanner.";},4000);
   /* live camera: on the first code, grab that frame and look for any other code in it */
   const onLive=async txt=>{if(busy||done)return;busy=true;let shot=null;
     try{const vid=area.querySelector("video");if(vid&&vid.videoWidth){const c=document.createElement("canvas");c.width=vid.videoWidth;c.height=vid.videoHeight;c.getContext("2d").drawImage(vid,0,0);
@@ -2877,6 +2883,7 @@ function scanCode(title,hint){return new Promise(resolve=>{
     if(shot){msg.textContent="Got it. Checking the picture for the other code…";
       try{const more=await Promise.race([decodePhoto(new File([shot],"frame.jpg",{type:"image/jpeg"})),new Promise(r=>setTimeout(()=>r([]),6000))]);more.forEach(m=>{if(!codes.includes(m))codes.push(m);});}catch(e){}}
     finish(codes,shot);};
+  function startLive(){if(live||done)return;live=true;area.style.display="";msg.textContent="Starting camera…";
   loadScanLib().then(async()=>{if(done)return;
     qr=new Html5Qrcode("scanArea",{verbose:false,formatsToSupport:SCAN_FMTS(),experimentalFeatures:{useBarCodeDetectorIfSupported:true}});
     const cfg={fps:15,aspectRatio:1.333,videoConstraints:{facingMode:"environment",width:{ideal:1920},height:{ideal:1080},advanced:[{focusMode:"continuous"}]}};
@@ -2894,7 +2901,7 @@ function scanCode(title,hint){return new Promise(resolve=>{
     const torch=caps&&caps.torchFeature&&caps.torchFeature();
     if(torch&&torch.isSupported()){let on=false;ctl.append(h("button",{type:"button",class:"btn ghost small",onclick:e=>{on=!on;torch.apply(on).catch(()=>{});e.currentTarget.textContent=on?"🔦 Light on":"🔦 Light";}},"🔦 Light"));}
     area.addEventListener("click",async()=>{try{await qr.applyVideoConstraints({advanced:[{focusMode:"single-shot"}]});setTimeout(()=>qr.applyVideoConstraints({advanced:[{focusMode:"continuous"}]}).catch(()=>{}),800);}catch(e){}});})
-  .catch(e=>{msg.textContent=e.message;});});}
+  .catch(e=>{msg.textContent=e.message;});}});}
 /* ===== handheld USB / Bluetooth scanners =====
    They type the code very fast and press Enter. Fast bursts typed outside a text box count as a scan. */
 let scanDialogOpen=false,ckOpen=null,wedgeBuf="",wedgeT=0,wedgeFast=0;
@@ -3063,7 +3070,7 @@ function scanAny(){const js=scanJobs(),me=myTech(),mine=me?assignOn(me.id,TODAY(
   if(js.length===1){scanFindCable(js[0].id);return;}
   const list=js.slice().sort((a,b)=>(mine&&b.id===mine.id?1:0)-(mine&&a.id===mine.id?1:0)||natCmp(a.name,b.name));
   openView("Which job?",[h("div",{class:"full stack"},list.map(j=>{const cs=cablesOf(j),n=cs.filter(c=>ckScanN(ckOf(j,c.id))===4).length;
-    return h("button",{type:"button",class:"moreitem",onclick:()=>{closeSheet();setTimeout(()=>scanFindCable(j.id),60);}},h("span",{},"📷"),h("span",{},h("strong",{},j.name),h("small",{},[mine&&j.id===mine.id?"Your job today":"",n+"/"+cs.length+" fully scanned",j.site].filter(Boolean).join(" · "))),h("span",{class:"status"},"›"));}))]);}
+    return h("button",{type:"button",class:"moreitem",onclick:()=>{closeSheet();scanFindCable(j.id);}},h("span",{},"📷"),h("span",{},h("strong",{},j.name),h("small",{},[mine&&j.id===mine.id?"Your job today":"",n+"/"+cs.length+" fully scanned",j.site].filter(Boolean).join(" · "))),h("span",{class:"status"},"›"));}))]);}
 /* ===== UPLOAD SCAN PHOTOS: photos someone texted or emailed you, read and filed to the right cables ===== */
 function findCableByCodes(j,codes){const keys=new Set();codes.forEach(v=>{v=String(v).trim();keys.add(v);const sn=snFromUrl(v);if(sn)keys.add(sn);});
   return cablesOf(j).find(c=>{const ck=ckOf(j,c.id);return keys.has(String(ck.serial||"").trim())||keys.has(String(ck.qr||"").trim())||keys.has((c.name||"").trim());})||null;}
