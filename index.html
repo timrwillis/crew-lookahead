@@ -603,6 +603,21 @@ body:has(#scrim:not([hidden])) .tabs{visibility:hidden}
   .tab .badge{position:absolute;top:1px;left:calc(50% + 4px);font-size:.62rem;padding:0 5px;min-width:16px}
   .chatwrap{height:calc(100dvh - 170px)}
 }
+
+/* ---- compact pass: fewer, smaller pieces on each card ---- */
+.prbtn{background:none;border:0;padding:0;color:inherit;font:inherit;text-align:left;width:100%;cursor:pointer}
+.btn.more{padding-inline:10px;font-weight:700;letter-spacing:.08em}
+.tcard{gap:6px;padding:9px 11px}
+.pchips{gap:4px;min-height:0}
+.pchip{padding:3px 9px;font-size:.8rem}
+.dpanel{gap:8px}
+.jhead{gap:6px}
+.prog{gap:5px;padding-left:14px}
+.titem{padding-block:7px;gap:2px 8px}
+.tpill{min-height:22px;padding:2px 9px;margin:1px 4px 1px 0}
+.qcard{padding:9px 11px}
+.board{gap:8px}
+@media (max-width:600px){.dpanel{padding:11px}.jhead h3{font-size:1.2rem}.titem{padding-block:6px}}
 </style>
 </head>
 <body>
@@ -1120,7 +1135,7 @@ function cablePill(j,t){const pg=jobProgress(j);if(!pg)return null;const step=t?
 function docPill(j,t,always){const n=t?docsFor(j.id,t.id).length:docsFor(j.id).length;
   if(!n&&!(always&&CAN_POST()))return null;
   return h("button",{type:"button",class:"tpill "+(n?"doc":"ghost"),title:"Photos, prints and files",onclick:e=>{e.stopPropagation();docsGallery(j.id,t?t.id:undefined);}},n?"Documents "+n:"+ Documents");}
-const openDoneJobs=new Set();
+const openDoneJobs=new Set(),openSteps=new Set();
 const doneWho=t=>t.doneBy?(names[t.doneBy]||chatName(t.doneBy)):"";
 function doneRow(j,t){const m=MGR();
   return h("div",{class:"titem done"},h("span",{class:"st done"},t.reviewedAt?"Reviewed":"Done"),
@@ -1137,33 +1152,38 @@ function reviewPanel(grid){const list=toReview();if(!list.length)return;
   grid.append(panel("Finished · review",null,[h("div",{},list.slice(0,8).map(({j,t})=>h("div",{class:"mprow"},h("span",{class:"nm"},t.name,h("small",{},j.name+" · done "+fmtS(t.doneOn)+(doneWho(t)?" by "+doneWho(t):""))),
     h("span",{style:"display:flex;gap:6px"},h("button",{type:"button",class:"btn small",onclick:()=>reviewTask(j,t,true)},"✓"),h("button",{type:"button",class:"btn ghost small",onclick:()=>{taskJob=j.id;openDoneJobs.add(j.id);setTab("tasks",true);}},"Look"))))),
     list.length>8?h("div",{class:"status"},"+"+(list.length-8)+" more on the Tasks tab"):null],{badge:list.length}));}
+/* "⋯" button: less-used actions live in a short menu so cards stay simple. items: [icon,label,fn] (nulls skipped) */
+function moreBtn(title,items){items=items.filter(Boolean);if(!items.length)return null;
+  return h("button",{type:"button",class:"btn ghost small more","aria-label":"More options",title:"More options",onclick:e=>{e.stopPropagation();
+    openView(title,[h("div",{class:"full stack",style:"gap:8px"},items.map(([ic,l,f])=>h("button",{type:"button",class:"emenu",onclick:()=>{closeSheet();setTimeout(f,60);}},h("span",{class:"ic","aria-hidden":"true"},ic),h("span",{},h("strong",{},l)),h("span",{class:"go"},"›"))))]);}},"⋯");}
 function taskRow(j,t,d){
   const [st,lbl]=taskStatus(j,t,d);
   const crew=st==="active"?workingOn(j,d).filter(x=>(taskFor(j,x,d)||{}).id===t.id):crewOn(t,d);
   const step=stepForTask(j,t),sp=step?stepCount(j,step.id)+"/"+cablesOf(j).length+" "+step.name.toLowerCase():"";
   const cs=tstate(j,t),csTxt=cs&&st!=="done"?(cs.state==="working"?"Working since "+fmtTime(cs.at):cs.state==="hold"?"Crew says on hold: "+(cs.reason||""):""):"";
   const sub=[csTxt,st==="wait"?waitTxt({job:j,task:t,waits:waitsOn(j,t,d)}):"",st==="hold"?(t.hold||j.hold||{}).reason||"":"",st==="done"&&t.doneOn?"Done "+fmtS(t.doneOn)+(t.crewDone&&t.doneBy?" by "+(names[t.doneBy]||"crew"):""):"",
-    crew.length?(st==="active"?"On it: ":"Crew: ")+crewNames(crew):(st==="done"?"":"No crew yet"),sp].filter(Boolean).join(" · ");
+    crew.length?(st==="active"?"On it: ":"Crew: ")+crewNames(crew):(st==="done"?"":"No crew yet"),step&&cablePill(j,t)?"":sp].filter(Boolean).join(" · ");
   const m=MGR(),btn=(l,f,pri)=>h("button",{type:"button",class:"btn "+(pri?"":"ghost ")+"small",onclick:f},l);
   return h("div",{class:"titem"+(st==="done"?" done":"")},
     h("span",{class:"st "+st},lbl),
     h("span",{class:"nm"},t.name,(()=>{const ps=[step?cablePill(j,t):null,docPill(j,t,false)].filter(Boolean);return ps.length?h("span",{class:"pills"},ps):null;})(),h("small",{},sub)),
     h("span",{class:"ac"},
-      m&&st==="active"?btn("Crew",()=>crewForm(j,d)):null,
-      m&&st==="active"?btn("Hold",()=>holdForm(j,t)):null,
       m&&st==="hold"&&t.hold?btn("Resume",()=>resumeHold(j,t),true):null,
       m&&st==="wait"?btn("Start now",()=>startEarly(j,t)):null,
-      m&&(st==="active"||st==="wait"||st==="planned")?btn("Done",()=>taskDone(j,t),st==="active"):null,
-      m&&st==="done"?btn("Reopen",()=>reopenTask(j,t)):null));}
+      m&&(st==="active"||st==="planned")?btn("Done",()=>taskDone(j,t),st==="active"):null,
+      m&&st==="done"?btn("Reopen",()=>reopenTask(j,t)):null,
+      m&&st!=="done"?moreBtn(t.name,[st==="active"?["👷","Change crew",()=>crewForm(j,d)]:null,st==="active"?["⏸","Put on hold",()=>holdForm(j,t)]:null,st==="wait"?["✓","Mark done",()=>taskDone(j,t)]:null]):null));}
 function jobPanel(j){
   const d=TODAY(),pct=jobPct(j),m=MGR(),pj=projById(j.projectId),pg=jobProgress(j);
   const box=h("div",{class:"dpanel"});
   box.append(h("div",{class:"jhead"},
     h("div",{class:"ttl"},h("div",{},h("h3",{},j.name),h("div",{class:"status"},[pj?pj.name:"",j.site,j.scope,fmtS(j.start)+" – "+fmtS(jobEnd(j)),CONF[j.conf||"likely"]].filter(Boolean).join(" · ")),
-        (()=>{const ps=[cablePill(j,null),docPill(j,null,true)].filter(Boolean);return ps.length?h("div",{class:"pills"},ps):null;})()),
+        (()=>{const ps=[cablePill(j,null),docPill(j,null,false)].filter(Boolean);return ps.length?h("div",{class:"pills"},ps):null;})()),
       h("div",{class:"acts"},m&&!j.doneOn?priControl(j):h("span",{class:"pill pri"+priOf(j)},PRI[priOf(j)]+" priority"),heldOn(j,d)?h("span",{class:"pill bad"},"Job on hold"):null,runningLong(j)?h("span",{class:"pill bad"},"Running long"):null)),
-    h("div",{class:"pr"},h("span",{class:"n"},"Progress"),h("span",{class:"bar"},h("i",{style:"width:"+(pct||0)+"%"})),h("span",{class:"c"},pct==null?"—":pct+"%"),h("span")),
-    pg?h("div",{class:"prog"},stepsOf(j).map(st=>{const n=stepCount(j,st.id);return h("div",{class:"pr"},h("span",{class:"n",style:"font-weight:400"},st.name),h("span",{class:"bar"},h("i",{style:"width:"+Math.round(n*100/cablesOf(j).length)+"%"})),h("span",{class:"c"},n+"/"+cablesOf(j).length),h("span"));})):null,
+    pg?h("button",{type:"button",class:"pr prbtn","aria-expanded":String(openSteps.has(j.id)),title:"Show each step",onclick:()=>{openSteps.has(j.id)?openSteps.delete(j.id):openSteps.add(j.id);render();}},
+        h("span",{class:"n"},(openSteps.has(j.id)?"▾ ":"▸ ")+"Progress"),h("span",{class:"bar"},h("i",{style:"width:"+(pct||0)+"%"})),h("span",{class:"c"},pct==null?"—":pct+"%"),h("span"))
+      :h("div",{class:"pr"},h("span",{class:"n"},"Progress"),h("span",{class:"bar"},h("i",{style:"width:"+(pct||0)+"%"})),h("span",{class:"c"},pct==null?"—":pct+"%"),h("span")),
+    pg&&openSteps.has(j.id)?h("div",{class:"prog"},stepsOf(j).map(st=>{const n=stepCount(j,st.id);return h("div",{class:"pr"},h("span",{class:"n",style:"font-weight:400"},st.name),h("span",{class:"bar"},h("i",{style:"width:"+Math.round(n*100/cablesOf(j).length)+"%"})),h("span",{class:"c"},n+"/"+cablesOf(j).length),h("span"));})):null,
     h("div",{class:"acts"},
       m?h("button",{type:"button",class:"btn small",onclick:()=>jobEditMenu(j)},"Edit job"):h("button",{type:"button",class:"btn ghost small",onclick:()=>jobForm(j)},"Job details"),
       m?h("button",{type:"button",class:"btn ghost small",onclick:()=>jobForm(j,"crew")},"👷 Crew"):null,
@@ -1253,7 +1273,7 @@ function waitingItems(d){const out=[];
 const waitTxt=x=>{const j=x.job,byPh={},loose=[];x.waits.forEach(w=>{const i=phaseIdx(j,w);if(i>=0&&i<phaseIdx(j,x.task)){(byPh[i]=byPh[i]||[]).push(w);}else loose.push(w.name);});
   const parts=[...Object.keys(byPh).map(i=>phasesOf(j)[i].name+" phase"),...loose];return "Waiting on "+(parts.length>3?parts.slice(0,3).join(", ")+" +"+(parts.length-3)+" more":parts.join(", "));};
 function waitCard(x){return h("div",{class:"holdcard",style:"border-color:var(--line)"},
-  h("div",{class:"top"},h("strong",{},targetLabel(x.job,x.task)),h("span",{class:"pill plain"},"Up next")),
+  h("div",{class:"top"},h("strong",{},targetLabel(x.job,x.task))),
   h("div",{class:"small"},waitTxt(x)),
   x.crew.length?h("div",{class:"status"},"Lined up: "+crewNames(x.crew)):h("div",{class:"status"},"No crew lined up yet"),
   MGR()?h("div",{},h("button",{class:"btn ghost small",type:"button",onclick:()=>startEarly(x.job,x.task)},"Start now")):null);}
@@ -1318,7 +1338,8 @@ function renderLive(v){
     if(isQuick(j)){grid.append(dropZone(quickBoardCard(j,tg),tg));return;}
     const card=h("div",{class:"tcard p"+p},
       h("div",{class:"tt"},h("div",{class:"tn"},tg.task?tg.task.name:j.name,h("small",{},tg.task?[j.name,phaseName(j,tg.task)].filter(Boolean).join(" · "):(tasksOf(j).length?"Whole job":[j.site,PRI[p]+" priority"].filter(Boolean).join(" · ")))),
-        MGR()?h("div",{class:"tbtns"},h("button",{class:"btn ghost small",type:"button",onclick:()=>jobEditMenu(j)},"Edit"),h("button",{class:"btn ghost small",type:"button",onclick:()=>holdForm(j,tg.task)},"Hold"),tg.task?h("button",{class:"btn ghost small",type:"button",onclick:()=>taskDone(j,tg.task)},"Done"):null):null),
+        MGR()?h("div",{class:"tbtns"},tg.task?h("button",{class:"btn ghost small",type:"button",onclick:()=>taskDone(j,tg.task)},"Done"):null,
+          moreBtn(tg.task?tg.task.name:j.name,[["✏️","Edit job",()=>jobEditMenu(j)],["⏸","Put on hold",()=>holdForm(j,tg.task)]])):null),
       cableLine(j,tg.task),
       (()=>{const p2=docPill(j,null,false);return p2?h("div",{class:"pills"},p2):null;})(),
       h("div",{class:"pchips"},tg.ids.length?tg.ids.map(x=>pchip(x,{})):h("span",{class:"status"},"No one on it")),
@@ -1584,11 +1605,12 @@ function quickCard(j){const q=j.quick||{},dd=doneDate(j),act=quickActive(j);
     h("div",{class:"top"},h("strong",{},j.name),h("span",{style:"display:flex;gap:4px;flex-wrap:wrap"},...(dd?[]:qBadges(j)),h("span",{class:"pill "+(dd?"good":act?"pri0":"plain")},dd?"Done "+fmtS(dd):act?"Now":(q.due?"By "+fmtS(q.due):"Later")))),
     h("div",{class:"status"},[q.askedBy?"From "+(names[q.askedBy]||"the boss"):"",crew.length?"Crew: "+crewNames(crew):"No one assigned",j.site,dd&&q.startedAt&&j.marks&&j.marks.done?"took "+durTxt(j.marks.done.at-q.startedAt):""].filter(Boolean).join(" · ")),
     j.notes?h("div",{class:"small"},j.notes):null,
-    h("div",{class:"acts"},
-      !dd&&!act&&MGR()?h("button",{class:"btn small",type:"button",style:"background:var(--quick);color:#fff",onclick:()=>quickStart(j)},"Start now"):null,
-      !dd&&(MGR()||(act&&on))?h("button",{class:"btn "+(act?"":"ghost ")+"small",type:"button",onclick:()=>quickDone(j)},"Done"):null,
-      (()=>{const n=docsFor(j.id).length;return n||CAN_POST()?h("button",{class:"btn ghost small",type:"button",onclick:()=>docsGallery(j.id)},"Docs"+(n?" ("+n+")":"")):null;})(),
-      MGR()?h("button",{class:"btn ghost small",type:"button",onclick:()=>quickForm(j)},dd?"Details":"Edit"):null));}
+    (()=>{const n=docsFor(j.id).length,canDone=!dd&&(MGR()||(act&&on)),start=!dd&&!act&&MGR();
+      return h("div",{class:"acts"},
+        start?h("button",{class:"btn small",type:"button",style:"background:var(--quick);color:#fff",onclick:()=>quickStart(j)},"Start now"):null,
+        canDone&&!start?h("button",{class:"btn "+(act?"":"ghost ")+"small",type:"button",onclick:()=>quickDone(j)},"Done"):null,
+        n?h("button",{class:"btn ghost small",type:"button",onclick:()=>docsGallery(j.id)},"Docs ("+n+")"):null,
+        moreBtn(j.name,[canDone&&start?["✓","Mark done",()=>quickDone(j)]:null,!n&&CAN_POST()?["📎","Add documents",()=>docsGallery(j.id)]:null,MGR()?["✏️",dd?"Details":"Edit",()=>quickForm(j)]:null]));})());}
 function quickNotify(j,ids,head){const d=TODAY(),tg=qTag(j);if(tg)head=tg.charAt(0).toUpperCase()+tg.slice(1)+" · "+head;
   notifyTechs(withJob(j,()=>ids.map(tid=>[tid,head+" "+(assignOn(tid,d)===S.jobs.find(x=>x.id===j.id)||(assignOn(tid,d)||{}).id===j.id?"Drop what you're on and start now.":"You'll start it when you're free.")])),"Quick task");}
 async function quickStart(j){const d=TODAY();if(!crewOn(j,d).length){toast("Assign someone first.");quickForm(j);return;}
