@@ -2851,6 +2851,8 @@ function scanCode(title,hint){return new Promise(resolve=>{
   const typed=h("input",{type:"text",class:"full-in",placeholder:hasKeyboardScanner()?"Scan with the handheld scanner, or type":"Or type / paste it here","aria-label":"Type the code",autocomplete:"off"});
   typed.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();e.stopPropagation();const v=typed.value.trim();if(v)finish([v],null);}});
   const file=h("input",Object.assign({type:"file",accept:"image/*",style:"display:none"},isLaptop()?{}:{capture:"environment"}));
+  /* phones: a second picker with no capture, so saved pictures from the gallery can be used too */
+  const gal=h("input",{type:"file",accept:"image/*",style:"display:none"});
   let qr=null,done=false,busy=false,live=false;
   const liveBtn=h("button",{type:"button",class:"btn ghost",onclick:()=>{liveBtn.remove();startLive();}},"🎥 Use live scanner");
   const stopCam=async()=>{try{if(qr&&qr.isScanning)await qr.stop();}catch(e){}try{qr&&qr.clear();}catch(e){}};
@@ -2859,21 +2861,23 @@ function scanCode(title,hint){return new Promise(resolve=>{
   pop.append(h("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:8px"},h("strong",{},title),h("button",{type:"button",class:"iconbtn","aria-label":"Close",onclick:()=>finish([],null)},"✕")),
     h("div",{class:"status",style:"margin:2px 0 8px"},isLaptop()?"Scan "+hint+" with the handheld scanner, or upload a photo of it.":"Take a close photo with the S/N barcode and the label QR both in it. It fills both at once."),area,ctl,msg,
     h("div",{style:"display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"},h("button",{type:"button",class:"btn"+(isLaptop()?" small":""),onclick:()=>file.click()},isLaptop()?"🖼 Upload a photo":"📸 Take a photo"),file,
+      isLaptop()?null:h("button",{type:"button",class:"btn ghost",onclick:()=>gal.click()},"🖼 Choose from gallery"),isLaptop()?null:gal,
       isLaptop()?null:liveBtn),
     h("div",{style:"display:flex;gap:8px;margin-top:8px"},typed,h("button",{type:"button",class:"btn ghost small",onclick:()=>{const v=typed.value.trim();if(v)finish([v],null);}},"Use")));
   document.body.append(wrap);scanDialogOpen=true;
   if(hasKeyboardScanner())setTimeout(()=>typed.focus(),50);
-  file.addEventListener("change",async()=>{const f=file.files[0];file.value="";if(!f)return;busy=true;await stopCam();area.style.display="none";ctl.textContent="";
+  const onPicked=async inp=>{const f=inp.files[0];inp.value="";if(!f)return;busy=true;await stopCam();area.style.display="none";ctl.textContent="";
     let n=0;msg.textContent="Reading photo…";
     try{const codes=await decodePhoto(f,()=>{n++;msg.textContent="Reading photo… "+"•".repeat(1+n%4);});
       if(!codes.length){busy=false;msg.textContent="Couldn't find a code in that photo. Get closer so the codes fill the picture, keep it sharp, and try again.";return;}
       finish(codes,f);}
-    catch(e){busy=false;msg.textContent="Couldn't read that photo. Try again or type the code.";}});
+    catch(e){busy=false;msg.textContent="Couldn't read that photo. Try again or type the code.";}};
+  file.addEventListener("change",()=>onPicked(file));gal.addEventListener("change",()=>onPicked(gal));
   if(isLaptop()){area.style.display="none";msg.textContent="Waiting for the scanner…";loadScanLib().catch(()=>{});return;}
   /* phones and tablets: straight to the camera for a photo; the live scanner is the backup */
   area.style.display="none";msg.textContent="Opening the camera… If it doesn't open, tap Take a photo.";loadScanLib().catch(()=>{});
   try{file.click();}catch(e){}
-  setTimeout(()=>{if(!done&&!busy)msg.textContent="Tap Take a photo, or use the live scanner.";},4000);
+  setTimeout(()=>{if(!done&&!busy)msg.textContent="Tap Take a photo, choose one from your gallery, or use the live scanner.";},4000);
   /* live camera: on the first code, grab that frame and look for any other code in it */
   const onLive=async txt=>{if(busy||done)return;busy=true;let shot=null;
     try{const vid=area.querySelector("video");if(vid&&vid.videoWidth){const c=document.createElement("canvas");c.width=vid.videoWidth;c.height=vid.videoHeight;c.getContext("2d").drawImage(vid,0,0);
