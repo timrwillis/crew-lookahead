@@ -2822,10 +2822,54 @@ function loadScanLib(){if(window.Html5Qrcode)return Promise.resolve();if(scanLib
   return scanLib;}
 /* read every code in a photo: native detector when the phone has one, otherwise the whole photo, then zoomed-in tiles */
 const SCAN_FMTS=()=>[Html5QrcodeSupportedFormats.QR_CODE,Html5QrcodeSupportedFormats.CODE_128,Html5QrcodeSupportedFormats.CODE_39,Html5QrcodeSupportedFormats.DATA_MATRIX,Html5QrcodeSupportedFormats.EAN_13,Html5QrcodeSupportedFormats.UPC_A,Html5QrcodeSupportedFormats.ITF];
-async function decodePhoto(file,onStep){await loadScanLib();const found=new Map();
-  const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=URL.createObjectURL(file);});
-  const W=img.naturalWidth,H=img.naturalHeight,F=Html5QrcodeSupportedFormats;
-  if("BarcodeDetector" in window){try{const bd=new BarcodeDetector();const rs=await bd.detect(img);rs.forEach(r=>{if(r.rawValue)found.set(r.rawValue,/qr|matrix/i.test(r.format)?"2d":"1d");});}catch(e){}}
+/* main photo reader: zxing-cpp (WebAssembly). Much better than the old reader on real phone photos (small, tilted,
+   glare, iPhones with no built-in detector) and finds every code in one pass. Runs on the phone; the photo isn't sent anywhere. */
+let zxLib=null;
+function loadZx(){if(window.ZXingWASM)return Promise.resolve(window.ZXingWASM);if(zxLib)return zxLib;
+  zxLib=new Promise((res,rej)=>{const sc=document.createElement("script");sc.src="https://cdn.jsdelivr.net/npm/zxing-wasm@2.2.4/dist/iife/reader/index.js";
+    sc.onload=()=>res(window.ZXingWASM);sc.onerror=()=>{zxLib=null;rej(new Error("zxing"));};document.head.append(sc);});return zxLib;}
+const ZX_FMTS=["QRCode","DataMatrix","Code128","Code39","EAN-13","UPC-A","ITF"];
+async function zxScan(c,g){const zx=await loadZx();
+  const rs=await zx.readBarcodes(g.getImageData(0,0,c.width,c.height),{formats:ZX_FMTS,tryHarder:true,tryRotate:true,tryInvert:true,tryDownscale:true,maxNumberOfSymbols:8});
+  return rs.filter(r=>r.isValid&&r.text);}
+/* read part of the photo (x,y,w,h), shrunk to at most max px. Returns [text, "2d"|"1d", corners in photo pixels] */
+async function zxRead(img,x,y,w,hh,max){const sc=Math.min(1,max/Math.max(w,hh));
+  const c=document.createElement("canvas");c.width=Math.round(w*sc);c.height=Math.round(hh*sc);const g=c.getContext("2d",{willReadFrequently:true});
+  g.drawImage(img,x,y,w,hh,0,0,c.width,c.height);
+  return (await zxScan(c,g)).map(r=>{const P=r.position,pt=q=>({x:x+q.x/sc,y:y+q.y/sc});
+    return [r.text,/QR|Matrix/i.test(r.format)?"2d":"1d",P?{tl:pt(P.topLeft),tr:pt(P.topRight),bl:pt(P.bottomLeft),br:pt(P.bottomRight)}:null];});}
+/* straighten and zoom in on the area around (cx,cy): turned by -ang, R photo-px across, drawn out to S px */
+async function zxAround(img,cx,cy,R,ang,S){const c=document.createElement("canvas");c.width=c.height=S;const g=c.getContext("2d",{willReadFrequently:true});
+  g.fillStyle="#fff";g.fillRect(0,0,S,S);g.translate(S/2,S/2);g.rotate(-ang);const k=S/R;g.scale(k,k);g.drawImage(img,-cx,-cy);
+  return (await zxScan(c,g)).map(r=>[r.text,/QR|Matrix/i.test(r.format)?"2d":"1d"]);}
+async function loadPhoto(file){
+  try{return await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=URL.createObjectURL(file);});}
+  catch(e){throw new Error(/hei[cf]/i.test((file.type||"")+(file.name||""))?"heic":"img");}}
+async function decodePhoto(file,onStep){const found=new Map(),spots=[];
+  const img=await loadPhoto(file);
+  const W=img.naturalWidth,H=img.naturalHeight;
+  const have=k=>[...found.values()].includes(k),both=()=>have("2d")&&have("1d");
+  const add=rs=>rs.forEach(([t,k,pos])=>{if(!found.has(t))found.set(t,k);if(pos)spots.push(pos);});
+  try{
+    /* 1) the whole photo */
+    if(onStep)onStep();add(await zxRead(img,0,0,W,H,3000));
+    /* 2) a code was found: the other one is on the same label, so straighten the label using that code's tilt and zoom in around it */
+    for(const P of spots.slice(0,4)){if(both())break;
+      const cx=(P.tl.x+P.tr.x+P.bl.x+P.br.x)/4,cy=(P.tl.y+P.tr.y+P.bl.y+P.br.y)/4,side=Math.max(20,Math.hypot(P.tr.x-P.tl.x,P.tr.y-P.tl.y));
+      const ang=Math.atan2(P.tr.y-P.tl.y,P.tr.x-P.tl.x);
+      for(const m of [5,3.5,8])for(const d of [0,-0.09,0.09,Math.PI/2]){if(both())break;if(onStep)onStep();
+        add(await zxAround(img,cx,cy,side*m,ang+d,Math.min(2400,Math.max(1200,side*m*1.5))));}}
+    /* 3) zoomed-in pieces of the photo, also tilted a bit, for small or crooked codes */
+    for(const n of spots.length?[2]:[2,3]){if(both())break;const tw=W/n*1.5,th=H/n*1.5;
+      for(let r=0;r<n&&!both();r++)for(let k=0;k<n&&!both();k++){const x=Math.max(0,Math.min(W-tw,k*W/n-tw*0.17)),y=Math.max(0,Math.min(H-th,r*H/n-th*0.17));
+        for(const a of spots.length?[0]:[0,0.26,-0.26,0.52,-0.52]){if(both())break;if(onStep)onStep();
+          add(a?await zxAround(img,x+tw/2,y+th/2,Math.max(tw,th),a,2000):await zxRead(img,x,y,tw,th,2000));}}}}
+  catch(e){}
+  if(both()){URL.revokeObjectURL(img.src);return [...found.keys()];}
+  /* backup: the older reader (and the phone's own detector, where there is one) */
+  try{await loadScanLib();}catch(e){URL.revokeObjectURL(img.src);if(found.size)return [...found.keys()];throw e;}
+  const F=Html5QrcodeSupportedFormats;
+  if("BarcodeDetector" in window){try{const bd=new BarcodeDetector();const rs=await bd.detect(img);rs.forEach(r=>{if(r.rawValue&&!found.has(r.rawValue))found.set(r.rawValue,/qr|matrix/i.test(r.format)?"2d":"1d");});}catch(e){}}
   const cut=(x,y,w,hh,scale,rot)=>{const c=document.createElement("canvas"),sw=Math.round(w*scale),sh=Math.round(hh*scale);c.width=rot?sh:sw;c.height=rot?sw:sh;const g=c.getContext("2d");
     g.fillStyle="#fff";g.fillRect(0,0,c.width,c.height);if(rot){g.translate(c.width,0);g.rotate(Math.PI/2);}g.drawImage(img,x,y,w,hh,0,0,sw,sh);return c;};
   /* QR codes and line barcodes are searched separately, so one photo can give both */
@@ -2851,8 +2895,6 @@ function scanCode(title,hint){return new Promise(resolve=>{
   const typed=h("input",{type:"text",class:"full-in",placeholder:hasKeyboardScanner()?"Scan with the handheld scanner, or type":"Or type / paste it here","aria-label":"Type the code",autocomplete:"off"});
   typed.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();e.stopPropagation();const v=typed.value.trim();if(v)finish([v],null);}});
   const file=h("input",Object.assign({type:"file",accept:"image/*",style:"display:none"},isLaptop()?{}:{capture:"environment"}));
-  /* phones: a second picker with no capture, so saved pictures from the gallery can be used too */
-  const gal=h("input",{type:"file",accept:"image/*",style:"display:none"});
   let qr=null,done=false,busy=false,live=false;
   const liveBtn=h("button",{type:"button",class:"btn ghost",onclick:()=>{liveBtn.remove();startLive();}},"🎥 Use live scanner");
   const stopCam=async()=>{try{if(qr&&qr.isScanning)await qr.stop();}catch(e){}try{qr&&qr.clear();}catch(e){}};
@@ -2861,23 +2903,21 @@ function scanCode(title,hint){return new Promise(resolve=>{
   pop.append(h("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:8px"},h("strong",{},title),h("button",{type:"button",class:"iconbtn","aria-label":"Close",onclick:()=>finish([],null)},"✕")),
     h("div",{class:"status",style:"margin:2px 0 8px"},isLaptop()?"Scan "+hint+" with the handheld scanner, or upload a photo of it.":"Take a close photo with the S/N barcode and the label QR both in it. It fills both at once."),area,ctl,msg,
     h("div",{style:"display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"},h("button",{type:"button",class:"btn"+(isLaptop()?" small":""),onclick:()=>file.click()},isLaptop()?"🖼 Upload a photo":"📸 Take a photo"),file,
-      isLaptop()?null:h("button",{type:"button",class:"btn ghost",onclick:()=>gal.click()},"🖼 Choose from gallery"),isLaptop()?null:gal,
       isLaptop()?null:liveBtn),
     h("div",{style:"display:flex;gap:8px;margin-top:8px"},typed,h("button",{type:"button",class:"btn ghost small",onclick:()=>{const v=typed.value.trim();if(v)finish([v],null);}},"Use")));
   document.body.append(wrap);scanDialogOpen=true;
   if(hasKeyboardScanner())setTimeout(()=>typed.focus(),50);
-  const onPicked=async inp=>{const f=inp.files[0];inp.value="";if(!f)return;busy=true;await stopCam();area.style.display="none";ctl.textContent="";
+  file.addEventListener("change",async()=>{const f=file.files[0];file.value="";if(!f)return;busy=true;await stopCam();area.style.display="none";ctl.textContent="";
     let n=0;msg.textContent="Reading photo…";
     try{const codes=await decodePhoto(f,()=>{n++;msg.textContent="Reading photo… "+"•".repeat(1+n%4);});
       if(!codes.length){busy=false;msg.textContent="Couldn't find a code in that photo. Get closer so the codes fill the picture, keep it sharp, and try again.";return;}
       finish(codes,f);}
-    catch(e){busy=false;msg.textContent="Couldn't read that photo. Try again or type the code.";}};
-  file.addEventListener("change",()=>onPicked(file));gal.addEventListener("change",()=>onPicked(gal));
+    catch(e){busy=false;msg.textContent=e&&e.message==="heic"?"This browser can't open iPhone HEIC photos. Use Safari, or save the photo as a JPG first.":"Couldn't read that photo. Try again or type the code.";}});
   if(isLaptop()){area.style.display="none";msg.textContent="Waiting for the scanner…";loadScanLib().catch(()=>{});return;}
   /* phones and tablets: straight to the camera for a photo; the live scanner is the backup */
   area.style.display="none";msg.textContent="Opening the camera… If it doesn't open, tap Take a photo.";loadScanLib().catch(()=>{});
   try{file.click();}catch(e){}
-  setTimeout(()=>{if(!done&&!busy)msg.textContent="Tap Take a photo, choose one from your gallery, or use the live scanner.";},4000);
+  setTimeout(()=>{if(!done&&!busy)msg.textContent="Tap Take a photo, or use the live scanner.";},4000);
   /* live camera: on the first code, grab that frame and look for any other code in it */
   const onLive=async txt=>{if(busy||done)return;busy=true;let shot=null;
     try{const vid=area.querySelector("video");if(vid&&vid.videoWidth){const c=document.createElement("canvas");c.width=vid.videoWidth;c.height=vid.videoHeight;c.getContext("2d").drawImage(vid,0,0);
@@ -3104,12 +3144,12 @@ function uploadScans(jid){const j0=S.jobs.find(x=>x.id===jid);if(!j0)return;
     pickBtn.disabled=true;let n=0,ok=0,need=0;
     for(const f of files){n++;status.textContent="Reading photo "+n+" of "+files.length+"…";
       const slot=row(f,"wait","Reading…");list.append(slot);let codes=[];
-      try{codes=await decodePhoto(f);}catch(e){}
+      let heic=false;try{codes=await decodePhoto(f);}catch(e){heic=e&&e.message==="heic";}
       const j=S.jobs.find(x=>x.id===jid),c=codes.length?findCableByCodes(j,codes):null;
       const redo=(title,sub,acts,state)=>{const r=row(f,state,title,sub,acts);slot.replaceWith(r);return r;};
       const ask=(msg,state)=>{let el;el=redo(msg,codes.length?codes.join(" · "):"No barcode or QR found",[pickCable(jid,f,codes,by,(c2,out)=>uploadResult(el,c2,out))],state);need++;};
       const uploadResult=(el,c2,out)=>{const r=row(f,"ok",c2.name,out.photoOnly?"Photo saved to the cable":out.saved&&out.saved.length?"Saved "+out.saved.map(x=>CK_LABEL[x]).join(" + ")+(out.steps&&out.steps.length?" · "+out.steps.map(x=>x+" ✓").join(" · "):""):"Photo saved (already scanned)");el.replaceWith(r);el=r;};
-      if(!codes.length){ask("Couldn't read a code","bad");continue;}
+      if(!codes.length){ask(heic?"HEIC photo: this browser can't open it. Use Safari or save it as a JPG":"Couldn't read a code","bad");continue;}
       if(!c){ask("Not matched to a cable yet","warn");continue;}
       const o={by,batch:true};await applyCodesToCk(jid,c.id,codes,f,"",o);const out=o.out||{};
       if(out.repeat){let el;el=redo(c.name+" · already scanned",out.lines.join(" · "),[h("button",{type:"button",class:"btn ghost small",onclick:async()=>{const o2={by,batch:true,keepRepeat:true};await applyCodesToCk(jid,c.id,codes,f,"",o2);uploadResult(el,c,o2.out||{});}},"Save photo anyway")],"warn");continue;}
