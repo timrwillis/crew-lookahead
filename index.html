@@ -3433,7 +3433,7 @@ function cableTable(j,asText){const cs=cablesOf(j),ss=stepsOf(j),who=u=>u?realNa
   CK_ITEMS.forEach((_,i)=>head.push("Check "+(i+1)+" owner","Check "+(i+1)+" date","Check "+(i+1)+" remarks"));
   const rows=cs.map(c=>{const ck=ckOf(j,c.id),done=ss.filter(st=>markOf(j,c.id,st.id)).length;
     const r=[c.name,stateOf(c),done+"/"+ss.length,rowOf(c),c.rack||"",c.pull||"",c.len||"",c.type||"",c.from||"",c.to||"",c.note||"",
-      ck.serial||"",who(ck.serialBy),D(ck.serialAt),ck.qr||"",who(ck.qrBy),D(ck.qrAt),ck.src||"",who(ck.srcBy),D(ck.srcAt),ck.dst||"",who(ck.dstBy),D(ck.dstAt),ckProblems(ck).join(" "),(ck.photos||[]).length||""];
+      ck.serial||"",who(ck.serialBy),D(ck.serialAt),ck.qr||"",who(ck.qrBy),D(ck.qrAt),ck.src||"",who(ck.srcBy),D(ck.srcAt),ck.dst||"",who(ck.dstBy),D(ck.dstAt),[...ckProblems(ck),...issuesOf(j,c.id).map(i=>"⚠ "+issueTxt(j,i))].join(" "),(ck.photos||[]).length||""];
     ss.forEach(st=>{const m=markOf(j,c.id,st.id),pp=partsOf(j,c.id,st.id);r.push(m?"✓":"",m&&m.at?D(m.at):"",m?who(m.by):"");
       if(isSplit(st))r.push(pp.map(p=>partWho(p)+(partTxt(p)?" ("+partTxt(p)+")":"")+" "+fmt(new Date(p.at),{month:"numeric",day:"numeric"})).join("; "));});
     CK_ITEMS.forEach((_,i)=>{const it=(ck.items||{})[i+1];r.push(it&&it.at?ckWho(it):"",it&&it.at?D(it.at):"",it&&it.at?(it.remark||""):"");});
@@ -3457,9 +3457,10 @@ function cableData(j){const cs=cablesOf(j),ss=stepsOf(j),who=u=>u?realName(u):""
     ss.forEach(x=>{const m=markOf(j,c.id,x.id);if(m&&m.at)hist.push([m.at,x.name,who(m.by),""]);partsOf(j,c.id,x.id).forEach(p=>hist.push([p.at,x.name+" (part)",partWho(p),partTxt(p)]));});
     CK_SCANS.forEach(([k,l])=>{if(ck[k]&&ck[k+"At"])hist.push([ck[k+"At"],"Scanned "+l,who(ck[k+"By"]),ck[k]]);});
     CK_ITEMS.forEach((t,i)=>{const it=(ck.items||{})[i+1];if(it&&it.at)hist.push([it.at,"Check "+(i+1),ckWho(it),(it.remark||"")+(it.auto?" (from scans)":"")]);});
+    issuesOf(j,c.id).forEach(i=>hist.push([i.at,"Problem reported",i.techId&&techById(i.techId)?techName(i.techId):who(i.by),issueTxt(j,i)+((i.photos||[]).length?" · "+i.photos.length+" photo(s) in the app":"")]));
     hist.sort((a,b)=>a[0]-b[0]);const last=hist[hist.length-1];
     return{name:c.name,status:st==="done"?"Complete":st==="part"?"In progress":"Not started",done,total:ss.length,
-      row:rowOf(c),rack:c.rack||"",pull:c.pull||"",len:c.len||"",type:c.type||"",from:c.from||"",to:c.to||"",note:c.note||"",problems:ckProblems(ck).join(" "),
+      row:rowOf(c),rack:c.rack||"",pull:c.pull||"",len:c.len||"",type:c.type||"",from:c.from||"",to:c.to||"",note:c.note||"",problems:[...ckProblems(ck),...issuesOf(j,c.id).map(i=>"⚠ "+issueTxt(j,i))].join(" "),
       last:last?T(last[0])+" · "+last[2]:"",
       info:[["Cable ID",c.name],["Row",rowOf(c)],["Rack",c.rack||""],["Pull",c.pull||""],["Length",c.len||""],["Cable type",c.type||""],["Source (from)",c.from||""],["Destination (to)",c.to||""],["Notes",c.note||""]],
       scans:CK_SCANS.map(([k,l])=>[l,ck[k]||"",who(ck[k+"By"]),T(ck[k+"At"])]),
@@ -3748,7 +3749,8 @@ function cableTracker(jid,q0){
     box.append(qIn);
     box.append(h("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"},
       h("div",{style:"display:flex;gap:10px;align-items:center;flex-wrap:wrap"},sortSel,have.length?gs:null,h("label",{class:"check",for:"ctRemain",style:"text-transform:none;letter-spacing:0"},rc,"Only unfinished"),h("span",{id:"ctPending",class:"status"})),
-      h("div",{style:"display:flex;gap:6px;flex-wrap:wrap"},can?h("button",{class:"btn ghost small",type:"button",onclick:()=>scanFindCable(j.id)},(isLaptop()?"⌨ Scan a cable":"📷 Scan a cable")):null,h("button",{class:"btn ghost small",type:"button",onclick:()=>{closeSheet();setTimeout(()=>cableReport(j.id),60);}},"📅 Dates & report"),
+      h("div",{style:"display:flex;gap:6px;flex-wrap:wrap"},can?h("button",{class:"btn ghost small",type:"button",onclick:()=>scanFindCable(j.id)},(isLaptop()?"⌨ Scan a cable":"📷 Scan a cable")):null,
+        can&&bulkSteps(j).length?h("button",{class:"btn small",type:"button",onclick:()=>bulkSignOff(j.id)},"✍ Sign off several"):null,h("button",{class:"btn ghost small",type:"button",onclick:()=>{closeSheet();setTimeout(()=>cableReport(j.id),60);}},"📅 Dates & report"),
         h("button",{class:"btn ghost small",type:"button",onclick:()=>{closeSheet();setTimeout(()=>cableLabels(j.id),60);}},"🏷 Labels"),
         MGR()&&cs.some(c=>c.rack&&c.type)?h("button",{class:"btn ghost small",type:"button",onclick:()=>{closeSheet();setTimeout(()=>pullBuilder(j.id),60);}},"🧩 Build pulls"):null,
         MGR()?h("button",{class:"btn ghost small",type:"button",onclick:()=>{closeSheet();cableEditor(j);}},"Edit cables & steps"):null)));
@@ -3768,6 +3770,9 @@ function cableTracker(jid,q0){
           el.append(h("div",{class:"cdet"},h("button",{type:"button",class:"btn ghost small",onclick:()=>{closeSheet();setTimeout(()=>ckSheet(j.id,c.id),60);}},"📋 Checklist & scans · "+sn+"/4 scanned · "+inn+"/5 checked"),ckProblems(ck).length?h("span",{style:"color:var(--over);margin-left:6px"},"⚠"):null));}
         const dated=ss.map(st=>{const m=markOf(j,c.id,st.id);return m&&m.at?st.name+" "+fmt(new Date(m.at),{month:"short",day:"numeric"})+(m.by?" ("+(realName(m.by).split(" ")[0])+")":""):"";}).filter(Boolean);
         if(dated.length)el.append(h("div",{class:"cdet"},"✓ "+dated.join(" · ")));
+        issuesOf(j,c.id).forEach(i=>{const ph=(i.photos||[]).map(id=>S.files.find(f=>f.id===id)).filter(Boolean);
+          el.append(h("div",{class:"cdet",style:"color:var(--over)"},"⚠ "+issueTxt(j,i)+" · "+(i.techId&&techById(i.techId)?techName(i.techId):realName(i.by))+" "+fmt(new Date(i.at),{month:"short",day:"numeric"}),
+            ph.map((f,k)=>h("button",{type:"button",class:"linkbtn",style:"margin-left:6px",onclick:()=>openDoc(f,()=>cableTracker(jid))},"📷"+(ph.length>1?" "+(k+1):"")))));});
         const d=detail(c);if(d)el.append(h("div",{class:"cdet"},d));
         {const lb=labelLines(j,c).filter(Boolean);if(lb.length)el.append(h("div",{class:"cdet"},"🏷 Label: "+lb.join(" / ")));}}
       return el;};
@@ -3825,10 +3830,119 @@ function stepMarkSheet(jid,sid){
           h("small",{style:"display:block;font-weight:400;color:var(--muted);overflow-wrap:anywhere"},[rowOf(c),c.from&&c.to?c.from+" → "+c.to:(c.to||c.from||""),pp.length&&!m?pp.length+" sign-off"+(pp.length>1?"s":"")+" so far":""].filter(Boolean).join(" · ")))));});
     foot.textContent="";
     const todo=list.filter(c=>!markOf(j,c.id,sid));
+    if(sp&&/port|vfl/i.test(st.name||"")&&CAN_POST())foot.append(h("button",{type:"button",class:"btn small",onclick:()=>{close();setTimeout(()=>bulkSignOff(jid,sid),60);}},"✍ Sign off several at once"));
     if(!sp&&todo.length>1)foot.append(h("button",{type:"button",class:"btn ghost small",onclick:async()=>{if(!confirm("Check off "+st.name+" on "+todo.length+" cables"+(q.trim()?" matching \""+q.trim()+"\"":"")+"?"))return;await setMarks(j,todo.map(c=>[c.id,sid]),true);draw();}},"✓ Check off all "+todo.length+" shown"));
     foot.append(h("button",{type:"button",class:"btn small",style:"margin-left:auto",onclick:close},"Done"));}
   const redraw=()=>{draw();};
   liveSheet=redraw;document.body.append(wrap);draw();setTimeout(()=>{if(!isPhone())qIn.focus();},30);}
+
+/* ===== SIGN OFF SEVERAL CABLES AT ONCE (Ported / VFL only) =====
+   One person, one step, many cables: for when someone did the work and forgot to update as they went.
+   Afterwards: "Find any problems?" → which cable or enclosure, port, damaged or not, notes, photos.
+   Problems live on the cable as marks[cid]._issues (crew can only write marks) and send the lead a flag. */
+const bulkSteps=j=>stepsOf(j).filter(st=>/port|vfl/i.test(st.name||""));
+const issuesOf=(j,cid)=>(((j.marks||{})[cid]||{})._issues)||[];
+const ISSUE_WHERE={cable:"Cable",src:"Source enclosure",dst:"Dest enclosure"};
+const issueTxt=(j,i)=>{const st=stepsOf(j).find(x=>x.id===i.step);return [ISSUE_WHERE[i.where]||"Cable",i.port?"port "+i.port:"",i.damaged?"DAMAGED":"not damaged",i.note,st?"("+st.name+")":""].filter(Boolean).join(" · ");};
+function bulkSignOff(jid,sid0){
+  const j0=S.jobs.find(x=>x.id===jid);if(!j0)return;const steps=bulkSteps(j0);
+  if(!steps.length){toast("This job has no Ported or VFL step.");return;}
+  const wrap=h("div",{class:"popwrap"}),pop=h("div",{class:"pop",role:"dialog","aria-modal":"true","aria-label":"Sign off several cables",style:"max-height:92vh;display:flex;flex-direction:column;gap:8px"});wrap.append(pop);
+  let sid=steps.some(x=>x.id===sid0)?sid0:steps[0].id,who=(myTech()||{}).id||"",when=TODAY(),note="",q="",showAll=false,stage="pick",busy=false;
+  const pick=new Set(),probs=[];
+  const close=()=>{wrap.remove();probs.forEach(p=>p.files.forEach(f=>{try{URL.revokeObjectURL(f.u);}catch(e){}}));if(liveSheet)liveSheet();};
+  const top=(title,sub)=>h("div",{style:"display:flex;justify-content:space-between;align-items:flex-start;gap:8px"},h("div",{},h("strong",{style:"font-size:1.1rem"},title),sub?h("div",{class:"status"},sub):null),h("button",{type:"button",class:"iconbtn","aria-label":"Close",onclick:close},"✕"));
+  const qIn=h("input",{type:"search",class:"full-in",placeholder:"Search: BLK, rack, PP, from/to…","aria-label":"Search cables",autocomplete:"off"});
+  qIn.addEventListener("input",()=>{q=qIn.value;draw();});
+  const newProb=()=>({cid:pick.size===1?[...pick][0]:"",where:"",port:"",damaged:null,note:"",files:[]});
+  function draw(){const j=S.jobs.find(x=>x.id===jid);if(!j){close();return;}const st=stepsOf(j).find(x=>x.id===sid);if(!st){close();return;}
+    const keepScroll=pop.scrollTop;pop.textContent="";const cs=cablesOf(j),chosen=cs.filter(c=>pick.has(c.id));
+    if(stage==="pick"){
+      pop.append(top("Sign off several cables","One person, one step. Pick every cable they did."));
+      pop.append(h("div",{class:"flabel"},"Step"),h("div",{class:"skillpick"},steps.map(x=>h("button",{type:"button",class:"skill","aria-pressed":String(x.id===sid),onclick:()=>{sid=x.id;pick.clear();draw();}},x.name))));
+      if(MGR()){const sel=h("select",{class:"full-in","aria-label":"Who did it"},h("option",{value:""},"Pick the tech…"),activeTechs().map(t=>h("option",{value:t.id,selected:t.id===who},t.name)));
+        sel.addEventListener("change",()=>{who=sel.value;draw();});pop.append(h("div",{class:"flabel"},"Who did it"),sel);}
+      else pop.append(h("div",{class:"flabel"},"Who did it"),h("div",{},(myTech()||{}).name||names[myId]||"You"));
+      const dIn=h("input",{type:"date",value:when,max:TODAY(),"aria-label":"Day it was done",style:"font:inherit;padding:7px 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink)"});
+      dIn.addEventListener("change",()=>{when=dIn.value||TODAY();});
+      pop.append(h("div",{style:"display:flex;gap:8px;align-items:center;flex-wrap:wrap"},h("span",{class:"flabel",style:"margin:0"},"Day it was done"),dIn));
+      const list=cs.filter(c=>cableMatch(j,c,q)&&(showAll||!markOf(j,c.id,sid)||pick.has(c.id)));
+      const left=cs.filter(c=>!markOf(j,c.id,sid)).length;
+      pop.append(h("div",{class:"flabel"},"Cables ("+pick.size+" picked)"),qIn,
+        h("div",{style:"display:flex;gap:8px;align-items:center;flex-wrap:wrap"},
+          h("div",{class:"seg-ctl"},[[false,"Not done ("+left+")"],[true,"All ("+cs.length+")"]].map(([k,l])=>h("button",{type:"button","aria-pressed":String(showAll===k),onclick:()=>{showAll=k;draw();}},l))),
+          list.length?h("button",{type:"button",class:"linkbtn",onclick:()=>{const all=list.every(c=>pick.has(c.id));list.forEach(c=>all?pick.delete(c.id):pick.add(c.id));draw();}},list.every(c=>pick.has(c.id))?"Unpick these":"Pick all shown"):null));
+      const body=h("div",{style:"display:flex;flex-direction:column;gap:6px"});
+      if(!list.length)body.append(h("p",{class:"status"},q.trim()?"No cable matches \""+q.trim()+"\".":"Every cable has "+st.name+" done ✓"));
+      list.forEach(c=>{const on=pick.has(c.id),m=markOf(j,c.id,sid);
+        body.append(h("button",{type:"button",class:"sbtn stepcab","aria-pressed":String(on),onclick:()=>{on?pick.delete(c.id):pick.add(c.id);draw();}},
+          h("span",{class:"tick","aria-hidden":"true"},on?"☑":"☐"),
+          h("span",{style:"min-width:0;text-align:left"},h("strong",{style:"display:block"},c.name),
+            h("small",{style:"display:block;font-weight:400;color:var(--muted);overflow-wrap:anywhere"},[rowOf(c),c.from&&c.to?c.from+" → "+c.to:(c.to||c.from||""),m?"already "+st.name.toLowerCase():""].filter(Boolean).join(" · ")))));});
+      pop.append(body);
+      const nIn=h("input",{type:"text",class:"full-in",placeholder:"Note for all of them (optional)",value:note});nIn.addEventListener("input",()=>note=nIn.value);
+      pop.append(nIn,h("div",{style:"display:flex;gap:8px;flex-wrap:wrap;position:sticky;bottom:-16px;background:var(--panel);padding:8px 0"},
+        h("button",{type:"button",class:"btn",disabled:!pick.size||(MGR()&&!who),onclick:()=>{stage="ask";draw();}},pick.size?"Sign off "+pick.size+" cable"+(pick.size===1?"":"s"):"Pick cables first"),
+        MGR()&&!who?h("span",{class:"status",style:"align-self:center"},"Pick the tech first"):null));}
+    else if(stage==="ask"){
+      pop.append(top(st.name+" · "+pick.size+" cable"+(pick.size===1?"":"s"),(who?techName(who):"You")+" · "+fmtS(when,{weekday:"short",month:"short",day:"numeric"})),
+        h("p",{style:"margin:6px 0 0;font-size:1.05rem;font-weight:600"},"Did you find any problems with these cables?"),
+        h("div",{class:"status"},chosen.map(c=>c.name).join(", ")),
+        h("div",{style:"display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"},
+          h("button",{type:"button",class:"btn",disabled:busy,onclick:()=>save()},"No problems · save"),
+          h("button",{type:"button",class:"btn ghost",onclick:()=>{if(!probs.length)probs.push(newProb());stage="probs";draw();}},"Yes, report a problem")),
+        h("button",{type:"button",class:"linkbtn",style:"justify-self:start",onclick:()=>{stage="pick";draw();}},"‹ Back to the cable list"));}
+    else{
+      pop.append(top("Report problems",st.name+" · "+(who?techName(who):"You")));
+      probs.forEach((p,i)=>{const c=cs.find(x=>x.id===p.cid);const card=h("div",{class:"panel stack",style:"gap:8px;padding:12px"});
+        card.append(h("div",{style:"display:flex;justify-content:space-between;align-items:center"},h("strong",{},"Problem "+(i+1)),probs.length>1?h("button",{type:"button",class:"linkbtn",onclick:()=>{probs.splice(i,1);draw();}},"Remove"):null));
+        const cSel=h("select",{class:"full-in","aria-label":"Which cable"},h("option",{value:""},"Which cable?"),chosen.map(x=>h("option",{value:x.id,selected:x.id===p.cid},x.name)));
+        cSel.addEventListener("change",()=>{p.cid=cSel.value;draw();});card.append(cSel);
+        card.append(h("div",{class:"flabel",style:"margin:0"},"Where"),h("div",{class:"skillpick"},Object.keys(ISSUE_WHERE).map(k=>h("button",{type:"button",class:"skill","aria-pressed":String(p.where===k),onclick:()=>{p.where=k;draw();}},
+          ISSUE_WHERE[k]+(c&&k==="src"&&c.from?" ("+c.from+")":"")+(c&&k==="dst"&&c.to?" ("+c.to+")":"")))));
+        const pIn=h("input",{type:"text",inputmode:"numeric",class:"full-in",placeholder:"Port # (e.g. 7, or 1-12)",value:p.port,"aria-label":"Port"});pIn.addEventListener("input",()=>p.port=pIn.value);
+        card.append(h("div",{class:"flabel",style:"margin:0"},"Port"),pIn);
+        card.append(h("div",{class:"flabel",style:"margin:0"},"Was it damaged?"),h("div",{class:"skillpick"},[[true,"Yes, damaged"],[false,"No"]].map(([v,l])=>h("button",{type:"button",class:"skill","aria-pressed":String(p.damaged===v),onclick:()=>{p.damaged=v;draw();}},l))));
+        const tIn=h("textarea",{class:"full-in",rows:2,placeholder:"Notes: what's wrong, what you did about it",style:"font:inherit;width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink)"});tIn.value=p.note;tIn.addEventListener("input",()=>p.note=tIn.value);
+        card.append(tIn);
+        const addPh=()=>{const inp=h("input",{type:"file",accept:"image/*",multiple:true,style:"display:none"});
+          inp.addEventListener("change",()=>{[...inp.files].forEach(f=>p.files.push({f,u:URL.createObjectURL(f)}));inp.remove();draw();});document.body.append(inp);inp.click();};
+        card.append(h("div",{style:"display:flex;gap:6px;flex-wrap:wrap;align-items:center"},
+          p.files.map((x,k)=>h("span",{style:"position:relative"},h("img",{src:x.u,alt:"Photo "+(k+1),style:"width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line)"}),
+            h("button",{type:"button","aria-label":"Remove photo",style:"position:absolute;top:-6px;right:-6px;border-radius:99px;border:0;width:22px;height:22px;background:var(--ink);color:var(--panel)",onclick:()=>{URL.revokeObjectURL(x.u);p.files.splice(k,1);draw();}},"✕"))),
+          h("button",{type:"button",class:"btn ghost small",onclick:addPh},"📷 Add photos")));
+        pop.append(card);});
+      const bad=probs.findIndex(p=>!p.cid||!p.where||p.damaged===null);
+      pop.append(h("button",{type:"button",class:"btn ghost small",style:"justify-self:start",onclick:()=>{probs.push(newProb());draw();setTimeout(()=>{pop.scrollTop=pop.scrollHeight;},30);}},"+ Another problem"),
+        h("div",{style:"display:flex;gap:8px;flex-wrap:wrap;align-items:center;position:sticky;bottom:-16px;background:var(--panel);padding:8px 0"},
+          h("button",{type:"button",class:"btn",disabled:busy,onclick:()=>{if(bad>=0){toast("Problem "+(bad+1)+": pick the cable, where, and damaged or not");return;}save();}},busy?"Saving…":"Save sign-off + problems"),
+          h("button",{type:"button",class:"linkbtn",onclick:()=>{stage="ask";draw();}},"‹ Back")));}
+    pop.scrollTop=keepScroll;}
+  async function save(){if(busy)return;busy=true;draw();
+    const j=S.jobs.find(x=>x.id===jid),st=j&&stepsOf(j).find(x=>x.id===sid);if(!st){close();return;}
+    const tid=MGR()?who:((myTech()||{}).id||""),doer=uidOf(tid)||myId||"",at=when===TODAY()?Date.now():parseD(when).getTime()+12*3600e3;
+    const cids=[...pick],upd={updatedAt:Date.now()},local={};
+    try{
+      cids.forEach(cid=>{const raw=rawMark(j,cid,sid)||{},had=raw.at&&raw.done!==false;
+        const part={by:myId||"",techId:tid,at,what:"Whole cable",from:"",to:"",note:note.trim(),bulk:true};
+        const val={parts:[...(raw.parts||[]),part],done:true,at:had?raw.at:at,by:had&&raw.by?raw.by:doer};
+        upd["marks."+cid+"."+sid]=val;local[cid]={[sid]:val};});
+      const flagLines=[];
+      for(const p of probs.filter(()=>stage==="probs")){const c=cablesOf(j).find(x=>x.id===p.cid);
+        let ids=[];if(p.files.length)ids=await uploadFiles(p.files.map((x,k)=>new File([x.f],c.name+" · "+st.name+" problem"+(p.port?" port "+p.port:"")+" "+(k+1)+".jpg",{type:x.f.type||"image/jpeg"})),j.id,"",{cableId:c.id,issue:true,quiet:true});ids=ids.filter(Boolean);
+        const iss={id:Math.random().toString(36).slice(2,10),step:sid,where:p.where,port:p.port.trim(),damaged:!!p.damaged,note:p.note.trim(),photos:ids,by:myId||"",techId:tid,at};
+        const k="marks."+p.cid+"._issues";upd[k]=[...(upd[k]||issuesOf(j,p.cid)),iss];local[p.cid]=Object.assign(local[p.cid]||{},{_issues:upd[k]});
+        flagLines.push(c.name+": "+issueTxt(j,iss)+(ids.length?" · "+ids.length+" photo"+(ids.length>1?"s":""):""));}
+      await db.collection("jobs").doc(j.id).update(upd);
+      j.marks=Object.assign({},j.marks||{});Object.entries(local).forEach(([cid,v])=>{j.marks[cid]=Object.assign({},j.marks[cid]||{},v);});
+      const nm=tid?techName(tid):meName(),names5=cids.map(cid=>(cablesOf(j).find(c=>c.id===cid)||{}).name).filter(Boolean);
+      logEvent(nm+" signed off "+st.name.toLowerCase()+" on "+cids.length+" cable"+(cids.length>1?"s":"")+": "+(names5.length>8?names5.slice(0,8).join(", ")+" +"+(names5.length-8)+" more":names5.join(", "))+(tid&&uidOf(tid)!==myId?" (entered by "+meName()+")":"")+" · "+j.name,{ev:"cables",jobId:j.id});
+      if(stepCount(j,sid)===cablesOf(j).length)logEvent("All "+cablesOf(j).length+" cables "+st.name.toLowerCase()+": "+j.name,{ev:"cables",jobId:j.id});
+      if(flagLines.length){try{await db.collection("asks").add({type:"flag",reason:probs.some(p=>p.damaged)?"Damaged cable":"Cable problem",text:st.name+" by "+nm+"\n"+flagLines.join("\n"),jobId:j.id,taskId:"",urgent:probs.some(p=>p.damaged),to:"lead",status:"open",by:myId||"",at:Date.now(),reply:""});}catch(e){}
+        logEvent(nm+" reported "+flagLines.length+" cable problem"+(flagLines.length>1?"s":"")+" on "+j.name+": "+flagLines.join(" | "),{ev:"flag",jobId:j.id});}
+      toast("Signed off "+cids.length+" cable"+(cids.length>1?"s":"")+(flagLines.length?" · lead alerted about "+flagLines.length+" problem"+(flagLines.length>1?"s":""):""));close();}
+    catch(err){busy=false;writeErr(err);draw();}}
+  document.body.append(wrap);draw();}
 
 /* ===== CABLE LABELS (for the EZ-Mark label printer) =====
    Each cable gets two label lines. By default they're built from the cable's From / To
