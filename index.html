@@ -605,6 +605,15 @@ body:has(#scrim:not([hidden])) .tabs{visibility:hidden}
 }
 
 /* ---- compact pass: fewer, smaller pieces on each card ---- */
+.cabgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px}
+.cabcard{border:1px solid var(--line);border-radius:12px;background:var(--bg);display:grid;gap:8px;padding:0;min-width:0}
+.cabcard.open{grid-column:1/-1;padding-bottom:6px}.cabcard.open>:not(.cabhd){margin:0 12px}
+.cabcard.fin{border-color:color-mix(in srgb,var(--ok) 55%,var(--line))}
+.cabhd{display:grid;gap:7px;width:100%;padding:12px;background:none;border:0;color:var(--ink);font:inherit;text-align:left;cursor:pointer;border-radius:12px}
+.cabtop{display:flex;align-items:center;gap:8px}.cabtop strong{font-size:1rem;flex:1}
+.cabpct{font-family:var(--f-mono);font-size:.82rem;color:var(--muted)}.cabcard.fin .cabpct{color:var(--ok)}
+.chev{color:var(--muted);width:1em;text-align:center}
+.cabsys{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:.8rem;color:var(--muted)}.cabsys .ok{color:var(--ok)}.cabsys .cabn{margin-left:auto}
 .prbtn{background:none;border:0;padding:0;color:inherit;font:inherit;text-align:left;width:100%;cursor:pointer}
 .btn.more{padding-inline:10px;font-weight:700;letter-spacing:.08em}
 .tcard{gap:6px;padding:9px 11px}
@@ -1161,7 +1170,7 @@ function cablePill(j,t){const pg=jobProgress(j);if(!pg)return null;const step=t?
 function docPill(j,t,always){const n=t?docsFor(j.id,t.id).length:docsFor(j.id).length;
   if(!n&&!(always&&CAN_POST()))return null;
   return h("button",{type:"button",class:"tpill "+(n?"doc":"ghost"),title:"Photos, prints and files",onclick:e=>{e.stopPropagation();docsGallery(j.id,t?t.id:undefined);}},n?"Documents "+n:"+ Documents");}
-const openDoneJobs=new Set(),openSteps=new Set();
+const openDoneJobs=new Set(),openSteps=new Set(),openCabs=new Set();
 const doneWho=t=>t.doneBy?(names[t.doneBy]||chatName(t.doneBy)):"";
 function doneRow(j,t){const m=MGR();
   return h("div",{class:"titem done"},h("span",{class:"st done"},t.reviewedAt?"Reviewed":"Done"),
@@ -1226,7 +1235,22 @@ function jobPanel(j){
       box.append(h("div",{class:"phasehd",style:"display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"},h("span",{},title),
           pc?h("button",{type:"button",class:"linkbtn",style:"color:"+(pc.n===pc.of?"var(--ok)":"var(--muted)"),onclick:()=>cableTracker(j.id,pc.cab?pc.cab+"-":undefined)},pc.n+"/"+pc.of+" cables"+(pc.cab?" done":"")+(pc.n===pc.of?" ✓":" ›")):h("span",{style:"color:var(--muted)"},nd+"/"+list.length+" done")),
         open.length?h("div",{class:"tlist"},open.map(t=>taskRow(j,t,d))):h("div",{class:"status",style:"padding:6px 0 10px"},"All done ✓"));};
-    ph.forEach((p,i)=>sect(p.cab?"Cabinet "+p.cab:"Phase "+(i+1)+" · "+p.name,tk.filter(t=>t.phase===p.id),phaseCables(j,p)));
+    /* cabinets: one compact card each (name, progress bar, systems); tap to open its tasks */
+    const cabPh=ph.filter(p=>p.cab&&tk.some(t=>t.phase===p.id));
+    if(cabPh.length){const grid=h("div",{class:"cabgrid"});
+      cabPh.forEach(p=>{const list=tk.filter(t=>t.phase===p.id),nd=list.filter(isDone).length,pc=phaseCables(j,p),key=j.id+"|"+p.id,isOpen=openCabs.has(key);
+        const pctC=pc&&pc.of?Math.round(pc.n*100/pc.of):Math.round(nd*100/list.length),all=nd===list.length;
+        const card=h("div",{class:"cabcard"+(isOpen?" open":"")+(all?" fin":"")});
+        card.append(h("button",{type:"button",class:"cabhd","aria-expanded":String(isOpen),onclick:()=>{isOpen?openCabs.delete(key):openCabs.add(key);render();}},
+          h("span",{class:"cabtop"},h("strong",{},"Cabinet "+p.cab),h("span",{class:"cabpct"},all?"✓ Done":pctC+"%"),h("span",{class:"chev","aria-hidden":"true"},isOpen?"▾":"▸")),
+          h("span",{class:"bar"},h("i",{style:"width:"+pctC+"%"})),
+          h("span",{class:"cabsys"},list.map(t=>h("span",{class:isDone(t)?"ok":""},(isDone(t)?"✓ ":"")+t.name)),h("span",{class:"cabn"},nd+"/"+list.length+" done"))));
+        if(isOpen){const open=list.filter(t=>!isDone(t));
+          if(pc)card.append(h("button",{type:"button",class:"linkbtn",style:"justify-self:start",onclick:()=>cableTracker(j.id,pc.cab?pc.cab+"-":undefined)},pc.n+"/"+pc.of+" cables done ›"));
+          card.append(open.length?h("div",{class:"tlist"},open.map(t=>taskRow(j,t,d))):h("div",{class:"status",style:"padding:4px 0"},"All done ✓"));}
+        grid.append(card);});
+      box.append(h("div",{class:"phasehd"},"Cabinets · tap one to open"),grid);}
+    ph.forEach((p,i)=>{if(cabPh.includes(p))return;sect(p.cab?"Cabinet "+p.cab:"Phase "+(i+1)+" · "+p.name,tk.filter(t=>t.phase===p.id),phaseCables(j,p));});
     sect(ph.length?"Other tasks":"Tasks",tk.filter(t=>!ph.some(p=>p.id===t.phase)));
     const done=tk.filter(isDone).sort((a,b)=>(b.doneAt||parseD(b.doneOn).getTime())-(a.doneAt||parseD(a.doneOn).getTime()));
     if(done.length){const nr=done.filter(t=>!t.reviewedAt).length,isOpen=openDoneJobs.has(j.id);
@@ -1938,8 +1962,8 @@ function resolveForm(f){openSheet("Mark resolved",[field({id:"rsNote",label:"Wha
 /* ===== HOME: Dashboard (leads/super) and My Day (crew) ===== */
 let homeSeg="";
 function renderHome(v){if(!MGR()){renderMyDay(v);return;}
-  const rk=isOwner?"lead":myRole();if(!homeSeg)homeSeg=rk==="boss"?"progress":"crew";
-  v.append(h("div",{style:"margin-bottom:10px"},subnav(homeSeg,[["crew","Manpower",offOn(TODAY()).filter(o=>o.type==="Call-in"||o.type==="Sick").length],["progress","Progress"],["dash","Dashboard"]],k=>homeSeg=k)));
+  const rk=isOwner?"lead":myRole();if(!homeSeg)homeSeg="dash";
+  v.append(h("div",{style:"margin-bottom:10px"},subnav(homeSeg,[["dash","Dashboard"],["crew","Manpower",offOn(TODAY()).filter(o=>o.type==="Call-in"||o.type==="Sick").length],["progress","Progress"]],k=>homeSeg=k)));
   if(homeSeg==="dash")renderDashboard(v);else if(homeSeg==="progress")renderSuperDay(v);else renderLeadDay(v);}
 function dayHead(v){const t=today();v.append(h("div",{class:"dayline"},h("strong",{},fmt(t,{weekday:"long",month:"short",day:"numeric"})),h("span",{class:"status"},hoursTxt(TODAY())+(holidayOn(TODAY())?" · "+holidayOn(TODAY()).name:"")),notifState()==="default"?h("button",{type:"button",class:"linkbtn",onclick:()=>enableAlerts()},"Turn on alerts"):null));}
 function flagPanel(v){const mine=myAlertFlags();if(mine.length)v.append(panel((isOwner?"lead":myRole())==="boss"?"Escalated to you":"Flags",null,h("div",{class:"stack"},mine.map(flagCard)),{full:true,badge:mine.length,cls:"alertp"}));}
@@ -4610,7 +4634,11 @@ async function importOld(btn){btn.disabled=true;btn.textContent="Adding…";
 function resolveNames(){let changed=false;S.people.forEach(p=>{const n=p.id===myId?"You":(p.name||"Someone");if(names[p.id]!==n){names[p.id]=n;changed=true;}});if(changed&&$("#scrim").hidden)render();}
 
 /* ---------- boot ---------- */
-{const hs=location.hash.slice(1);if(hs==="asks"){msgSeg="asks";tab="messages";}else tab=OLD_TABS[hs]||(TABS.includes(hs)?hs:"home");}
+/* always open on the dashboard (Home), even if the last screen was a job */
+tab="home";if(location.hash)history.replaceState(null,"",location.pathname+location.search);
+/* phones keep the app alive in the background: if it's been away 15+ min, come back to the dashboard */
+{let awayAt=0;document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="hidden"){awayAt=Date.now();return;}
+  if(awayAt&&Date.now()-awayAt>15*60e3&&$("#scrim").hidden&&tab!=="home"){homeSeg="";taskJob="";tab="home";history.replaceState(null,"",location.pathname+location.search);window.scrollTo(0,0);render();}awayAt=0;});}
 let pendingRender=null;
 function schedule(){if(pendingRender)return;pendingRender=requestAnimationFrame(()=>{pendingRender=null;
   const active=document.activeElement;const typing=active&&(active.tagName==="TEXTAREA"||(active.tagName==="INPUT"&&active.type!=="checkbox"))&&!$("#scrim").contains(active)&&!$("#login").contains(active);
