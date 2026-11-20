@@ -722,6 +722,14 @@ const hoursTxt=s=>{const h=hoursOn(s);return h?t12(h[0])+" – "+t12(h[1]):"Off"
 const dayOffLabel=s=>{const hd=holidayOn(s);return hd&&hd.type==="off"?(hd.name||"Day off"):DAYNAMES[parseD(s).getDay()]+" · off";};
 function ago(ts){const m=Math.round((Date.now()-ts)/6e4);if(m<1)return"just now";if(m<60)return m+"m ago";const hh=Math.round(m/60);if(hh<24)return hh+"h ago";const dd=Math.round(hh/24);if(dd<7)return dd+"d ago";return new Date(ts).toLocaleDateString(undefined,{month:"short",day:"numeric"});}
 function toast(t){const e=$("#toast");e.textContent=t;e.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>e.hidden=true,2600);}
+function toastAction(t,label,fn,ms){const e=$("#toast");e.textContent="";e.append(h("span",{},t),h("button",{type:"button",style:"margin-left:12px;background:none;border:0;color:inherit;font:inherit;font-weight:700;text-decoration:underline;padding:4px 2px;cursor:pointer",onclick:()=>{e.hidden=true;clearTimeout(toast.t);fn();}},label));
+  e.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>e.hidden=true,ms||10000);}
+/* "are you sure?" box on top of everything */
+function confirmBox(title,msg,okLabel,onOk){const wrap=h("div",{class:"popwrap"}),close=()=>wrap.remove();
+  const ok=h("button",{type:"button",class:"btn danger",onclick:async()=>{ok.disabled=true;close();await onOk();}},okLabel);
+  wrap.append(h("div",{class:"pop stack",role:"alertdialog","aria-modal":"true","aria-label":title,style:"gap:10px"},h("h3",{style:"margin:0"},title),h("p",{style:"margin:0"},msg),
+    h("div",{style:"display:flex;justify-content:flex-end;gap:8px"},h("button",{type:"button",class:"btn ghost",onclick:close},"Cancel"),ok)));
+  wrap.addEventListener("click",e=>{if(e.target===wrap)close();});document.body.append(wrap);setTimeout(()=>ok.focus(),30);}
 function writeErr(err){const c=err&&err.code;toast(c==="permission-denied"?(isOwner?"Firebase blocked this. Your database rules are out of date: paste the latest firestore.rules into Firebase → Firestore → Rules and tap Publish.":MGR()?"Firebase blocked this. Ask Tim to update the database rules.":"You don't have permission to change that. Ask Tim or the superintendent."):"Couldn't save. Check your connection and try again.");}
 
 /* ---------- state ---------- */
@@ -1470,8 +1478,10 @@ function drawChat(stick){const list=document.getElementById("chatList");if(!list
 /* ===== RECENTLY DELETED ===== */
 const TRASH_DAYS=30;
 async function softDelete(col,id,label){const x=(S[col]||[]).find(d=>d.id===id);const data=Object.assign({},x||{});delete data.id;
-  await db.collection("trash").add({col,docId:id,data,label:label||"",by:myId||"",at:Date.now()});
-  await db.collection(col).doc(id).delete();logEvent("Deleted: "+(label||col),{ev:"delete"});toast("Deleted. You can restore it from Messages → Deleted.");}
+  const ref=await db.collection("trash").add({col,docId:id,data,label:label||"",by:myId||"",at:Date.now()});
+  await db.collection(col).doc(id).delete();logEvent("Deleted: "+(label||col),{ev:"delete"});
+  if(col==="jobs"&&taskJob===id)taskJob="";
+  toastAction("Deleted"+(label?" "+label:"")+".","Undo",()=>restoreTrash({id:ref.id,col,docId:id,data,label:label||""}),12000);}
 async function saveVersion(j,why){try{const data=Object.assign({},j);delete data.id;
   await db.collection("trash").add({col:"jobs",docId:j.id,kind:"version",data,label:j.name,why:why||"Before edit",by:myId||"",at:Date.now()});
   const old=S.trash.filter(t=>t.kind==="version"&&t.docId===j.id).sort((a,b)=>b.at-a.at).slice(9);for(const t of old)await db.collection("trash").doc(t.id).delete();}catch(e){}}
@@ -2757,7 +2767,27 @@ function jobEditMenu(j){if(!j)return;if(!MGR()){jobForm(j);return;}const go=f=>(
     opt("📎","Documents",dn?dn+" files":"Photos, prints, PDFs",()=>docsGallery(j.id)),
     cablesOf(j).length?opt("📊","Live Google Sheet",j.feedId?"On · refreshes every 5 minutes":"Keep a Google Sheet filled with this job's cable data",()=>liveSheetPanel(j.id)):null,
     opt("⏸","Hold or finish",heldOn(j,TODAY())?"On hold now":j.doneOn?"Done "+fmtS(j.doneOn):"Put on hold, or mark the job done",()=>holdOrDone(j)),
+    opt("⧉","Duplicate job","Copy it as a new job: same setup, fresh progress",()=>duplicateJob(j)),
+    h("button",{type:"button",class:"emenu",onclick:()=>confirmDelete(j)},h("span",{class:"ic","aria-hidden":"true"},"🗑"),h("span",{},h("strong",{style:"color:var(--over)"},"Delete job"),h("small",{},"Asks first. You can undo it, or restore it from Messages → Deleted")),h("span",{class:"go"},"›")),
     h("button",{type:"button",class:"linkbtn",style:"justify-self:start;margin-top:4px",onclick:go(()=>jobForm(j))},"Open the full form (everything at once)"))]);}
+function confirmDelete(j){const cn=cablesOf(j).length,tn=tasksOf(j).length;
+  confirmBox("Delete “"+j.name+"”?",(tn||cn?"Its "+[tn?tn+" task"+(tn>1?"s":""):"",cn?cn+" cables":""].filter(Boolean).join(" and ")+" will be deleted too. ":"")+"You can tap Undo right after, or restore it from Messages → Deleted for "+TRASH_DAYS+" days.","Delete job",
+    async()=>{closeSheet();try{await softDelete("jobs",j.id,j.name);render();}catch(e){writeErr(e);}});}
+function duplicateJob(j){
+  const nm=h("input",{id:"dupName",value:j.name+" (copy)",autocomplete:"off"}),st=h("input",{id:"dupStart",type:"date",value:TODAY()});
+  const cb=(id,l,on)=>{const c=h("input",{type:"checkbox",id,checked:on});return [c,h("label",{class:"check",for:id,style:"text-transform:none;letter-spacing:0"},c,l)];};
+  const [kCab,lCab]=cb("dupCab","Keep the cable / label list"+(cablesOf(j).length?" ("+cablesOf(j).length+")":""),true),[kCrew,lCrew]=cb("dupCrew","Keep the crew",true),[kProg,lProg]=cb("dupProg","Keep checked-off progress",false);
+  openSheet("Duplicate · "+j.name,[h("div",{class:"field full"},h("label",{for:"dupName"},"New job name"),nm),h("div",{class:"field"},h("label",{for:"dupStart"},"Start"),st),
+    h("div",{class:"field full stack",style:"gap:6px"},lCab,lCrew,lProg),
+    h("p",{class:"status full",style:"margin:0"},"Phases, tasks, cabinets and steps are copied. Tasks start fresh: not done, no holds.")],
+    async()=>{const name=nm.value.trim();if(!name){formErr("Give the new job a name.");return false;}
+      const d=JSON.parse(JSON.stringify(j));delete d.id;["doneOn","hold","holds","feedId","crewDone","closedAt","crewLog"].forEach(k=>delete d[k]);
+      d.name=name;d.start=st.value||TODAY();d.createdAt=Date.now();d.updatedAt=Date.now();d.by=myId||"";d.addedBy=myId||"";d.addedAt=Date.now();
+      if(!kCab.checked){d.cables=[];}if(!kProg.checked||!kCab.checked)d.marks={};
+      const crew=kCrew.checked?crewOn(j,refDay(j)):[];d.crew=crew;
+      d.tasks=tasksOf(j).map(t=>{const o=JSON.parse(JSON.stringify(t));["doneOn","startedOn","hold","holds","doneBy","doneAt","crewDone","reviewedAt","reviewedBy"].forEach(k=>delete o[k]);o.doneOn="";o.startedOn="";o.crewLog={};o.crew=kCrew.checked?(o.crew||[]):[];return o;});
+      const ref=await db.collection("jobs").add(d);logEvent("Duplicated: "+j.name+" → "+name,{ev:"cables",jobId:ref.id});lastNewJob=Object.assign({id:ref.id},d);
+      nextAfterSave=()=>{toast("Copied as “"+name+"”");setTimeout(()=>{if(S.jobs.some(x=>x.id===ref.id)){taskJob=ref.id;setTab("tasks",true);}},700);};});}
 function holdOrDone(j){const d=TODAY();openView(j.name,[h("div",{class:"full stack"},
   heldOn(j,d)?h("button",{type:"button",class:"btn",onclick:()=>{closeSheet();resumeHold(j,null);}},"Resume job"):h("button",{type:"button",class:"btn ghost",onclick:()=>{closeSheet();holdForm(j,null);}},"Put the whole job on hold"),
   h("button",{type:"button",class:"btn ghost",onclick:()=>{closeSheet();setDone(j,!j.doneOn);}},j.doneOn?"Reopen job":"Mark job done"),
