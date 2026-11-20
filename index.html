@@ -1184,7 +1184,7 @@ function taskRow(j,t,d){
   const m=MGR(),btn=(l,f,pri)=>h("button",{type:"button",class:"btn "+(pri?"":"ghost ")+"small",onclick:f},l);
   return h("div",{class:"titem"+(st==="done"?" done":"")},
     h("span",{class:"st "+st},lbl),
-    h("span",{class:"nm"},t.name,(()=>{const ps=[step?cablePill(j,t):null,docPill(j,t,false)].filter(Boolean);return ps.length?h("span",{class:"pills"},ps):null;})(),h("small",{},sub)),
+    h("span",{class:"nm"},t.name,(()=>{const ps=[t.scope?scopePill(j,t):step?cablePill(j,t):null,docPill(j,t,false)].filter(Boolean);return ps.length?h("span",{class:"pills"},ps):null;})(),h("small",{},sub)),
     h("span",{class:"ac"},
       m&&st==="hold"&&t.hold?btn("Resume",()=>resumeHold(j,t),true):null,
       m&&st==="wait"?btn("Start now",()=>startEarly(j,t)):null,
@@ -1210,15 +1210,15 @@ function jobPanel(j){
   const tk=tasksOf(j),ph=phasesOf(j);
   if(readyToClose(j))box.append(closePrompt(j));
   if(needsScan(j)){box.prepend(scanBar(j));if(MGR()&&missingScanSteps(j))setTimeout(()=>ensureScanSteps(S.jobs.find(x=>x.id===j.id)),0);}
-  {const cst=cabinetStrip(j);if(cst)box.append(cst);}
+  {const cst=ph.some(p=>p.cab)?null:cabinetStrip(j);if(cst)box.append(cst);}
   if(!tk.length){box.append(h("div",{class:"empty"},h("strong",{},"No tasks yet"),m?"Edit the job to add tasks, or tap “Standard cable run” in the job form.":"A lead hasn't broken this job into tasks yet."));}
   else{
     const isDone=t=>!!t.doneOn;
     const sect=(title,list,pc)=>{if(!list.length)return;const nd=list.filter(isDone).length,open=list.filter(t=>!isDone(t));
       box.append(h("div",{class:"phasehd",style:"display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"},h("span",{},title),
-          pc?h("button",{type:"button",class:"linkbtn",style:"color:"+(pc.n===pc.of?"var(--ok)":"var(--muted)"),onclick:()=>cableTracker(j.id)},pc.n+"/"+pc.of+" cables"+(pc.n===pc.of?" ✓":" ›")):h("span",{style:"color:var(--muted)"},nd+"/"+list.length+" done")),
+          pc?h("button",{type:"button",class:"linkbtn",style:"color:"+(pc.n===pc.of?"var(--ok)":"var(--muted)"),onclick:()=>cableTracker(j.id,pc.cab?pc.cab+"-":undefined)},pc.n+"/"+pc.of+" cables"+(pc.cab?" done":"")+(pc.n===pc.of?" ✓":" ›")):h("span",{style:"color:var(--muted)"},nd+"/"+list.length+" done")),
         open.length?h("div",{class:"tlist"},open.map(t=>taskRow(j,t,d))):h("div",{class:"status",style:"padding:6px 0 10px"},"All done ✓"));};
-    ph.forEach((p,i)=>sect("Phase "+(i+1)+" · "+p.name,tk.filter(t=>t.phase===p.id),phaseCables(j,p)));
+    ph.forEach((p,i)=>sect(p.cab?"Cabinet "+p.cab:"Phase "+(i+1)+" · "+p.name,tk.filter(t=>t.phase===p.id),phaseCables(j,p)));
     sect(ph.length?"Other tasks":"Tasks",tk.filter(t=>!ph.some(p=>p.id===t.phase)));
     const done=tk.filter(isDone).sort((a,b)=>(b.doneAt||parseD(b.doneOn).getTime())-(a.doneAt||parseD(a.doneOn).getTime()));
     if(done.length){const nr=done.filter(t=>!t.reviewedAt).length,isOpen=openDoneJobs.has(j.id);
@@ -2749,6 +2749,7 @@ function jobEditMenu(j){if(!j)return;if(!MGR()){jobForm(j);return;}const go=f=>(
     opt("👷","Crew","Add or move people · "+crewN+" on it now",()=>jobForm(j,"crew"),true),
     opt("📋","Tasks & phases",tk.length?nd+"/"+tk.length+" done · add, rename, reorder":"Add tasks",()=>jobForm(j,"tasks")),
     opt("📝","Details","Name, dates, how long, techs needed, priority, notes",()=>jobForm(j,"details")),
+    cabsOf(j).length?opt("🗂","Set up by cabinet & system",phasesOf(j).some(p=>p.cab)?"Rebuild: each cabinet with its own systems":"Each cabinet gets its own BMS, Cameras, WAPs…",()=>organizeByCabinet(j),!phasesOf(j).some(p=>p.cab)):null,
     opt("🗄","Cabinets",cabsOf(j).length?cabsOf(j).join(", "):"IDFs, racks or rooms this job feeds",()=>cabinetsForm(j)),
     opt("🏷","Load label workbook",cn?"Add or update labels from the Excel file":"Excel file with a sheet per cabinet and system",()=>cableJobSetup(j),!cn),
     opt("🧵","Cables & steps",cn?cn+" cables · steps, profile, material":"Type or paste a cable list instead",()=>cableEditor(j)),
@@ -3965,12 +3966,12 @@ const WIZ_PHASES=["Pull","Rough-in","Terminate & dress","Test & certify","Closeo
 const WIZ_TASKS={"pull":["Pull","Set up spools","Dress at rack"],"rough-in":["Hang J-hooks","Sleeves","Back boxes"],"terminate & dress":["Dress","Terminate","Label"],"test & certify":["Test","Certify","Fix fails"],"closeout":["Test reports","As-builts","Punch list"]};
 const notPerCable=n=>/close|punch|walk|as-?built|report|rough/i.test(n);
 function jobWizard(){
-  const W={cabs:[],kind:"",name:"",start:TODAY(),weeks:2,recs:null,syss:[],sum:null,warn:[],fiber:null,phases:[],crew:new Set()};
+  const W={steps:CAB_STEPS_DEFAULT.map(n=>({name:n})),cabs:[],kind:"",name:"",start:TODAY(),weeks:2,recs:null,syss:[],sum:null,warn:[],fiber:null,phases:[],crew:new Set()};
   let scr="kind",pi=0;
   const body=h("div",{class:"full stack",style:"gap:12px"});
   const nid=p=>p+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
   const isCable=()=>W.kind==="cat6"||W.kind==="fiber";
-  const order=()=>["kind","basics",...(isCable()?["cables","cabinets"]:[]),"phase","crew","review"];
+  const order=()=>W.kind==="cat6"?["kind","basics","cables","cabinets","steps","crew","review"]:["kind","basics",...(isCable()?["cables","cabinets"]:[]),"phase","crew","review"];
   const go=s=>{scr=s;draw();const sh=$(".sheet");if(sh)sh.scrollTop=0;};
   const next=()=>{const o=order();go(o[o.indexOf(scr)+1]);};
   const back=()=>{if(scr==="phase"&&pi>0){pi--;draw();return;}const o=order();go(o[Math.max(0,o.indexOf(scr)-1)]);};
@@ -4016,6 +4017,10 @@ function jobWizard(){
       if(!W.cabs.length&&W.fiber)W.cabs=[...new Set(W.fiber.map(r=>r.rack).filter(Boolean))].sort(natCmp);
       body.append(...q("Which cabinets does this job feed?","IDFs, racks or rooms. "+(W.recs||W.fiber?"Filled in from your file; add or remove any.":"Type them in, like 1.14, 1.15.")),cabinetEditor(W.cabs),
         nav("Next",null,W.cabs.length?null:h("button",{type:"button",class:"btn ghost",onclick:next},"Skip")));return;}
+    if(scr==="steps"){const per=W.cabs.map(cb=>{const s=W.recs?[...new Set(W.recs.filter(r=>r.rack===cb).map(r=>r.type))]:[];return cb+": "+(s.length?s.sort((a,b)=>sysRank({},a)-sysRank({},b)).join(", "):SYS_ORDER_DEFAULT.join(", "));});
+      body.append(...q("What does each system go through?","Every cabinet gets its own systems, and each system gets these steps. You check them off per pull."),
+        stepListEditor(W.steps),W.cabs.length?h("p",{class:"status",style:"margin:0"},per.join(" · ")):null,
+        nav("Next",()=>{if(!W.steps.length){toast("Add at least one step");return false;}}));return;}
     if(scr==="phase"){
       if(!W.phases[pi])W.phases[pi]={id:nid("p"),name:"",tasks:[],perCable:isCable()};
       const p=W.phases[pi],ord=["first","second","third","fourth","fifth","sixth","seventh","eighth"][pi]||("#"+(pi+1));
@@ -4048,13 +4053,17 @@ function jobWizard(){
         h("div",{},h("strong",{},W.name)," · starts "+fmtS(W.start)+" · about "+W.weeks+" week"+(W.weeks>1?"s":"")),
         isCable()?h("div",{},ncab?ncab+(W.kind==="cat6"?" labels":" cables"):"No cables yet (you can load them later)"):null,
         isCable()&&W.cabs.length?h("div",{},"Cabinets: "+W.cabs.join(", ")):null,
-        h("ol",{style:"margin:0;padding-left:20px"},W.phases.map(p=>h("li",{},h("strong",{},p.name),p.tasks.length?": "+p.tasks.join(", "):"",isCable()&&p.perCable?h("span",{class:"status"}," · per "+(W.kind==="cat6"?"pull":"cable")):null))),
+        W.kind==="cat6"?h("div",{},"Each cabinet → its systems → "+W.steps.map(x=>x.name).join(" → ")):null,
+        W.kind==="cat6"?null:h("ol",{style:"margin:0;padding-left:20px"},W.phases.map(p=>h("li",{},h("strong",{},p.name),p.tasks.length?": "+p.tasks.join(", "):"",isCable()&&p.perCable?h("span",{class:"status"}," · per "+(W.kind==="cat6"?"pull":"cable")):null))),
         h("div",{},W.crew.size?W.crew.size+" on the crew: "+[...W.crew].map(id=>(techById(id)||{}).name||"").filter(Boolean).join(", "):"No crew picked yet")),
         nav(null,null,h("button",{type:"button",class:"btn",onclick:create},"Create job")));}}
   async function create(){if(!db)return;
-    const phases=W.phases.map(p=>({id:p.id,name:p.name.trim(),afterPrev:true}));
-    const tasks=[];W.phases.forEach(p=>{(p.tasks.length?p.tasks:[p.name]).forEach(n=>tasks.push({id:nid("t"),name:n,phase:p.id,doneOn:"",after:[],startedOn:"",crew:[],crewLog:{},addedBy:myId||"",addedAt:Date.now()}));});
-    const steps=isCable()?W.phases.filter(p=>p.perCable).map(p=>({id:p.id,name:p.name.trim()})):[];
+    let phases=W.phases.map(p=>({id:p.id,name:p.name.trim(),afterPrev:true}));
+    let tasks=[];W.phases.forEach(p=>{(p.tasks.length?p.tasks:[p.name]).forEach(n=>tasks.push({id:nid("t"),name:n,phase:p.id,doneOn:"",after:[],startedOn:"",crew:[],crewLog:{},addedBy:myId||"",addedAt:Date.now()}));});
+    let steps=isCable()?W.phases.filter(p=>p.perCable).map(p=>({id:p.id,name:p.name.trim()})):[];
+    if(W.kind==="cat6"){steps=W.steps.map(x=>({id:nid("s"),name:x.name.trim()}));const sy={};
+      W.cabs.forEach(cb=>{const s=W.recs?[...new Set(W.recs.filter(r=>r.rack===cb).map(r=>r.type))]:[];sy[cb]=(s.length?s:SYS_ORDER_DEFAULT.slice()).sort((a,b)=>sysRank({},a)-sysRank({},b)||natCmp(a,b));});
+      const plan=cabSysPlan(W.cabs,sy);phases=plan.phases;tasks=plan.tasks;}
     let cables=[];
     if(W.kind==="cat6"&&W.recs)cables=W.recs.map(r=>{const o={id:nid("c"),name:r.name,rack:r.rack,type:r.type};if(r.from)o.from=r.from;return o;});
     if(W.kind==="fiber"&&W.fiber)cables=W.fiber.map(r=>{const o={id:nid("c"),name:String(r.name).trim()};["rack","pull","len","type","from","to","note"].forEach(k=>{if(r[k]&&String(r[k]).trim())o[k]=String(r[k]).trim();});return o;});
@@ -4086,8 +4095,56 @@ function cabinetStrip(j){const cabs=cabsOf(j);if(!cabs.length)return null;const 
     const dn=ss.length?gl.filter(c=>ss.every(st=>markOf(j,c.id,st.id))).length:0,all=gl.length&&dn===gl.length;
     return h("button",{type:"button",class:"chipbtn",style:all?"border-color:var(--ok);color:var(--ok)":"",title:"Open "+cb+"'s cables",onclick:()=>gl.length?cableTracker(j.id,cb+"-"):(MGR()&&cabinetsForm(j))},
       cb+(gl.length?" · "+dn+"/"+gl.length+(all?" ✓":""):""));}));}
+/* ===== CABINET → SYSTEM → STEPS =====
+   Each cabinet is a phase (p.cab, no waiting on the one before: you go where pathways are ready).
+   Each system in it is a task (t.scope={rack,type}). The cable steps (Pull → Terminate & dress → Test & certify)
+   show as progress on that task, counted from its own cables. */
+const CAB_STEPS_DEFAULT=["Pull","Terminate & dress","Test & certify"];
+function scopeCables(j,sc){return cablesOf(j).filter(c=>c.rack===sc.rack&&(!sc.type||c.type===sc.type));}
+function scopeDone(j,sc){const gl=scopeCables(j,sc),ss=stepsOf(j);return {gl,done:ss.length?gl.filter(c=>ss.every(st=>markOf(j,c.id,st.id))).length:0};}
+function scopePill(j,t){const sc=t.scope;if(!sc)return null;const gl=scopeCables(j,sc),ss=stepsOf(j);if(!gl.length||!ss.length)return null;
+  const parts=ss.map(st=>{const n=gl.filter(c=>markOf(j,c.id,st.id)).length;return (st.name.split(/[ &]/)[0])+" "+n+"/"+gl.length;});
+  const all=ss.every(st=>gl.every(c=>markOf(j,c.id,st.id)));
+  return h("button",{type:"button",class:"tpill cab"+(all?" done":""),title:"Open "+sc.rack+" "+(sc.type||"")+" cables",onclick:e=>{e.stopPropagation();cableTracker(j.id,(sc.rack+" "+(sc.type||"")).trim());}},(all?"✓ ":"")+parts.join(" · "));}
+function cabSysPlan(cabs,syss){const phases=[],tasks=[];const nid=p=>p+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+  cabs.forEach(cb=>{const p={id:nid("p"),name:cb,cab:cb,afterPrev:false};phases.push(p);
+    (syss[cb]||[]).forEach(sy=>tasks.push({id:nid("t"),name:sy,phase:p.id,scope:{rack:cb,type:sy},doneOn:"",after:[],startedOn:"",crew:[],crewLog:{},addedBy:myId||"",addedAt:Date.now()}));});
+  return {phases,tasks};}
+function systemsByCab(j,cabs){const out={};cabs.forEach(cb=>{const s=[...new Set(cablesOf(j).filter(c=>c.rack===cb).map(c=>c.type).filter(Boolean))].sort((a,b)=>sysRank(j,a)-sysRank(j,b)||natCmp(a,b));
+  out[cb]=s.length?s:sysOrderOf(j).slice();});return out;}
+function stepListEditor(list){/* list of {id?,name}; keeps ids so checked-off cables stay checked */
+  const box=h("div",{class:"stack",style:"gap:6px"}),chips=h("div",{class:"chips",style:"gap:6px"}),inp=h("input",{id:"stAdd",placeholder:"Add a step, then Enter",autocomplete:"off"});
+  const add=n=>{n=String(n||"").trim();if(n&&!list.some(x=>x.name.toLowerCase()===n.toLowerCase()))list.push({name:n});draw();};
+  inp.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();add(inp.value);inp.value="";}});
+  const sugg=h("div",{class:"chips",style:"gap:6px"});
+  function draw(){chips.textContent="";list.forEach((s_,i)=>chips.append(h("span",{class:"chip"},(i+1)+". "+s_.name,
+      h("button",{type:"button",class:"iconbtn","aria-label":"Move "+s_.name+" earlier",disabled:i===0,onclick:()=>{[list[i-1],list[i]]=[list[i],list[i-1]];draw();}},"↑"),
+      h("button",{type:"button",class:"iconbtn","aria-label":"Remove "+s_.name,onclick:()=>{list.splice(i,1);draw();}},"✕"))));
+    if(!list.length)chips.append(h("span",{class:"status"},"No steps yet"));
+    sugg.textContent="";["Pull","Dress","Terminate","Label","Terminate & dress","Test & certify","Test"].filter(n=>!list.some(x=>x.name===n)).forEach(n=>sugg.append(h("button",{type:"button",class:"chipbtn",onclick:()=>add(n)},"+ "+n)));}
+  box.append(chips,sugg,inp);draw();return box;}
+function organizeByCabinet(j){
+  const cabs=cabsOf(j);if(!cabs.length){toast("Add cabinets first (Edit job → Cabinets) or load the label workbook.");return;}
+  const syss=systemsByCab(j,cabs);
+  const cur=stepsOf(j).map(s=>({id:s.id,name:s.name,split:s.split}));
+  const steps=cur.length&&!(cur.length===5&&cur[0].name==="Pulled"&&!cablesOf(j).some(c=>cur.some(s=>markOf(j,c.id,s.id))))?cur:CAB_STEPS_DEFAULT.map(n=>({name:n}));
+  const nT=cabs.reduce((a,c)=>a+syss[c].length,0);
+  openSheet("Set up by cabinet · "+j.name,[
+    h("div",{class:"field full"},h("p",{style:"margin:0"},h("strong",{},cabs.length+" cabinets × their systems = "+nT+" tasks")),
+      h("p",{class:"status",style:"margin:0"},cabs.map(c=>c+": "+syss[c].join(", ")).join(" · "))),
+    h("div",{class:"field full"},h("span",{class:"flabel"},"Steps each system goes through"),stepListEditor(steps)),
+    h("p",{class:"status full",style:"margin:0"},"This replaces the job's current phases and tasks. Cables, checked-off steps and the job's crew stay. You can undo it from the job's version history.")],
+    async()=>{const ss=steps.filter(x=>(x.name||"").trim());if(!ss.length){formErr("Add at least one step.");return false;}
+      const nid=p=>p+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+      const st=ss.map(x=>({id:x.id||nid("s"),name:x.name.trim(),split:!!x.split}));
+      const plan=cabSysPlan(cabs,syss);
+      await saveVersion(j,"Before cabinet setup");
+      await db.collection("jobs").doc(j.id).update({phases:plan.phases,tasks:plan.tasks,steps:st,cabinets:cabs,kind:j.kind||"cat6",updatedAt:Date.now()});
+      logEvent("Set up by cabinet: "+j.name+" ("+plan.tasks.length+" tasks)",{ev:"cables",jobId:j.id});});
+  $(".sheet").classList.add("wide");}
+
 /* phase progress from cable steps that share the phase's id */
-function phaseCables(j,p){const cs=cablesOf(j);if(!cs.length||!stepsOf(j).some(s=>s.id===p.id))return null;return {n:stepCount(j,p.id),of:cs.length};}
+function phaseCables(j,p){if(p.cab){const r=scopeDone(j,{rack:p.cab});return r.gl.length?{n:r.done,of:r.gl.length,cab:p.cab}:null;}const cs=cablesOf(j);if(!cs.length||!stepsOf(j).some(s=>s.id===p.id))return null;return {n:stepCount(j,p.id),of:cs.length};}
 
 /* ===== ONE-SCREEN CABLE JOB SETUP =====
    New job: name + start + label workbook + steps → Create, then straight to Build pulls.
