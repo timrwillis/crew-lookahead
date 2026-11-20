@@ -2736,7 +2736,8 @@ function jobEditMenu(j){if(!j)return;if(!MGR()){jobForm(j);return;}const go=f=>(
     opt("👷","Crew","Add or move people · "+crewN+" on it now",()=>jobForm(j,"crew"),true),
     opt("📋","Tasks & phases",tk.length?nd+"/"+tk.length+" done · add, rename, reorder":"Add tasks",()=>jobForm(j,"tasks")),
     opt("📝","Details","Name, dates, how long, techs needed, priority, notes",()=>jobForm(j,"details")),
-    opt("🧵","Cables & steps",cn?cn+" cables":"Add or import a cable list",()=>cableEditor(j)),
+    opt("🧵","Cables & steps",cn?cn+" cables":"Add or import a cable list or label workbook",()=>cableEditor(j)),
+    cablesOf(j).some(c=>c.rack&&c.type)?opt("🧩","Build pulls",(()=>{const cs=cablesOf(j).filter(c=>c.rack&&c.type),n=cs.filter(c=>!c.pull).length;return n?n+" of "+cs.length+" labels not in a pull yet":"Every label is in a pull";})(),()=>pullBuilder(j.id)):null,
     opt("📎","Documents",dn?dn+" files":"Photos, prints, PDFs",()=>docsGallery(j.id)),
     cablesOf(j).length?opt("📊","Live Google Sheet",j.feedId?"On · refreshes every 5 minutes":"Keep a Google Sheet filled with this job's cable data",()=>liveSheetPanel(j.id)):null,
     opt("⏸","Hold or finish",heldOn(j,TODAY())?"On hold now":j.doneOn?"Done "+fmtS(j.doneOn):"Put on hold, or mark the job done",()=>holdOrDone(j)),
@@ -3615,6 +3616,7 @@ function cableTracker(jid){
         /* tap a step to check it off on many cables from one list */
         return can?h("button",{type:"button",class:"pr prbtn steprow",title:"Check off "+st.name+" on several cables",onclick:()=>stepMarkSheet(j.id,st.id)},inner):h("div",{class:"pr"},inner);})),
       can?h("div",{class:"status",style:"margin:-2px 0 0"},"Tap a step to check it off on several cables at once."):null);
+    {const cp=cabinetProgress(j);if(cp)box.append(cp);}
     const have=Object.keys(GROUPS).filter(k=>cs.some(c=>cabVal(c,k)));
     if(trackSort&&!have.includes(trackSort)&&trackSort!=="name")trackSort="";
     const sortSel=h("select",{id:"ctSort","aria-label":"Sort by",style:"font:inherit;font-size:.85rem;padding:5px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink)"},Object.keys(SORTS).filter(k=>!k||k==="name"||have.includes(k)).map(k=>h("option",{value:k,selected:trackSort===k},"Sort: "+SORTS[k].toLowerCase())));
@@ -3629,6 +3631,7 @@ function cableTracker(jid){
       h("div",{style:"display:flex;gap:10px;align-items:center;flex-wrap:wrap"},sortSel,have.length?gs:null,h("label",{class:"check",for:"ctRemain",style:"text-transform:none;letter-spacing:0"},rc,"Only unfinished"),h("span",{id:"ctPending",class:"status"})),
       h("div",{style:"display:flex;gap:6px;flex-wrap:wrap"},can?h("button",{class:"btn ghost small",type:"button",onclick:()=>scanFindCable(j.id)},(isLaptop()?"⌨ Scan a cable":"📷 Scan a cable")):null,h("button",{class:"btn ghost small",type:"button",onclick:()=>{closeSheet();setTimeout(()=>cableReport(j.id),60);}},"📅 Dates & report"),
         h("button",{class:"btn ghost small",type:"button",onclick:()=>{closeSheet();setTimeout(()=>cableLabels(j.id),60);}},"🏷 Labels"),
+        MGR()&&cs.some(c=>c.rack&&c.type)?h("button",{class:"btn ghost small",type:"button",onclick:()=>{closeSheet();setTimeout(()=>pullBuilder(j.id),60);}},"🧩 Build pulls"):null,
         MGR()?h("button",{class:"btn ghost small",type:"button",onclick:()=>{closeSheet();cableEditor(j);}},"Edit cables & steps"):null)));
     const sub=c=>[trackGroup!=="row"&&rowOf(c)&&!/row/i.test((c.pull||"")+(c.to||""))?rowOf(c):"",trackGroup!=="rack"&&c.rack?"Rack "+c.rack:"",trackGroup!=="pull"&&c.pull&&!/row/i.test(c.pull)?"Pull "+c.pull:"",trackGroup!=="len"&&c.len?c.len+(/^\d+(\.\d+)?$/.test(String(c.len).trim())?" m":""):""].filter(Boolean).join(" · ");
     const detail=c=>[c.type,c.from||c.to?[c.from,c.to].filter(Boolean).join(" → "):"",c.note].filter(Boolean).join(" · ");
@@ -3752,7 +3755,7 @@ function cableLabels(jid){const m=MGR();let q="",edits={},fmt=null;
 
 /* ---- editor ---- */
 function cableEditor(j){
-  let steps=stepsOf(j).map(x=>Object.assign({},x)),cables=cablesOf(j).map(x=>Object.assign({},x)),typeMat=Object.assign({},j.typeMat||{}),slack=(j.slack===0||+j.slack>0)?+j.slack:10;
+  let sysOrder=sysOrderOf(j).slice(),steps=stepsOf(j).map(x=>Object.assign({},x)),cables=cablesOf(j).map(x=>Object.assign({},x)),typeMat=Object.assign({},j.typeMat||{}),slack=(j.slack===0||+j.slack>0)?+j.slack:10;
   const nid=p=>p+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
   const stepBox=h("div",{class:"stack"}),cabBox=h("div",{class:"cgrid"}),cabCount=h("span",{class:"status"}),matBox=h("div",{});
   function drawSteps(){stepBox.textContent="";
@@ -3788,13 +3791,32 @@ function cableEditor(j){
   const bulkApply=()=>{const a=Math.max(1,parseInt(bf.value)||1),b=Math.min(cables.length,parseInt(bt.value)||0);if(!cables.length||b<a){toast("Check the row numbers.");return;}
     for(let i=a-1;i<b;i++)cables[i][bk.value]=bv.value;drawCables();drawMat();toast("Set "+(b-a+1)+" cables");};
   const impWrap=h("div",{hidden:true});impWrap.append(importerBox(CABLE_FIELDS,recs=>{addRecs(recs,false);impWrap.hidden=true;},{go:"Add these cables"}));
-  drawSteps();drawCables();drawMat();
+  const lwbWrap=h("div",{hidden:true});lwbWrap.append(labelWorkbookBox(j,(recs,syss)=>{syss.forEach(x=>{if(!sysOrder.includes(x))sysOrder.push(x);});drawSys();addRecs(recs,false);lwbWrap.hidden=true;}));
+  const sysBox=h("div",{class:"chips",style:"gap:6px;align-items:center"});
+  function drawSys(){sysBox.textContent="";sysOrder.forEach((x,i)=>sysBox.append(h("span",{class:"chip"},(i+1)+". "+x,
+      h("button",{type:"button",class:"iconbtn","aria-label":"Pull "+x+" earlier",disabled:i===0,onclick:()=>{[sysOrder[i-1],sysOrder[i]]=[sysOrder[i],sysOrder[i-1]];drawSys();}},"↑"),
+      h("button",{type:"button",class:"iconbtn","aria-label":"Remove "+x,onclick:()=>{sysOrder.splice(i,1);drawSys();}},"✕"))));
+    const add=h("input",{placeholder:"+ system",style:"width:110px","aria-label":"Add a system"});add.addEventListener("change",()=>{const v=sysName(add.value);if(v&&!sysOrder.includes(v))sysOrder.push(v);drawSys();});sysBox.append(add);}
+  const profBox=h("div",{class:"bulk"});
+  function drawProf(){profBox.textContent="";const ps=profilesCache||[];
+    const sel=h("select",{id:"cbProf","aria-label":"Job profile"},h("option",{value:""},ps.length?"Pick a saved profile…":"No saved profiles yet"),ps.map(p=>h("option",{value:p.id},p.name)));
+    const nm=h("input",{id:"cbProfName",placeholder:"Profile name, e.g. Cat6 device drops",style:"min-width:200px"});
+    profBox.append(sel,h("button",{type:"button",class:"btn ghost small",disabled:!ps.length,onclick:()=>{const pr=ps.find(x=>x.id===sel.value);if(!pr){toast("Pick a profile first");return;}
+        if(Array.isArray(pr.steps)&&pr.steps.length){steps=pr.steps.map(x=>({id:nid("s"),name:x.name,split:!!x.split}));drawSteps();}
+        if(Array.isArray(pr.sysOrder)&&pr.sysOrder.length){sysOrder=pr.sysOrder.slice();drawSys();}
+        if(pr.typeMat)typeMat=Object.assign({},pr.typeMat);if(pr.slack===0||+pr.slack>0)slack=+pr.slack;drawMat();nm.value=pr.name;toast("Used “"+pr.name+"”. Tap Save to keep it.");}},"Use it"),
+      nm,h("button",{type:"button",class:"btn ghost small",onclick:async()=>{if(await saveProfile(nm.value,{steps:steps.filter(x=>(x.name||"").trim()).map(x=>({name:x.name.trim(),split:isSplit(x)})),sysOrder,typeMat,slack}))drawProf();}},"Save as profile"));}
+  if(!profilesCache)loadProfiles().then(drawProf);
+  drawSteps();drawCables();drawMat();drawSys();drawProf();
   openSheet("Cables & steps · "+j.name,[
+    h("div",{class:"field full"},h("span",{class:"flabel"},"Job profile"),h("p",{class:"status",style:"margin:0"},"Start from a setup you saved before, or save this one (steps, system order, material) for the next job."),profBox),
+    h("div",{class:"field full"},h("span",{class:"flabel"},"Systems, in the order you pull them into each cabinet"),sysBox),
     h("div",{class:"field full"},h("span",{class:"flabel"},"Steps for every cable (in order)"),stepBox,
       h("div",{class:"presets"},h("button",{type:"button",class:"btn small",onclick:()=>STD_STEPS.forEach(addStep)},"+ Pulled → Dressed → Labeled → Ported → Tested"),STEP_PRESETS.map(n=>h("button",{type:"button",class:"btn ghost small",onclick:()=>addStep(n)},"+ "+n)),
         h("button",{type:"button",class:"btn ghost small",onclick:()=>{steps.push({id:nid("s"),name:"New step"});drawSteps();}},"+ Other"))),
     h("div",{class:"field full"},h("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"},h("span",{class:"flabel"},"Cables in pull order · ",cabCount),
-      h("button",{type:"button",class:"btn small",onclick:()=>{impWrap.hidden=!impWrap.hidden;}},"Import from Excel / Sheets")),impWrap,cabBox),
+      h("div",{style:"display:flex;gap:6px;flex-wrap:wrap"},h("button",{type:"button",class:"btn small",onclick:()=>{lwbWrap.hidden=!lwbWrap.hidden;impWrap.hidden=true;}},"Import label workbook"),
+        h("button",{type:"button",class:"btn ghost small",onclick:()=>{impWrap.hidden=!impWrap.hidden;lwbWrap.hidden=true;}},"Import from Excel / Sheets"))),lwbWrap,impWrap,cabBox),
     h("div",{class:"field full"},h("span",{class:"flabel"},"Set a group for many cables at once"),h("div",{class:"bulk"},h("span",{class:"status"},"Rows"),bf,h("span",{class:"status"},"to"),bt,bk,bv,h("button",{type:"button",class:"btn ghost small",onclick:bulkApply},"Apply"))),
     h("div",{class:"field full"},h("label",{for:"cbPaste"},"Paste a simple list"),paste,h("div",{},h("button",{type:"button",class:"btn ghost small",onclick:()=>{addRecs(paste.value.split(/\r?\n|,|\t/).map(x=>({name:x})));paste.value="";}},"Add these cables"))),
     h("div",{class:"field full"},h("span",{class:"flabel"},"Or make a numbered range"),h("div",{class:"rangegen"},
@@ -3802,11 +3824,137 @@ function cableEditor(j){
       h("button",{type:"button",class:"btn ghost small",onclick:genRange},"Add range"))),
     h("div",{class:"field full"},h("span",{class:"flabel"},"Material check (from your Material list)"),matBox)],
     async()=>{const ss=steps.filter(x=>(x.name||"").trim()).map(x=>({id:x.id,name:x.name.trim(),split:isSplit(x)}));
-      const cc=cables.filter(x=>(x.name||"").trim()).map(x=>{const o={id:x.id,name:x.name.trim()};["rack","pull","len","type","from","to","note"].forEach(k=>{if(x[k])o[k]=String(x[k]).trim();});return o;});
-      await saveVersion(j,"Before cable edit");await db.collection("jobs").doc(j.id).update({steps:ss,cables:cc,typeMat,slack,updatedAt:Date.now()});
+      const cc=cables.filter(x=>(x.name||"").trim()).map(x=>{const o={id:x.id,name:x.name.trim()};["rack","pull","len","type","from","to","note"].forEach(k=>{if(x[k])o[k]=String(x[k]).trim();});if(Array.isArray(x.label)&&x.label.some(Boolean))o.label=x.label;return o;});
+      await saveVersion(j,"Before cable edit");await db.collection("jobs").doc(j.id).update({steps:ss,cables:cc,typeMat,slack,sysOrder:sysOrder.filter(Boolean),updatedAt:Date.now()});
       logEvent("Cables updated: "+j.name+" ("+cc.length+" cables, "+ss.map(x=>x.name).join(" → ")+")",{ev:"cables",jobId:j.id});});
   $(".sheet").classList.add("wide");
 }
+/* ===== LABEL WORKBOOK + PULLS =====
+   Label workbook: one sheet per cabinet and system ("1.14 BMS", "1.14 Cameras", "1.14 WAPS", "1.14 AP Labels").
+   Each row is a label like 1.14-1.801, sometimes with the device next to it (CDCF-22A-01, AP name).
+   Cabinet goes in c.rack, system in c.type, device in c.from. A pull is c.pull = "1.14 BMS · Rows 1-19". */
+const SYS_ORDER_DEFAULT=["BMS","Cameras","WAPs"];
+const LABEL_RE=/^\d+(\.\d+)*-\d+(\.\d+)+$/;
+function sysName(raw){const t=String(raw||"").trim();if(/bms/i.test(t))return "BMS";if(/cam/i.test(t))return "Cameras";if(/wap|\bap\b|access/i.test(t))return "WAPs";return t;}
+function sysOrderOf(j){return Array.isArray(j&&j.sysOrder)&&j.sysOrder.length?j.sysOrder:SYS_ORDER_DEFAULT;}
+const sysRank=(j,s)=>{const o=sysOrderOf(j),i=o.indexOf(s);return i<0?99:i;};
+const labelNum=n=>{const m=String(n||"").match(/(\d+)\s*$/);return m?parseInt(m[1],10):NaN;};
+function pullKey(idf,sys,name){return idf+" "+sys+" · "+String(name||"").trim();}
+function pullShort(c){const p=String(c.pull||""),i=p.indexOf(" · ");return i>=0?p.slice(i+3):p;}
+/* read every sheet; returns {recs, sum:{idf:{sys:n}}, warn:[]} */
+function readLabelWorkbook(wb){const recs=new Map(),sum={},warn=[];
+  wb.SheetNames.forEach(sn=>{const m=sn.trim().match(/^([\d.]+)\s+(.+)$/);if(!m){warn.push("Skipped sheet “"+sn+"” (name isn't like “1.14 BMS”).");return;}
+    const idf=m[1],sys=sysName(m[2]);
+    const rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:false,defval:""}).map(r=>r.map(x=>String(x==null?"":x).trim()).filter(Boolean)).filter(r=>r.length);
+    let wrong=0,n=0;
+    rows.forEach(r=>{let lab=r.find(x=>LABEL_RE.test(x));if(!lab&&r.length===1)lab=r[0];if(!lab)return;
+      const dev=r.find(x=>x!==lab)||"";
+      if(LABEL_RE.test(lab)&&lab.split("-")[0]!==idf){wrong++;return;}
+      const ex=recs.get(lab);
+      if(ex){if(dev&&!ex.from)ex.from=dev;}else{recs.set(lab,{name:lab,rack:idf,type:sys,from:dev});n++;}
+      sum[idf]=sum[idf]||{};sum[idf][sys]=(sum[idf][sys]||0)+(ex?0:1);});
+    if(wrong)warn.push("“"+sn+"”: "+wrong+" label"+(wrong===1?"":"s")+" belong to a different cabinet, so they were left out. It may be a copy of another sheet.");});
+  return {recs:[...recs.values()],sum,warn};}
+function labelWorkbookBox(j,onRecs){
+  const box=h("div",{class:"imp stack"}),file=h("input",{type:"file",id:"lwbFile",accept:".xlsx,.xls"}),out=h("div",{class:"stack"});
+  file.addEventListener("change",async()=>{const f=file.files[0];if(!f)return;out.textContent="Reading…";
+    try{await loadXLSX();const r=readLabelWorkbook(XLSX.read(await f.arrayBuffer(),{type:"array"}));out.textContent="";
+      if(!r.recs.length){out.append(h("p",{class:"err"},"No labels found. Each sheet should be named like “1.14 BMS” with one label per row."));return;}
+      const syss=[...new Set(Object.values(r.sum).flatMap(o=>Object.keys(o)))].sort((a,b)=>sysRank(j,a)-sysRank(j,b));
+      out.append(h("div",{class:"preview"},h("table",{},h("tr",{style:"font-weight:600"},h("td",{},"Cabinet"),syss.map(s=>h("td",{},s))),
+        Object.keys(r.sum).sort(natCmp).map(idf=>h("tr",{},h("td",{},idf),syss.map(s=>h("td",{},String(r.sum[idf][s]||"–"))))))),
+        ...r.warn.map(w=>h("p",{class:"status",style:"color:var(--over);margin:0"},"⚠ "+w)),
+        h("button",{type:"button",class:"btn small",onclick:()=>{onRecs(r.recs,syss);out.textContent="";file.value="";}},"Add these "+r.recs.length+" labels"));}
+    catch(e){out.textContent="";toast("Couldn't read that file. Save it as .xlsx and try again.");}});
+  box.append(h("p",{class:"status",style:"margin:0"},"One sheet per cabinet and system, named like “1.14 BMS” or “1.15 Cameras”. Labels that are already on the job get updated, not doubled."),
+    h("div",{class:"field"},h("label",{for:"lwbFile"},"Label workbook (.xlsx)"),file),out);
+  return box;}
+
+/* ---- job profiles: saved setup (steps, system order, material, slack) to start the next job from ---- */
+let profilesCache=null;
+async function loadProfiles(){try{const s=await db.collection("profiles").get();profilesCache=s.docs.map(d=>Object.assign({id:d.id},d.data())).sort((a,b)=>natCmp(a.name,b.name));}catch(e){profilesCache=profilesCache||[];}return profilesCache;}
+async function saveProfile(name,data){const nm=String(name||"").trim();if(!nm){toast("Give the profile a name");return false;}
+  const ex=(profilesCache||[]).find(p=>(p.name||"").toLowerCase()===nm.toLowerCase());
+  const body=Object.assign({name:nm,updatedAt:Date.now(),by:myId||""},data);
+  try{if(ex)await db.collection("profiles").doc(ex.id).set(body);else await db.collection("profiles").add(body);await loadProfiles();toast(ex?"Profile updated":"Profile saved");return true;}
+  catch(e){if(e&&e.code==="permission-denied")toast("Profiles need the new database rules pasted in Firebase first.");else writeErr(e);return false;}}
+
+/* ---- build pulls: pick cabinet + system, then type label numbers or tap them ---- */
+function parsePullInput(txt,pool){const out=new Set(),miss=[];
+  const byNum=new Map();pool.forEach(c=>{const n=labelNum(c.name);if(!isNaN(n))byNum.set(n,c);});
+  String(txt||"").replace(/(\d)\s*[-–]\s*(\d)/g,"$1-$2").split(/[\s,;]+/).filter(Boolean).forEach(t=>{
+    let m;
+    if((m=t.match(/^(\d+)-(\d+)$/))){let a=+m[1],b=+m[2];if(b<a)[a,b]=[b,a];if(b-a>500){miss.push(t);return;}let hit=0;for(let i=a;i<=b;i++){const c=byNum.get(i);if(c){out.add(c);hit++;}}if(!hit)miss.push(t);return;}
+    if(/^\d+$/.test(t)){const c=byNum.get(+t);if(c)out.add(c);else miss.push(t);return;}
+    const lt=t.toLowerCase(),hits=pool.filter(c=>c.name.toLowerCase()===lt||String(c.from||"").toLowerCase().startsWith(lt));
+    if(hits.length)hits.forEach(c=>out.add(c));else miss.push(t);});
+  return {cabs:[...out],miss};}
+function pullBuilder(jid){
+  const job=()=>S.jobs.find(x=>x.id===jid);
+  const j0=job();if(!j0)return;
+  const idfs=()=>[...new Set(cablesOf(job()).map(c=>c.rack).filter(Boolean))].sort(natCmp);
+  const syssIn=idf=>[...new Set(cablesOf(job()).filter(c=>c.rack===idf).map(c=>c.type).filter(Boolean))].sort((a,b)=>sysRank(job(),a)-sysRank(job(),b)||natCmp(a,b));
+  let idf=null,sys=null,pick=new Set(),busy=false;
+  try{idf=localStorage.getItem("pbIdf:"+jid);sys=localStorage.getItem("pbSys:"+jid);}catch(e){}
+  const box=h("div",{class:"full stack"}),top=h("div",{class:"stack",style:"gap:6px"}),mid=h("div",{class:"stack"}),bottom=h("div",{class:"stack"});
+  const nameIn=h("input",{id:"pbName",class:"full-in",placeholder:"Pull name, e.g. Rows 1-19",autocomplete:"off"});
+  const numIn=h("input",{id:"pbNums",class:"full-in mono",placeholder:"Labels: 801-806, 811  or  CDCF-22A",autocomplete:"off",inputmode:"text"});
+  const pool=()=>cablesOf(job()).filter(c=>c.rack===idf&&c.type===sys);
+  const remember=()=>{try{localStorage.setItem("pbIdf:"+jid,idf||"");localStorage.setItem("pbSys:"+jid,sys||"");}catch(e){}};
+  async function assign(cabs,key){const j=job();if(!j||busy)return;busy=true;
+    const ids=new Set(cabs.map(c=>c.id));let moved=0;
+    const cables=cablesOf(j).map(c=>{if(!ids.has(c.id))return c;if(key&&c.pull&&c.pull!==key)moved++;const o=Object.assign({},c);if(key)o.pull=key;else delete o.pull;return o;});
+    try{await db.collection("jobs").doc(j.id).update({cables,updatedAt:Date.now()});
+      if(key)logEvent("Pull set up: "+key+" ("+cabs.length+" cables) on "+j.name,{ev:"cables",jobId:j.id});
+      toast(key?cabs.length+" added to "+pullShort({pull:key})+(moved?" ("+moved+" moved from another pull)":""):cabs.length+" taken out of the pull");return true;}
+    catch(e){writeErr(e);return false;}finally{busy=false;}}
+  function draw(){const j=job();if(!j){closeSheet();return;}
+    const list=idfs();if(!list.includes(idf))idf=list[0]||null;const sl=idf?syssIn(idf):[];if(!sl.includes(sys))sys=sl[0]||null;remember();
+    top.textContent="";mid.textContent="";bottom.textContent="";
+    if(!list.length){top.append(h("div",{class:"empty"},h("strong",{},"No cabinets on this job yet"),"Import the label workbook in Cables & steps first."),
+      h("button",{class:"btn",type:"button",onclick:()=>{closeSheet();setTimeout(()=>cableEditor(job()),60);}},"Cables & steps"));return;}
+    const left=(a,b)=>cablesOf(j).filter(c=>c.rack===a&&(!b||c.type===b)&&!c.pull).length;
+    top.append(h("div",{class:"flabel"},"Cabinet"),h("div",{class:"chips",style:"gap:6px"},list.map(x=>{const n=left(x);return h("button",{type:"button",class:"chipbtn","aria-pressed":String(x===idf),onclick:()=>{idf=x;pick.clear();draw();}},x+(n?" · "+n+" left":" ✓"));})),
+      h("div",{class:"flabel"},"System"),h("div",{class:"chips",style:"gap:6px"},sl.map(x=>{const n=left(idf,x);return h("button",{type:"button",class:"chipbtn","aria-pressed":String(x===sys),onclick:()=>{sys=x;pick.clear();draw();}},x+(n?" · "+n+" left":" ✓"));})));
+    const p=pool().slice().sort((a,b)=>natCmp(a.name,b.name)),free=p.filter(c=>!c.pull),pulls={};
+    p.filter(c=>c.pull).forEach(c=>{(pulls[c.pull]=pulls[c.pull]||[]).push(c);});
+    pick=new Set([...pick].filter(id=>free.some(c=>c.id===id)));
+    const addBtn=h("button",{type:"button",class:"btn",onclick:async()=>{const nm=nameIn.value.trim();if(!nm){toast("Name the pull first, e.g. Rows 1-19");nameIn.focus();return;}
+      const r=parsePullInput(numIn.value,p),cabs=[...new Set([...r.cabs,...free.filter(c=>pick.has(c.id))])];
+      if(r.miss.length){toast("Not on "+idf+" "+sys+": "+r.miss.slice(0,6).join(", ")+(r.miss.length>6?"…":""));if(!cabs.length)return;}
+      if(!cabs.length){toast("Type label numbers or tap labels below");return;}
+      if(await assign(cabs,pullKey(idf,sys,nm))){numIn.value="";pick.clear();}}},"Add to pull");
+    mid.append(h("div",{class:"panel stack",style:"gap:8px"},
+      h("div",{class:"field"},h("label",{for:"pbName"},"Pull"),nameIn),
+      Object.keys(pulls).length?h("div",{class:"chips",style:"gap:6px"},Object.keys(pulls).sort(natCmp).map(k=>h("button",{type:"button",class:"chipbtn","aria-pressed":String(pullKey(idf,sys,nameIn.value)===k),onclick:()=>{nameIn.value=pullShort({pull:k});draw();}},"↺ "+pullShort({pull:k})))):null,
+      h("div",{class:"field"},h("label",{for:"pbNums"},"Labels from the prints"),numIn),
+      h("div",{style:"display:flex;gap:8px;align-items:center;flex-wrap:wrap"},addBtn,h("span",{class:"status"},pick.size?pick.size+" tapped":"Ranges, single numbers, or a device ID start"))));
+    const done=p.length-free.length;
+    bottom.append(h("div",{class:"pr"},h("span",{class:"n"},idf+" "+sys),h("span",{class:"bar"},h("i",{style:"width:"+(p.length?Math.round(done*100/p.length):0)+"%"})),h("span",{class:"c"},done+"/"+p.length+" in a pull"),h("span")));
+    if(free.length){bottom.append(h("div",{class:"flabel"},"Not in a pull yet ("+free.length+") · tap to add"),
+      h("div",{class:"chips",style:"gap:6px"},free.map(c=>h("button",{type:"button",class:"chipbtn","aria-pressed":String(pick.has(c.id)),title:c.name,onclick:()=>{pick.has(c.id)?pick.delete(c.id):pick.add(c.id);draw();}},
+        h("span",{class:"mono"},String(labelNum(c.name)).padStart(3,"0")),c.from?h("small",{style:"opacity:.75;margin-left:4px"},c.from):null))));}
+    else bottom.append(h("p",{class:"status",style:"color:var(--ok)"},"✓ Every "+sys+" label for "+idf+" is in a pull."));
+    const ss=stepsOf(j);
+    Object.keys(pulls).sort(natCmp).forEach(k=>{const gl=pulls[k],fin=ss.length?gl.filter(c=>ss.every(st=>markOf(j,c.id,st.id))).length:0;
+      bottom.append(h("div",{class:"panel stack",style:"gap:6px;padding:10px"},
+        h("div",{style:"display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"},h("strong",{},pullShort({pull:k})),h("span",{class:"status"},gl.length+" cables"+(ss.length?" · "+fin+" done":""))),
+        h("div",{class:"chips",style:"gap:4px"},gl.map(c=>h("button",{type:"button",class:"chip",title:"Take "+c.name+" out of this pull","aria-label":"Take "+c.name+" out of this pull",onclick:()=>assign([c],null)},String(labelNum(c.name)).padStart(3,"0")," ✕")))));});}
+  box.append(h("p",{class:"status",style:"margin:0"},"Pick the cabinet and system, name the pull, then type the label numbers off the prints (801-806, 811) or tap them. Each label can only be in one pull."),top,mid,bottom);
+  openView("Build pulls · "+j0.name,[box]);$(".sheet").classList.add("wide");liveSheet=()=>{if(!busy&&document.activeElement!==numIn&&document.activeElement!==nameIn)draw();};draw();}
+
+/* progress by cabinet and system, in the order the crew pulls them */
+function cabinetProgress(j){const cs=cablesOf(j).filter(c=>c.rack&&c.type),ss=stepsOf(j);if(!cs.length||!ss.length)return null;
+  const first=ss[0];const by={};cs.forEach(c=>{const k=c.rack;(by[k]=by[k]||{});(by[k][c.type]=by[k][c.type]||[]).push(c);});
+  const rows=[];Object.keys(by).sort(natCmp).forEach(idf=>{const syss=Object.keys(by[idf]).sort((a,b)=>sysRank(j,a)-sysRank(j,b)||natCmp(a,b));
+    const all=syss.flatMap(s=>by[idf][s]),fin=all.filter(c=>ss.every(st=>markOf(j,c.id,st.id))).length;
+    rows.push(h("div",{class:"pr",style:"margin-top:6px"},h("span",{class:"n"},"Cabinet "+idf),h("span",{class:"bar"},h("i",{style:"width:"+Math.round(fin*100/all.length)+"%"})),h("span",{class:"c"},fin+"/"+all.length+" done"),h("span")));
+    syss.forEach(s=>{const gl=by[idf][s],pl=gl.filter(c=>markOf(j,c.id,first.id)).length,dn=gl.filter(c=>ss.every(st=>markOf(j,c.id,st.id))).length,
+        np=new Set(gl.map(c=>c.pull).filter(Boolean)).size,unas=gl.filter(c=>!c.pull).length;
+      rows.push(h("div",{class:"status",style:"padding-left:12px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"},h("span",{},s+": "+pl+"/"+gl.length+" "+first.name.toLowerCase()+" · "+dn+" done"),
+        h("span",{},np+" pull"+(np===1?"":"s")+(unas?" · "+unas+" not in a pull":""))));});});
+  return h("details",{open:true},h("summary",{},"By cabinet"),h("div",{},rows));}
+
 function crewHistory(j){
   const log=j.crewLog||{};const keys=Object.keys(log).sort();
   if(!keys.length)return null;

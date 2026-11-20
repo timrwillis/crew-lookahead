@@ -74,6 +74,11 @@ service cloud.firestore {
       // crew can mark cables off, nothing else on a job
       allow update: if isMember() && onlyKeys(['marks', 'updatedAt']);
     }
+    // saved job setups (steps, system order, material) to start the next job from
+    match /profiles/{id} {
+      allow read: if isMember();
+      allow write: if isMgr();
+    }
     match /projects/{id} {
       allow read: if isMember();
       allow write: if isMgr();
