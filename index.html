@@ -3430,12 +3430,28 @@ function cableData(j){const cs=cablesOf(j),ss=stepsOf(j),who=u=>u?realName(u):""
       checks:CK_ITEMS.map((t,i)=>{const it=(ck.items||{})[i+1];return[t,it&&it.at?ckWho(it):"",it&&it.at?T(it.at):"",it&&it.at?(it.remark||"")+(it.auto?" (from scans)":""):""];}),
       history:hist.map(r=>[T(r[0]),r[1],r[2],r[3]])};});
   return{job:j.name||"",updated:T(Date.now()),steps:ss.map(x=>x.name),cables};}
-async function writeFeed(j){if(!j||!j.feedId)return;const t=cableTable(j,true),cs=cablesOf(j),ss=stepsOf(j);
-  const summary=[["Job",j.name],["Updated",fmt(new Date(),{month:"numeric",day:"numeric",year:"numeric"})+" "+fmtTime(Date.now())],["Cables",cs.length],["Complete",cs.filter(c=>cabState(j,c,ss)==="done").length],
-    ["Fully scanned (4/4)",cs.filter(c=>ckScanN(ckOf(j,c.id))===4).length],["Check lists done (5/5)",cs.filter(c=>ckItemN(ckOf(j,c.id))===5).length],["",""],["Step","Done"],...ss.map(st=>[st.name,stepCount(j,st.id)+" of "+cs.length])];
-  try{await db.collection("feeds").doc(j.feedId).set({jobId:j.id,job:j.name||"",updatedAt:Date.now(),updatedBy:myId||"",csv:toCsv([t.head,...t.rows]),history:toCsv([t.logHead,...t.log]),summary:toCsv(summary),data:JSON.stringify(cableData(j))});}catch(e){}}
-const feedTimers={};
-function scheduleFeed(jid){clearTimeout(feedTimers[jid]);feedTimers[jid]=setTimeout(()=>{writeFeed(S.jobs.find(x=>x.id===jid));},2500);}
+async function gzB64(str){const cs=new Blob([str]).stream().pipeThrough(new CompressionStream("gzip"));const u=new Uint8Array(await new Response(cs).arrayBuffer());let b="";for(let i=0;i<u.length;i+=32768)b+=String.fromCharCode.apply(null,u.subarray(i,i+32768));return btoa(b);}
+/* the feed doc must stay under Firestore's 1 MB limit, so the full data goes in gzipped; the plain copies are only kept for old pasted scripts when they fit */
+async function writeFeed(j,loud){if(!j||!j.feedId||!db)return false;
+  try{const t=cableTable(j,true),cs=cablesOf(j),ss=stepsOf(j);
+    const summary=toCsv([["Job",j.name],["Updated",fmt(new Date(),{month:"numeric",day:"numeric",year:"numeric"})+" "+fmtTime(Date.now())],["Cables",cs.length],["Complete",cs.filter(c=>cabState(j,c,ss)==="done").length],
+      ["Fully scanned (4/4)",cs.filter(c=>ckScanN(ckOf(j,c.id))===4).length],["Check lists done (5/5)",cs.filter(c=>ckItemN(ckOf(j,c.id))===5).length],["",""],["Step","Done"],...ss.map(st=>[st.name,stepCount(j,st.id)+" of "+cs.length])]);
+    const history=toCsv([t.logHead,...t.log]),data=JSON.stringify(cableData(j));
+    const doc={jobId:j.id,job:j.name||"",updatedAt:Date.now(),updatedBy:myId||"",v:2,summary};
+    if(typeof CompressionStream!=="undefined"){doc.gz=await gzB64(JSON.stringify({data,history,summary}));if(doc.gz.length>950000)throw new Error("too big");}
+    if(data.length+history.length+(doc.gz||"").length<900000){doc.data=data;doc.history=history;}
+    else if(!doc.gz)throw new Error("too big");
+    await db.collection("feeds").doc(j.feedId).set(doc);delete feedPending[j.id];return true;}
+  catch(e){if(loud){if(e&&e.message==="too big")toast("This job has too much cable data for the live sheet ("+cablesOf(j).length+" cables). Tell Claude so it can split the feed.");else writeErr(e);}return false;}}
+const feedTimers={},feedPending={};
+function scheduleFeed(jid){feedPending[jid]=1;clearTimeout(feedTimers[jid]);feedTimers[jid]=setTimeout(()=>{writeFeed(S.jobs.find(x=>x.id===jid));},2500);}
+/* phone pocketed or app closed before the timer fired: send it now */
+function flushFeeds(){Object.keys(feedPending).forEach(jid=>{clearTimeout(feedTimers[jid]);writeFeed(S.jobs.find(x=>x.id===jid));});}
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="hidden")flushFeeds();});
+window.addEventListener("pagehide",flushFeeds);
+/* leads/super: when the app opens, refresh every live feed once, so anything a phone missed catches up */
+let feedsHealed=false;
+function healFeeds(){if(feedsHealed||!myId||!MGR())return;feedsHealed=true;S.jobs.filter(j=>j.feedId).forEach((j,i)=>setTimeout(()=>writeFeed(S.jobs.find(x=>x.id===j.id)),4000+i*1500));}
 function feedScript(j){return `// Crew Lookahead → live cable data for "${(j.name||"").replace(/[`$\\]/g,"")}"
 // Paste this in Extensions → Apps Script, save, then run "setup" once.
 // Makes a "Cables" list (click a cable to open its own tab), a tab per cable, "History" and "Summary".
@@ -3446,7 +3462,11 @@ function refreshCables() {
   const res = UrlFetchApp.fetch(FEED, { muteHttpExceptions: true });
   if (res.getResponseCode() !== 200) throw new Error("Couldn't reach the app's feed (" + res.getResponseCode() + "). Ask your lead for a new link.");
   const f = JSON.parse(res.getContentText()).fields || {};
-  const txt = k => (f[k] && f[k].stringValue) || "";
+  let txt = k => (f[k] && f[k].stringValue) || "";
+  if (txt("gz")) {
+    const all = JSON.parse(Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(txt("gz")), "application/x-gzip")).getDataAsString());
+    txt = k => all[k] || "";
+  }
   const data = JSON.parse(txt("data") || "{}");
   if (!data.cables) throw new Error("The feed is from an older app version. In the app, tap Update feed now, then run this again.");
   const ss = SpreadsheetApp.getActive();
@@ -3574,7 +3594,7 @@ function liveSheetPanel(jid){const box=h("div",{class:"full stack"});
         h("li",{},"Pick ",h("strong",{},"setup")," in the function menu at the top, then click ",h("strong",{},"▶ Run"),". Google asks you to allow it once: choose your account → Advanced → Go to the project → Allow."),
         h("li",{},"Back in the sheet you'll have a ",h("strong",{},"Cables")," list (click a cable to open its own tab), a tab for each cable, plus ",h("strong",{},"History")," and ",h("strong",{},"Summary"),". It refreshes every 5 minutes, and ",h("strong",{},"Crew Lookahead → Refresh now")," pulls right away. Already set it up before? Paste the new script over the old one and run setup again.")),
       h("div",{style:"display:flex;gap:8px;flex-wrap:wrap"},h("button",{type:"button",class:"btn",onclick:()=>copyText(code,"Script copied. Paste it into Apps Script.")},"Copy script"),
-        h("button",{type:"button",class:"btn ghost",onclick:async()=>{await writeFeed(j);toast("Feed updated");}},"Update feed now")),
+        h("button",{type:"button",class:"btn ghost",onclick:async()=>{if(await writeFeed(S.jobs.find(x=>x.id===j.id)||j,true))toast("Feed updated. In the sheet: Crew Lookahead → Refresh now");}},"Update feed now")),
       h("details",{},h("summary",{class:"status"},"Show the script"),h("pre",{class:"mono",style:"white-space:pre-wrap;font-size:.72rem;background:var(--bg);padding:10px;border-radius:8px;max-height:260px;overflow:auto"},code)),
       h("p",{class:"status",style:"margin:0"},"The Google Sheet is a read-only copy: edits there don't go back into the app, and the Cables, cable, History and Summary tabs are rewritten on each refresh. Add your own notes on other tabs."),
       m?h("div",{style:"display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:10px"},
@@ -4609,7 +4629,7 @@ function startData(){if(dataOn||!teamLoaded)return;if(!isOwner&&myRole()==="pend
   const timer=setTimeout(()=>{$("#status").textContent="Can't reach the board yet. It may be out of date.";},10000);
   /* crew only get their own time off and requests; the database refuses anyone else's */
   const src=col=>!MGR()&&col==="timeoff"?db.collection("timeoff").where("uid","==",myId):!MGR()&&col==="offreq"?db.collection("offreq").where("by","==",myId):db.collection(col);
-  Object.keys(S).forEach(col=>{unsubs.push(src(col).onSnapshot(snap=>{if(col==="jobs")jobAlerts(snap);S[col]=snap.docs.map(d=>Object.assign({id:d.id},d.data()));if(col==="jobs")S.jobs.forEach(applyCrewDone);if((col==="timeoff"||col==="techs")&&MGR())syncOffUids();
+  Object.keys(S).forEach(col=>{unsubs.push(src(col).onSnapshot(snap=>{if(col==="jobs"){jobAlerts(snap);setTimeout(healFeeds,0);}S[col]=snap.docs.map(d=>Object.assign({id:d.id},d.data()));if(col==="jobs")S.jobs.forEach(applyCrewDone);if((col==="timeoff"||col==="techs")&&MGR())syncOffUids();
       if(!snap.metadata.fromCache){clearTimeout(timer);$("#status").textContent="Live";}
       if(col==="people")resolveNames();if(col==="asks")asksLoaded=true;if(col==="messages")msgsLoaded=true;if(col==="asks"||col==="jobs"||col==="people"||col==="messages")checkAlerts();schedule();},
     err=>{clearTimeout(timer);if(err&&err.code==="permission-denied"){dataOn=false;schedule();return;}$("#status").textContent="Lost connection. Reload to try again.";}));});
