@@ -1113,7 +1113,7 @@ function jobPct(j){if(j.doneOn)return 100;const pg=jobProgress(j);if(pg)return p
 function renderJobs(v){
   const nDone=realJobs().filter(j=>j.doneOn).length;
   v.append(h("div",{class:"sechead"},subnav(jobSeg,[["open","Open"],["done","Done",nDone,true],["projects","Projects"]],k=>jobSeg=k),
-    MGR()?(jobSeg==="projects"?h("button",{class:"btn",type:"button",onclick:()=>projectForm(null)},"+ New project"):h("button",{class:"btn",type:"button",onclick:()=>newJobChooser()},"+ Add job")):null));
+    MGR()?(jobSeg==="projects"?h("button",{class:"btn",type:"button",onclick:()=>projectForm(null)},"+ New project"):h("button",{class:"btn",type:"button",onclick:()=>jobWizard()},"+ Add job")):null));
   if(jobSeg==="projects"){renderProjects(v);return;}
   const t=TODAY(),done=jobSeg==="done";
   if(!done){const qs=S.jobs.filter(j=>isQuick(j)&&!doneDate(j)).sort(qSort);
@@ -1213,10 +1213,11 @@ function jobPanel(j){
   if(!tk.length){box.append(h("div",{class:"empty"},h("strong",{},"No tasks yet"),m?"Edit the job to add tasks, or tap “Standard cable run” in the job form.":"A lead hasn't broken this job into tasks yet."));}
   else{
     const isDone=t=>!!t.doneOn;
-    const sect=(title,list)=>{if(!list.length)return;const nd=list.filter(isDone).length,open=list.filter(t=>!isDone(t));
-      box.append(h("div",{class:"phasehd",style:"display:flex;justify-content:space-between"},h("span",{},title),h("span",{style:"color:var(--muted)"},nd+"/"+list.length+" done")),
+    const sect=(title,list,pc)=>{if(!list.length)return;const nd=list.filter(isDone).length,open=list.filter(t=>!isDone(t));
+      box.append(h("div",{class:"phasehd",style:"display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"},h("span",{},title),
+          pc?h("button",{type:"button",class:"linkbtn",style:"color:"+(pc.n===pc.of?"var(--ok)":"var(--muted)"),onclick:()=>cableTracker(j.id)},pc.n+"/"+pc.of+" cables"+(pc.n===pc.of?" ✓":" ›")):h("span",{style:"color:var(--muted)"},nd+"/"+list.length+" done")),
         open.length?h("div",{class:"tlist"},open.map(t=>taskRow(j,t,d))):h("div",{class:"status",style:"padding:6px 0 10px"},"All done ✓"));};
-    ph.forEach((p,i)=>sect("Phase "+(i+1)+" · "+p.name,tk.filter(t=>t.phase===p.id)));
+    ph.forEach((p,i)=>sect("Phase "+(i+1)+" · "+p.name,tk.filter(t=>t.phase===p.id),phaseCables(j,p)));
     sect(ph.length?"Other tasks":"Tasks",tk.filter(t=>!ph.some(p=>p.id===t.phase)));
     const done=tk.filter(isDone).sort((a,b)=>(b.doneAt||parseD(b.doneOn).getTime())-(a.doneAt||parseD(a.doneOn).getTime()));
     if(done.length){const nr=done.filter(t=>!t.reviewedAt).length,isOpen=openDoneJobs.has(j.id);
@@ -1233,7 +1234,7 @@ function renderTasks(v){
     [...open,...S.jobs.filter(j=>j.doneOn&&j.id===taskJob)].map(j=>h("option",{value:j.id,selected:j.id===taskJob},j.name+(jobPct(j)!=null?" · "+jobPct(j)+"%":""))));
   sel.addEventListener("change",()=>{taskJob=sel.value;render();});
   v.append(h("div",{class:"sechead"},h("div",{class:"tools"},h("button",{type:"button",class:"btn ghost small",onclick:()=>{taskJob="";setTab("jobs",true);}},"‹ Jobs"),sel),
-    MGR()&&!taskJob?h("button",{class:"btn",type:"button",onclick:()=>newJobChooser()},"+ Add job"):null));
+    MGR()&&!taskJob?h("button",{class:"btn",type:"button",onclick:()=>jobWizard()},"+ Add job"):null));
   if(!taskJob&&false){const qs=S.jobs.filter(j=>isQuick(j)&&!doneDate(j)).sort(qSort);
     const qd=quickArchList();
     v.append(h("div",{class:"sechead",style:"margin-top:4px"},h("h2",{},"Quick tasks"),MGR()?h("button",{class:"btn ghost small",type:"button",onclick:()=>quickForm(null)},"+ Quick task"):null));
@@ -2578,15 +2579,26 @@ const val=id=>{const e=document.getElementById(id);return e?(e.type==="checkbox"
 
 const TASK_PRESETS=["Pull","Dress","Terminate","Port","Label","VFL","Test","Certify"];
 const SCOPES=["Cabling / rough-in","Trim & terminate","Certify / test","Fiber","Security / access control","AV","Service / small work","Other"];
-function techChips(set,days,excludeJobId,ro){
-  const wrap=h("div",{class:"tchips"});
-  activeTechs().forEach(t=>{const off=days.filter(d=>offRec(t.id,d)).length;
+function techChips(set,days,excludeJobId,ro,pool){
+  /* only the people picked show; "+ Tech" opens the crew list (this job's crew first) */
+  const wrap=h("div",{class:"tchips"});let open=false;const poolSet=pool instanceof Set?pool:new Set(pool||[]);
+  const warnOf=t=>{const off=days.filter(d=>offRec(t.id,d)).length;
     const other=S.jobs.find(x=>x.id!==excludeJobId&&days.some(d=>jobOn(x,d)&&membersOn(x,d).includes(t.id)));
-    const warn=[off?off+"d off":"",other?other.name:""].filter(Boolean).join(", ");
-    const b=h("button",{type:"button",class:"tchip","aria-pressed":String(set.has(t.id)),disabled:ro,title:warn||null,onclick:()=>{set.has(t.id)?set.delete(t.id):set.add(t.id);b.setAttribute("aria-pressed",String(set.has(t.id)));}},t.name,warn?h("span",{class:"w"},"• "+warn):null);
-    wrap.append(b);});
-  if(!activeTechs().length)wrap.append(h("span",{class:"status"},"Add techs on the Crew tab first."));
-  return wrap;
+    return [off?off+"d off":"",other?other.name:""].filter(Boolean).join(", ");};
+  const chip=(t,on)=>{const w=warnOf(t);return h("button",{type:"button",class:"tchip","aria-pressed":String(on),disabled:ro,title:w||null,"aria-label":(on?"Take "+t.name+" off":"Add "+t.name),
+    onclick:()=>{on?set.delete(t.id):set.add(t.id);draw();}},t.name,on&&!ro?" ✕":"",w?h("span",{class:"w"},"• "+w):null);};
+  function draw(){wrap.textContent="";
+    const picked=activeTechs().filter(t=>set.has(t.id));picked.forEach(t=>wrap.append(chip(t,true)));
+    if(ro){if(!picked.length)wrap.append(h("span",{class:"status"},"No one yet"));return;}
+    if(!activeTechs().length){wrap.append(h("span",{class:"status"},"Add techs on the Crew tab first."));return;}
+    wrap.append(h("button",{type:"button",class:"tchip dep","aria-expanded":String(open),onclick:()=>{open=!open;draw();}},open?"Done":"+ Tech"));
+    if(open){const rest=activeTechs().filter(t=>!set.has(t.id)),mine=rest.filter(t=>poolSet.has(t.id)),others=rest.filter(t=>!poolSet.has(t.id));
+      const list=h("div",{class:"tchips",style:"flex-basis:100%;border:1px solid var(--line);border-radius:10px;padding:8px;margin-top:2px"});
+      if(mine.length){list.append(h("div",{class:"status",style:"flex-basis:100%"},"On this job"));mine.forEach(t=>list.append(chip(t,false)));}
+      if(others.length){if(mine.length)list.append(h("div",{class:"status",style:"flex-basis:100%"},"Everyone else"));others.forEach(t=>list.append(chip(t,false)));}
+      if(!rest.length)list.append(h("span",{class:"status"},"Everyone's already on it."));
+      wrap.append(list);}}
+  draw();return wrap;
 }
 function jobForm(j,sec){
   const ro=!MGR();if(ro||!j)sec="";
@@ -2625,7 +2637,7 @@ function jobForm(j,sec){
     genWrap.textContent="";genWrap.append(techChips(crewSet,days,j?.id,ro));
     if(sec==="crew"){crewTaskWrap.textContent="";const open=tasks.filter(t=>!t.doneOn);
       if(!open.length)crewTaskWrap.append(h("div",{class:"status"},"No open tasks. Use the whole-job crew above, or add tasks."));
-      open.forEach(t=>crewTaskWrap.append(h("div",{class:"task"},h("div",{class:"trow"},h("strong",{},t.name||"Untitled"),h("span",{class:"status"},t.set.size?t.set.size+" on it":"no one yet")),techChips(t.set,days,j?.id,ro))));}
+      open.forEach(t=>crewTaskWrap.append(h("div",{class:"task"},h("div",{class:"trow"},h("strong",{},t.name||"Untitled"),h("span",{class:"status"},t.set.size?t.set.size+" on it":"no one yet")),techChips(t.set,days,j?.id,ro,crewSet))));}
     taskWrap.textContent="";
     tasks.forEach((t,i)=>{const nameIn=h("input",{type:"text",id:"tk-"+i,value:t.name,"aria-label":"Task name",disabled:ro});nameIn.addEventListener("input",()=>t.name=nameIn.value);
       const doneCb=h("input",{type:"checkbox",id:"tkd-"+i,checked:!!t.doneOn,disabled:ro,"aria-label":"Task done"});doneCb.addEventListener("change",()=>{t.doneOn=doneCb.checked?(t.orig&&t.orig.doneOn||TODAY()):"";box.classList.toggle("done",doneCb.checked);});
@@ -2633,7 +2645,7 @@ function jobForm(j,sec){
         h("div",{class:"trow"},nameIn,h("label",{class:"check",for:"tkd-"+i,style:"font-size:.82rem"},doneCb,"Done"),
           ro?null:h("button",{type:"button",class:"iconbtn","aria-label":"Move up",disabled:i===0,onclick:()=>{[tasks[i-1],tasks[i]]=[tasks[i],tasks[i-1]];drawCrews();}},"↑"),
           ro?null:h("button",{type:"button",class:"iconbtn","aria-label":"Remove task",onclick:()=>{tasks.splice(i,1);drawCrews();}},"✕")),
-        techChips(t.set,days,j?.id,ro));
+        techChips(t.set,days,j?.id,ro,crewSet));
       if(phases.length){const ps=h("select",{id:"tkp-"+i,"aria-label":"Phase",disabled:ro,style:"font:inherit;font-size:.82rem;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink)"},h("option",{value:""},"No phase"),phases.map((p,k)=>h("option",{value:p.id,selected:t.phase===p.id},(k+1)+". "+(p.name||"Phase"))));
         ps.addEventListener("change",()=>{t.phase=ps.value;});box.append(h("div",{class:"tchips"},h("span",{class:"status",style:"align-self:center"},"Phase"),ps));}
       const others=tasks.filter(x=>x!==t);
@@ -3943,6 +3955,113 @@ function pullBuilder(jid){
         h("div",{class:"chips",style:"gap:4px"},gl.map(c=>h("button",{type:"button",class:"chip",title:"Take "+c.name+" out of this pull","aria-label":"Take "+c.name+" out of this pull",onclick:()=>assign([c],null)},String(labelNum(c.name)).padStart(3,"0")," ✕")))));});}
   box.append(h("p",{class:"status",style:"margin:0"},"Pick the cabinet and system, name the pull, then type the label numbers off the prints (801-806, 811) or tap them. Each label can only be in one pull."),top,mid,bottom);
   openView("Build pulls · "+j0.name,[box]);$(".sheet").classList.add("wide");liveSheet=()=>{if(!busy&&document.activeElement!==numIn&&document.activeElement!==nameIn)draw();};draw();}
+
+/* ===== NEW JOB, ONE QUESTION AT A TIME =====
+   What kind → name/dates → cables (Cat6 label workbook / fiber cable list) → phase 1 → its tasks → next phase… → crew → review.
+   On cable jobs every phase checked "per cable" is also a cable step with the SAME id, so checking cables off moves the phase. */
+const WIZ_PHASES=["Pull","Rough-in","Terminate & dress","Test & certify","Closeout"];
+const WIZ_TASKS={"pull":["Pull","Set up spools","Dress at rack"],"rough-in":["Hang J-hooks","Sleeves","Back boxes"],"terminate & dress":["Dress","Terminate","Label"],"test & certify":["Test","Certify","Fix fails"],"closeout":["Test reports","As-builts","Punch list"]};
+const notPerCable=n=>/close|punch|walk|as-?built|report|rough/i.test(n);
+function jobWizard(){
+  const W={kind:"",name:"",start:TODAY(),weeks:2,recs:null,syss:[],sum:null,warn:[],fiber:null,phases:[],crew:new Set()};
+  let scr="kind",pi=0;
+  const body=h("div",{class:"full stack",style:"gap:12px"});
+  const nid=p=>p+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+  const isCable=()=>W.kind==="cat6"||W.kind==="fiber";
+  const order=()=>["kind","basics",...(isCable()?["cables"]:[]),"phase","crew","review"];
+  const go=s=>{scr=s;draw();const sh=$(".sheet");if(sh)sh.scrollTop=0;};
+  const next=()=>{const o=order();go(o[o.indexOf(scr)+1]);};
+  const back=()=>{if(scr==="phase"&&pi>0){pi--;draw();return;}const o=order();go(o[Math.max(0,o.indexOf(scr)-1)]);};
+  const q=(t,sub)=>[h("h3",{style:"margin:0;font-size:1.25rem"},t),sub?h("p",{class:"status",style:"margin:0"},sub):null].filter(Boolean);
+  const nav=(nextLbl,ok,extra)=>h("div",{style:"display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:6px"},
+    scr==="kind"?h("span"):h("button",{type:"button",class:"btn ghost",onclick:back},"‹ Back"),
+    h("div",{style:"display:flex;gap:8px;flex-wrap:wrap"},extra||null,nextLbl?h("button",{type:"button",class:"btn",onclick:()=>{const r=ok?ok():true;if(r!==false)next();}},nextLbl):null));
+  const big=(ic,t,sub,on,f)=>h("button",{type:"button",class:"emenu"+(on?" pri":""),onclick:f},h("span",{class:"ic","aria-hidden":"true"},ic),h("span",{},h("strong",{},t),h("small",{},sub)),h("span",{class:"go"},"›"));
+  const dots=()=>{const o=order(),i=o.indexOf(scr);return h("div",{class:"status",style:"margin:0"},"Step "+(i+1)+" of "+o.length);};
+  function draw(){body.textContent="";body.append(dots());
+    if(scr==="kind"){body.append(...q("What kind of job is it?"),
+        big("🟦","Cat6 / copper","Label workbook, track pulls by cabinet",W.kind==="cat6",()=>{W.kind="cat6";next();}),
+        big("🟨","Fiber","Cable list, scans and checklist per cable",W.kind==="fiber",()=>{W.kind="fiber";next();}),
+        big("📋","Other work","No cables, just phases and tasks",W.kind==="other",()=>{W.kind="other";next();}),
+        h("button",{type:"button",class:"linkbtn",style:"justify-self:start",onclick:()=>{closeSheet();setTimeout(()=>jobForm(null),60);}},"Use the full form instead"));return;}
+    if(scr==="basics"){const nm=h("input",{id:"wzName",value:W.name,placeholder:W.kind==="cat6"?"e.g. DC2 IDF Cat6":"e.g. B side torpedo pulls",autocomplete:"off"});nm.addEventListener("input",()=>W.name=nm.value);
+      const st=h("input",{id:"wzStart",type:"date",value:W.start});st.addEventListener("change",()=>W.start=st.value);
+      const wk=h("input",{id:"wzWeeks",type:"number",min:"1",max:"52",value:String(W.weeks),style:"width:80px"});wk.addEventListener("change",()=>W.weeks=Math.max(1,parseInt(wk.value)||1));
+      body.append(...q("What's the job called, and when does it start?"),
+        h("div",{class:"field"},h("label",{for:"wzName"},"Job name"),nm),
+        h("div",{style:"display:flex;gap:12px;flex-wrap:wrap"},h("div",{class:"field"},h("label",{for:"wzStart"},"Start"),st),h("div",{class:"field"},h("label",{for:"wzWeeks"},"About how many weeks?"),wk)),
+        nav("Next",()=>{if(!W.name.trim()){toast("Give the job a name");nm.focus();return false;}}));setTimeout(()=>nm.focus(),30);return;}
+    if(scr==="cables"){
+      if(W.kind==="cat6"){const file=h("input",{type:"file",id:"wzFile",accept:".xlsx,.xls"}),sm=h("div",{class:"stack",style:"gap:4px"});
+        const show=()=>{sm.textContent="";if(!W.recs)return;const cabs=Object.keys(W.sum).sort(natCmp);
+          sm.append(h("p",{style:"margin:0;color:var(--ok);font-weight:600"},"✓ "+W.recs.length+" labels · "+cabs.length+" cabinets · "+W.syss.join(", ")),
+            h("p",{class:"status",style:"margin:0"},cabs.map(c=>c+": "+W.syss.map(s=>(W.sum[c][s]||0)+" "+s).join(", ")).join(" · ")),
+            ...W.warn.map(w=>h("p",{class:"status",style:"color:var(--over);margin:0"},"⚠ "+w)));};
+        file.addEventListener("change",async()=>{const f=file.files[0];if(!f)return;sm.textContent="Reading…";
+          try{await loadXLSX();const r=readLabelWorkbook(XLSX.read(await f.arrayBuffer(),{type:"array"}));
+            if(!r.recs.length){W.recs=null;sm.textContent="";sm.append(h("p",{class:"err"},"No labels found. Name each sheet like “1.14 BMS” with one label per row."));return;}
+            W.recs=r.recs;W.sum=r.sum;W.warn=r.warn;W.syss=[...new Set(r.recs.map(x=>x.type))].sort((a,b)=>sysRank({},a)-sysRank({},b)||natCmp(a,b));show();}
+          catch(e){sm.textContent="";toast("Couldn't read that file. Save it as .xlsx and try again.");}});
+        body.append(...q("Load the label workbook","One sheet per cabinet and system, named like “1.14 BMS”. Cabinets, systems and device names come from the file."),
+          h("div",{class:"field"},h("label",{for:"wzFile"},"Label workbook (.xlsx)"),file),sm,nav("Next",null,h("button",{type:"button",class:"btn ghost",onclick:()=>{W.recs=null;next();}},"Skip for now")));show();}
+      else{const sm=h("div",{class:"status"},W.fiber?"✓ "+W.fiber.length+" cables loaded":"");
+        body.append(...q("Load the cable list","Excel, CSV, or copy and paste from a sheet. Scans and the cable checklist get turned on for fiber."),
+          importerBox(CABLE_FIELDS,recs=>{W.fiber=recs;sm.textContent="✓ "+recs.length+" cables loaded";},{go:"Use these cables"}),sm,
+          nav("Next",null,h("button",{type:"button",class:"btn ghost",onclick:()=>{W.fiber=null;next();}},"Skip for now")));}
+      return;}
+    if(scr==="phase"){
+      if(!W.phases[pi])W.phases[pi]={id:nid("p"),name:"",tasks:[],perCable:isCable()};
+      const p=W.phases[pi],ord=["first","second","third","fourth","fifth","sixth","seventh","eighth"][pi]||("#"+(pi+1));
+      const nm=h("input",{id:"wzPh",value:p.name,placeholder:"Phase name",autocomplete:"off"});nm.addEventListener("input",()=>{p.name=nm.value;});
+      const used=new Set(W.phases.map(x=>x.name));
+      const sugg=h("div",{class:"chips",style:"gap:6px"},WIZ_PHASES.filter(n=>!used.has(n)||n===p.name).map(n=>h("button",{type:"button",class:"chipbtn","aria-pressed":String(p.name===n),onclick:()=>{p.name=n;if(isCable())p.perCable=!notPerCable(n);draw();}},n)));
+      const tb=h("div",{class:"chips",style:"gap:6px"});
+      const drawTasks=()=>{tb.textContent="";p.tasks.forEach((t,i)=>tb.append(h("span",{class:"chip"},t,h("button",{type:"button",class:"iconbtn","aria-label":"Remove "+t,onclick:()=>{p.tasks.splice(i,1);drawTasks();}},"✕"))));
+        if(!p.tasks.length)tb.append(h("span",{class:"status"},"No tasks yet. The phase itself counts as one task."));};
+      const ti=h("input",{id:"wzTask",placeholder:"Add a task, then Enter",autocomplete:"off"});
+      const addT=n=>{n=String(n||"").trim();if(n&&!p.tasks.includes(n)){p.tasks.push(n);drawTasks();drawTS();}};
+      ti.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();addT(ti.value);ti.value="";}});
+      const ts=h("div",{class:"chips",style:"gap:6px"});
+      const drawTS=()=>{ts.textContent="";(WIZ_TASKS[(p.name||"").toLowerCase()]||TASK_PRESETS).filter(n=>!p.tasks.includes(n)).forEach(n=>ts.append(h("button",{type:"button",class:"chipbtn",onclick:()=>addT(n)},"+ "+n)));};
+      const pc=h("input",{type:"checkbox",id:"wzPc",checked:p.perCable});pc.addEventListener("change",()=>p.perCable=pc.checked);
+      const ok=()=>{if(ti.value.trim()){addT(ti.value);ti.value="";}if(!p.name.trim()){toast("Name the phase or tap one");nm.focus();return false;}return true;};
+      body.append(...q("What's the "+ord+" phase?",pi?"Phases run in order: this one waits for “"+W.phases[pi-1].name+"”.":null),sugg,h("div",{class:"field"},nm),
+        h("div",{class:"flabel"},"Tasks in this phase"),tb,ts,h("div",{class:"field"},ti),
+        isCable()?h("label",{class:"check",for:"wzPc",style:"text-transform:none;letter-spacing:0"},pc,"Check this off per "+(W.kind==="cat6"?"pull":"cable")):null,
+        h("div",{style:"display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:6px"},h("button",{type:"button",class:"btn ghost",onclick:back},"‹ Back"),
+          h("div",{style:"display:flex;gap:8px;flex-wrap:wrap"},
+            h("button",{type:"button",class:"btn ghost",onclick:()=>{if(!ok())return;pi++;draw();const sh=$(".sheet");if(sh)sh.scrollTop=0;}},"+ Next phase"),
+            h("button",{type:"button",class:"btn",onclick:()=>{if(!ok())return;W.phases=W.phases.filter(x=>x.name.trim());next();}},"That's all phases"))));
+      drawTasks();drawTS();return;}
+    if(scr==="crew"){const end=iso(addDays(parseD(W.start),W.weeks*7-1)),days=[];for(let d=parseD(W.start),i=0;i<W.weeks*7&&i<120;i++,d=addDays(d,1))days.push(iso(d));
+      body.append(...q("Who's on this job?","This is the job's crew. You can put people on specific tasks later, picking from this list."),techChips(W.crew,days,"",false),
+        h("p",{class:"status",style:"margin:0"},W.start&&end?"Shows time off and other jobs between "+fmtS(W.start)+" and "+fmtS(end)+".":""),nav("Next",null,h("button",{type:"button",class:"btn ghost",onclick:()=>{W.crew.clear();next();}},"Skip")));return;}
+    if(scr==="review"){const ncab=W.kind==="cat6"?(W.recs||[]).length:W.kind==="fiber"?(W.fiber||[]).length:0;
+      body.append(...q("Look right?"),h("div",{class:"panel stack",style:"gap:6px"},
+        h("div",{},h("strong",{},W.name)," · starts "+fmtS(W.start)+" · about "+W.weeks+" week"+(W.weeks>1?"s":"")),
+        isCable()?h("div",{},ncab?ncab+(W.kind==="cat6"?" labels":" cables"):"No cables yet (you can load them later)"):null,
+        h("ol",{style:"margin:0;padding-left:20px"},W.phases.map(p=>h("li",{},h("strong",{},p.name),p.tasks.length?": "+p.tasks.join(", "):"",isCable()&&p.perCable?h("span",{class:"status"}," · per "+(W.kind==="cat6"?"pull":"cable")):null))),
+        h("div",{},W.crew.size?W.crew.size+" on the crew: "+[...W.crew].map(id=>(techById(id)||{}).name||"").filter(Boolean).join(", "):"No crew picked yet")),
+        nav(null,null,h("button",{type:"button",class:"btn",onclick:create},"Create job")));}}
+  async function create(){if(!db)return;
+    const phases=W.phases.map(p=>({id:p.id,name:p.name.trim(),afterPrev:true}));
+    const tasks=[];W.phases.forEach(p=>{(p.tasks.length?p.tasks:[p.name]).forEach(n=>tasks.push({id:nid("t"),name:n,phase:p.id,doneOn:"",after:[],startedOn:"",crew:[],crewLog:{},addedBy:myId||"",addedAt:Date.now()}));});
+    const steps=isCable()?W.phases.filter(p=>p.perCable).map(p=>({id:p.id,name:p.name.trim()})):[];
+    let cables=[];
+    if(W.kind==="cat6"&&W.recs)cables=W.recs.map(r=>{const o={id:nid("c"),name:r.name,rack:r.rack,type:r.type};if(r.from)o.from=r.from;return o;});
+    if(W.kind==="fiber"&&W.fiber)cables=W.fiber.map(r=>{const o={id:nid("c"),name:String(r.name).trim()};["rack","pull","len","type","from","to","note"].forEach(k=>{if(r[k]&&String(r[k]).trim())o[k]=String(r[k]).trim();});return o;});
+    const body_={name:W.name.trim(),start:W.start||TODAY(),days:0,weeks:W.weeks,phases,tasks,crew:[...W.crew],projectId:"",loc:null,site:"",techs:W.crew.size,scope:"",conf:"locked",pri:3,notes:"",
+      scanCk:W.kind==="fiber",kind:W.kind,cables,steps,createdAt:Date.now(),updatedAt:Date.now(),by:myId||"",addedBy:myId||"",addedAt:Date.now()};
+    if(W.kind==="cat6")body_.sysOrder=W.syss.length?W.syss:SYS_ORDER_DEFAULT.slice();
+    try{const ref=await db.collection("jobs").add(body_);lastNewJob=Object.assign({id:ref.id},body_);
+      logEvent("New job: "+body_.name+(cables.length?" ("+cables.length+" cables)":""),{ev:"cables",jobId:ref.id});
+      closeSheet();toast("Job created");
+      if(W.kind==="cat6"&&cables.length)setTimeout(()=>pullBuilder(ref.id),300);
+      else if(W.kind==="fiber"&&MGR())setTimeout(()=>{const jj=S.jobs.find(x=>x.id===ref.id);if(jj)ensureScanSteps(jj);},800);}
+    catch(e){writeErr(e);}}
+  openView("New job",[body]);liveSheet=null;{const ac=$("#form .actions");if(ac)ac.hidden=true;}draw();}
+/* phase progress from cable steps that share the phase's id */
+function phaseCables(j,p){const cs=cablesOf(j);if(!cs.length||!stepsOf(j).some(s=>s.id===p.id))return null;return {n:stepCount(j,p.id),of:cs.length};}
 
 /* ===== ONE-SCREEN CABLE JOB SETUP =====
    New job: name + start + label workbook + steps → Create, then straight to Build pulls.
