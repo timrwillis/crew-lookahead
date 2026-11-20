@@ -1113,7 +1113,7 @@ function jobPct(j){if(j.doneOn)return 100;const pg=jobProgress(j);if(pg)return p
 function renderJobs(v){
   const nDone=realJobs().filter(j=>j.doneOn).length;
   v.append(h("div",{class:"sechead"},subnav(jobSeg,[["open","Open"],["done","Done",nDone,true],["projects","Projects"]],k=>jobSeg=k),
-    MGR()?(jobSeg==="projects"?h("button",{class:"btn",type:"button",onclick:()=>projectForm(null)},"+ New project"):h("button",{class:"btn",type:"button",onclick:()=>jobForm(null)},"+ Add job")):null));
+    MGR()?(jobSeg==="projects"?h("button",{class:"btn",type:"button",onclick:()=>projectForm(null)},"+ New project"):h("button",{class:"btn",type:"button",onclick:()=>newJobChooser()},"+ Add job")):null));
   if(jobSeg==="projects"){renderProjects(v);return;}
   const t=TODAY(),done=jobSeg==="done";
   if(!done){const qs=S.jobs.filter(j=>isQuick(j)&&!doneDate(j)).sort(qSort);
@@ -1233,7 +1233,7 @@ function renderTasks(v){
     [...open,...S.jobs.filter(j=>j.doneOn&&j.id===taskJob)].map(j=>h("option",{value:j.id,selected:j.id===taskJob},j.name+(jobPct(j)!=null?" · "+jobPct(j)+"%":""))));
   sel.addEventListener("change",()=>{taskJob=sel.value;render();});
   v.append(h("div",{class:"sechead"},h("div",{class:"tools"},h("button",{type:"button",class:"btn ghost small",onclick:()=>{taskJob="";setTab("jobs",true);}},"‹ Jobs"),sel),
-    MGR()&&!taskJob?h("button",{class:"btn",type:"button",onclick:()=>jobForm(null)},"+ Add job"):null));
+    MGR()&&!taskJob?h("button",{class:"btn",type:"button",onclick:()=>newJobChooser()},"+ Add job"):null));
   if(!taskJob&&false){const qs=S.jobs.filter(j=>isQuick(j)&&!doneDate(j)).sort(qSort);
     const qd=quickArchList();
     v.append(h("div",{class:"sechead",style:"margin-top:4px"},h("h2",{},"Quick tasks"),MGR()?h("button",{class:"btn ghost small",type:"button",onclick:()=>quickForm(null)},"+ Quick task"):null));
@@ -2736,7 +2736,8 @@ function jobEditMenu(j){if(!j)return;if(!MGR()){jobForm(j);return;}const go=f=>(
     opt("👷","Crew","Add or move people · "+crewN+" on it now",()=>jobForm(j,"crew"),true),
     opt("📋","Tasks & phases",tk.length?nd+"/"+tk.length+" done · add, rename, reorder":"Add tasks",()=>jobForm(j,"tasks")),
     opt("📝","Details","Name, dates, how long, techs needed, priority, notes",()=>jobForm(j,"details")),
-    opt("🧵","Cables & steps",cn?cn+" cables":"Add or import a cable list or label workbook",()=>cableEditor(j)),
+    opt("🏷","Load label workbook",cn?"Add or update labels from the Excel file":"Excel file with a sheet per cabinet and system",()=>cableJobSetup(j),!cn),
+    opt("🧵","Cables & steps",cn?cn+" cables · steps, profile, material":"Type or paste a cable list instead",()=>cableEditor(j)),
     cablesOf(j).some(c=>c.rack&&c.type)?opt("🧩","Build pulls",(()=>{const cs=cablesOf(j).filter(c=>c.rack&&c.type),n=cs.filter(c=>!c.pull).length;return n?n+" of "+cs.length+" labels not in a pull yet":"Every label is in a pull";})(),()=>pullBuilder(j.id)):null,
     opt("📎","Documents",dn?dn+" files":"Photos, prints, PDFs",()=>docsGallery(j.id)),
     cablesOf(j).length?opt("📊","Live Google Sheet",j.feedId?"On · refreshes every 5 minutes":"Keep a Google Sheet filled with this job's cable data",()=>liveSheetPanel(j.id)):null,
@@ -3942,6 +3943,59 @@ function pullBuilder(jid){
         h("div",{class:"chips",style:"gap:4px"},gl.map(c=>h("button",{type:"button",class:"chip",title:"Take "+c.name+" out of this pull","aria-label":"Take "+c.name+" out of this pull",onclick:()=>assign([c],null)},String(labelNum(c.name)).padStart(3,"0")," ✕")))));});}
   box.append(h("p",{class:"status",style:"margin:0"},"Pick the cabinet and system, name the pull, then type the label numbers off the prints (801-806, 811) or tap them. Each label can only be in one pull."),top,mid,bottom);
   openView("Build pulls · "+j0.name,[box]);$(".sheet").classList.add("wide");liveSheet=()=>{if(!busy&&document.activeElement!==numIn&&document.activeElement!==nameIn)draw();};draw();}
+
+/* ===== ONE-SCREEN CABLE JOB SETUP =====
+   New job: name + start + label workbook + steps → Create, then straight to Build pulls.
+   Existing job (j): just the workbook + steps. */
+const QUICK_STEP_SETS=[["Pulled","Terminated & dressed","Tested & certified"],["Pulled","Dressed","Labeled","Ported","Tested"]];
+function newJobChooser(){const go=f=>()=>{closeSheet();setTimeout(f,60);};
+  const opt=(ic,t,sub,f,pri)=>h("button",{type:"button",class:"emenu"+(pri?" pri":""),onclick:go(f)},h("span",{class:"ic","aria-hidden":"true"},ic),h("span",{},h("strong",{},t),h("small",{},sub)),h("span",{class:"go"},"›"));
+  openView("Add a job",[h("div",{class:"full stack",style:"gap:8px"},
+    opt("🧵","Cable pull job","Load your label workbook. One screen, then build pulls.",()=>cableJobSetup(null),true),
+    opt("📋","Regular job","Dates, crew, phases and tasks",()=>jobForm(null)))]);}
+function cableJobSetup(j){
+  let recs=null,syss=[],stepPick="q0";
+  if(!profilesCache)loadProfiles().then(()=>drawSteps());
+  const nameIn=j?null:h("input",{id:"cjName",placeholder:"e.g. DC2 IDF Cat6",autocomplete:"off"});
+  const startIn=j?null:h("input",{id:"cjStart",type:"date",value:TODAY()});
+  const file=h("input",{type:"file",id:"cjFile",accept:".xlsx,.xls"}),sum=h("div",{class:"stack",style:"gap:4px"}),stepBox=h("div",{class:"chips",style:"gap:6px"});
+  const stepsFor=k=>{if(k[0]==="q")return QUICK_STEP_SETS[+k.slice(1)].map(n=>({name:n}));const p=(profilesCache||[]).find(x=>x.id===k);return p&&Array.isArray(p.steps)?p.steps:[];};
+  function drawSteps(){stepBox.textContent="";const opts=[...QUICK_STEP_SETS.map((s,i)=>["q"+i,s.join(" → ")]),...(profilesCache||[]).filter(p=>Array.isArray(p.steps)&&p.steps.length).map(p=>[p.id,p.name])];
+    opts.forEach(([k,l])=>stepBox.append(h("button",{type:"button",class:"chipbtn","aria-pressed":String(stepPick===k),onclick:()=>{stepPick=k;drawSteps();}},l)));}
+  file.addEventListener("change",async()=>{const f=file.files[0];if(!f)return;sum.textContent="Reading…";
+    try{await loadXLSX();const r=readLabelWorkbook(XLSX.read(await f.arrayBuffer(),{type:"array"}));sum.textContent="";
+      if(!r.recs.length){recs=null;sum.append(h("p",{class:"err"},"No labels found. Name each sheet like “1.14 BMS” with one label per row."));return;}
+      recs=r.recs;syss=[...new Set(recs.map(x=>x.type))].sort((a,b)=>SYS_ORDER_DEFAULT.indexOf(a)-SYS_ORDER_DEFAULT.indexOf(b));
+      if(nameIn&&!nameIn.value.trim())nameIn.value=f.name.replace(/\.[^.]+$/,"").replace(/[_]+/g," ").replace(/\blabels?\b/i,"").trim();
+      const cabs=Object.keys(r.sum).sort(natCmp);
+      sum.append(h("p",{style:"margin:0;color:var(--ok);font-weight:600"},"✓ "+recs.length+" labels · "+cabs.length+" cabinets · "+syss.join(", ")),
+        h("p",{class:"status",style:"margin:0"},cabs.map(c=>c+": "+syss.map(s=>(r.sum[c][s]||0)+" "+s).join(", ")).join(" · ")),
+        ...r.warn.map(w=>h("p",{class:"status",style:"color:var(--over);margin:0"},"⚠ "+w)));}
+    catch(e){recs=null;sum.textContent="";toast("Couldn't read that file. Save it as .xlsx and try again.");}});
+  drawSteps();
+  const fields=[];
+  if(!j)fields.push(h("div",{class:"field full"},h("label",{for:"cjName"},"Job name"),nameIn),h("div",{class:"field full"},h("label",{for:"cjStart"},"Start"),startIn));
+  fields.push(h("div",{class:"field full"},h("label",{for:"cjFile"},"Label workbook"),file,h("p",{class:"status",style:"margin:0"},"One sheet per cabinet and system, like “1.14 BMS”. Cabinets, systems and device names come from the file."),sum),
+    h("div",{class:"field full"},h("span",{class:"flabel"},"Steps each pull goes through"),stepBox),
+    j?null:h("p",{class:"status full",style:"margin:0"},"Add crew later from the job's Crew button."));
+  openSheet(j?"Load labels · "+j.name:"New cable pull job",fields.filter(Boolean),async()=>{
+    const name=j?j.name:nameIn.value.trim(),start=j?j.start:(startIn.value||TODAY());
+    if(!name){formErr("Give the job a name.");return false;}
+    if(!recs){formErr("Pick the label workbook.");return false;}
+    const nid=p=>p+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+    const old=j?cablesOf(j):[],byName=new Map(old.map(c=>[c.name,Object.assign({},c)]));
+    recs.forEach(r=>{const ex=byName.get(r.name),d={rack:r.rack,type:r.type};if(r.from)d.from=r.from;if(ex)Object.assign(ex,d);else byName.set(r.name,Object.assign({id:nid("c"),name:r.name},d));});
+    const cables=[...byName.values()],keepSteps=j&&stepsOf(j).length;
+    const steps=keepSteps?stepsOf(j):stepsFor(stepPick).map(s=>({id:nid("s"),name:s.name,split:!!s.split}));
+    const sysOrder=j?[...new Set([...sysOrderOf(j),...syss])]:syss;
+    let id;
+    if(j){await saveVersion(j,"Before label import");await db.collection("jobs").doc(j.id).update({cables,steps,sysOrder,updatedAt:Date.now()});id=j.id;}
+    else{const body={name,start,days:0,weeks:4,phases:[],tasks:[],crew:[],projectId:"",loc:null,site:"",techs:0,scope:"",conf:"locked",pri:3,notes:"",scanCk:false,
+        cables,steps,sysOrder,createdAt:Date.now(),updatedAt:Date.now(),by:myId||"",addedBy:myId||"",addedAt:Date.now()};
+      const ref=await db.collection("jobs").add(body);id=ref.id;lastNewJob=Object.assign({id},body);}
+    logEvent((j?"Labels loaded: ":"New cable job: ")+name+" ("+cables.length+" labels)",{ev:"cables",jobId:id});
+    nextAfterSave=()=>setTimeout(()=>pullBuilder(id),300);});
+  $(".sheet").classList.add("wide");}
 
 /* progress by cabinet and system, in the order the crew pulls them */
 function cabinetProgress(j){const cs=cablesOf(j).filter(c=>c.rack&&c.type),ss=stepsOf(j);if(!cs.length||!ss.length)return null;
