@@ -1226,7 +1226,7 @@ function jobPanel(j){
       m&&j.doneOn?h("button",{type:"button",class:"btn ghost small",onclick:()=>setDone(j,false)},"Reopen job"):null)));
   const tk=tasksOf(j),ph=phasesOf(j);
   if(readyToClose(j))box.append(closePrompt(j));
-  if(needsScan(j)){box.prepend(scanBar(j));if(MGR()&&missingScanSteps(j))setTimeout(()=>ensureScanSteps(S.jobs.find(x=>x.id===j.id)),0);}
+  if(needsScan(j)){box.prepend(scanBar(j));if(MGR()&&missingScanSteps(j))setTimeout(()=>ensureScanSteps(S.jobs.find(x=>x.id===j.id)),0);else setTimeout(()=>healScanSteps(S.jobs.find(x=>x.id===j.id)),0);}
   {const cst=ph.some(p=>p.cab)?null:cabinetStrip(j);if(cst)box.append(cst);}
   if(!tk.length){box.append(h("div",{class:"empty"},h("strong",{},"No tasks yet"),m?"Edit the job to add tasks, or tap “Standard cable run” in the job form.":"A lead hasn't broken this job into tasks yet."));}
   else{
@@ -3191,6 +3191,22 @@ function keepPhotoAsk(c,lines){return new Promise(resolve=>{
     h("p",{class:"status",style:"margin:0 0 10px"},"Save the photo anyway, or delete it?"),
     h("div",{style:"display:flex;gap:8px;flex-wrap:wrap"},h("button",{type:"button",class:"btn",onclick:()=>done(false)},"🗑 Delete photo"),h("button",{type:"button",class:"btn ghost",onclick:()=>done(true)},"Save photo")));
   document.body.append(wrap);setTimeout(()=>{const b=pop.querySelector("button");b&&b.focus();},30);});}
+/* steps a cable's scans should have checked off but haven't yet. cable = serial (or label QR); src / dst = enclosures */
+function scanStepsDue(j,cid,ck){const sC=scanStepFor(j,"cable"),sS=scanStepFor(j,"src"),sD=scanStepFor(j,"dst"),want=new Set(),sn=snFromUrl(ck.qr);
+  const cableBad=ck.serial&&ck.qr&&sn&&sn!==String(ck.serial).trim(),encBad=ck.src&&ck.dst&&ck.src.trim()===ck.dst.trim();
+  if(sC&&(ck.serial||ck.qr)&&!cableBad)want.add(sC);
+  if(sS&&sS===sD){if(ck.src&&ck.dst&&!encBad)want.add(sS);}
+  else{if(sS&&ck.src)want.add(sS);if(sD&&ck.dst&&!encBad)want.add(sD);}
+  return [...want].filter(id=>!markOf(j,cid,id)).map(id=>stepsOf(j).find(x=>x.id===id)).filter(Boolean);}
+/* cables scanned before their step existed (or held back by an old rule): check those steps now, credited to whoever scanned */
+const scanHealed=new Set();
+async function healScanSteps(j){if(!j||!CAN_POST()||scanHealed.has(j.id)||!needsScan(j))return;scanHealed.add(j.id);
+  const upd={},sC=scanStepFor(j,"cable");let n=0;
+  cablesOf(j).forEach(c=>{const ck=ckOf(j,c.id);scanStepsDue(j,c.id,ck).forEach(st=>{
+    const f=st.id===sC?(ck.serial?"serial":"qr"):(st.id===scanStepFor(j,"dst")&&ck.dst?"dst":"src");
+    upd["marks."+c.id+"."+st.id]={at:ck[f+"At"]||Date.now(),by:ck[f+"By"]||myId||"",auto:true};n++;});});
+  if(!n)return;upd.updatedAt=Date.now();
+  try{await db.collection("jobs").doc(j.id).update(upd);logEvent("Checked off "+n+" scan step"+(n===1?"":"s")+" from scans already saved · "+j.name,{ev:"cables",jobId:j.id});}catch(e){scanHealed.delete(j.id);}}
 async function applyCodesToCk(jid,cid,codes,photo,hint,opts){const j=S.jobs.find(x=>x.id===jid),c=j&&cablesOf(j).find(x=>x.id===cid);if(!c||!codes.length)return[];
   opts=opts||{};const prev=ckOf(j,cid);
   /* photos someone sent you: the scan is credited to them, the log says you uploaded it */
@@ -3214,23 +3230,20 @@ async function applyCodesToCk(jid,cid,codes,photo,hint,opts){const j=S.jobs.find
       if(!hasPhoto||opts.keepRepeat||await keepPhotoAsk(c,lines)){const id=await savePhotoToCable(j,c,photo,hit,takenBy);
         if(id){cur.photos=[...(cur.photos||[]),{id,at:now,by:me,what:hit}];await saveCk(j,cid,cur);opts.out={saved:hit,again:true};logEvent(who+" saved another photo of "+c.name+" ("+hit.map(f=>CK_LABEL[f]).join(" + ")+")",{ev:"cables",jobId:jid});toast(hasPhoto?"Photo saved to "+c.name:"Already scanned. Photo saved to "+c.name+" (it had none).");}}
       else toast("Photo deleted. Nothing changed on "+c.name+".");
+      {const due=scanStepsDue(j,cid,ckOf(j,cid));for(const st of due)await setMarks(j,[[cid,st.id]],true,opts.by);if(due.length&&!opts.batch)toast(due.map(st=>st.name+" ✓").join(" · "));}
       if(liveSheet)liveSheet();return[];}}
   /* all four scans in and matching → item 1 (validate serial, QR, SRC & Dest) is done by whoever finished the scans */
   let autoItem=false,autoStep=null;
   if(uniq.length&&ckScanN(cur)===4&&!ckProblems(cur).length&&!(cur.items&&cur.items[1]&&cur.items[1].at)){cur.items=Object.assign({},cur.items||{});cur.items[1]={by:me,techId:byTech,at:now,remark:"All 4 scans match",auto:true};autoItem=true;}
-  const autoSteps=[];
-  if(uniq.length&&!ckProblems(cur).length){const sC=scanStepFor(j,"cable"),sS=scanStepFor(j,"src"),sD=scanStepFor(j,"dst"),want=new Set();
-    if(sC&&cur.serial&&cur.qr)want.add(sC);
-    if(sS&&sS===sD){if(cur.src&&cur.dst)want.add(sS);}
-    else{if(sS&&cur.src)want.add(sS);if(sD&&cur.dst)want.add(sD);}
-    want.forEach(id=>{if(!markOf(j,cid,id)){const st=stepsOf(j).find(x=>x.id===id);if(st)autoSteps.push(st);}});}
+  /* each scan checks off its own step right away. Only a real mismatch holds back the step it affects */
+  const autoSteps=scanStepsDue(j,cid,cur);
   autoStep=autoSteps[0]||null;
   if(photo&&uniq.length){const id=await savePhotoToCable(j,c,photo,uniq,takenBy);if(id){cur.photos=[...(cur.photos||[]),{id,at:now,by:me,what:uniq}];uniq.forEach(f=>{cur[f+"Photo"]=id;});}}
   opts.out=Object.assign(opts.out||{},{saved:uniq,warn,steps:autoSteps.map(st=>st.name)});
   if(uniq.length){await saveCk(j,cid,cur);logEvent(who+" scanned "+uniq.map(f=>CK_LABEL[f]).join(" + ")+" for "+c.name+(photo?" (photo saved)":""),{ev:"cables",jobId:jid});}
   for(const st of autoSteps)await setMarks(j,[[cid,st.id]],true,opts.by);
   if(autoItem)logEvent(meName()+" validated "+c.name+": serial, QR, source and destination all scanned and matching",{ev:"cables",jobId:jid});
-  if(!opts.batch){warn.forEach(w=>toast(w));if(uniq.length)toast("Saved "+uniq.map(f=>CK_LABEL[f]).join(" + ")+(autoSteps.length?" · "+autoSteps.map(st=>st.name+" ✓").join(" · "):"")+(autoItem?" · item 1 ✓":""));}
+  if(!opts.batch){warn.forEach(w=>toast(w));if(!uniq.length&&autoSteps.length)toast(autoSteps.map(st=>st.name+" ✓").join(" · "));if(uniq.length)toast("Saved "+uniq.map(f=>CK_LABEL[f]).join(" + ")+(autoSteps.length?" · "+autoSteps.map(st=>st.name+" ✓").join(" · "):"")+(autoItem?" · item 1 ✓":""));}
   if(liveSheet)liveSheet();return uniq;}
 /* the picture goes in the job's documents, named after the cable, with who took it */
 async function savePhotoToCable(j,c,blob,what,more){const d=new Date(),stamp=iso(d)+" "+String(d.getHours()).padStart(2,"0")+String(d.getMinutes()).padStart(2,"0");
@@ -3399,7 +3412,7 @@ async function scanFindCable(jid,pre){let codes,photo=null;
   if(!codes.length)return;const j=S.jobs.find(x=>x.id===jid);if(!j)return;
   const keys=new Set();codes.forEach(v=>{v=String(v).trim();keys.add(v);const sn=snFromUrl(v);if(sn)keys.add(sn);});
   const c=cablesOf(j).find(c=>{const ck=ckOf(j,c.id);return keys.has(String(ck.serial||"").trim())||keys.has(String(ck.qr||"").trim())||keys.has((c.name||"").trim());});
-  if(c){if(photo||codes.length>1)await applyCodesToCk(jid,c.id,codes,photo,"");closeSheet();setTimeout(()=>ckSheet(jid,c.id),60);return;}
+  if(c){const byName=codes.length===1&&!photo&&String(codes[0]).trim()===(c.name||"").trim();if(!byName)await applyCodesToCk(jid,c.id,codes,photo,"");closeSheet();setTimeout(()=>ckSheet(jid,c.id),60);return;}
   const sn=[...keys].find(k=>/^\d{6,}$/.test(k))||codes[0];
   const free=cablesOf(j).filter(c=>!ckOf(j,c.id).serial),rest=cablesOf(j).filter(c=>ckOf(j,c.id).serial);
   const link=async c=>{closeSheet();await applyCodesToCk(jid,c.id,codes,photo,"serial");setTimeout(()=>ckSheet(jid,c.id),60);};
@@ -3452,8 +3465,12 @@ function cableData(j){const cs=cablesOf(j),ss=stepsOf(j),who=u=>u?realName(u):""
       scans:CK_SCANS.map(([k,l])=>[l,ck[k]||"",who(ck[k+"By"]),T(ck[k+"At"])]),
       steps:ss.map(x=>{const m=markOf(j,c.id,x.id),pp=partsOf(j,c.id,x.id);return[x.name,m?"✓":"",m?T(m.at):"",m?who(m.by):"",pp.map(p=>partWho(p)+(partTxt(p)?" ("+partTxt(p)+")":"")).join("; ")];}),
       checks:CK_ITEMS.map((t,i)=>{const it=(ck.items||{})[i+1];return[t,it&&it.at?ckWho(it):"",it&&it.at?T(it.at):"",it&&it.at?(it.remark||"")+(it.auto?" (from scans)":""):""];}),
-      history:hist.map(r=>[T(r[0]),r[1],r[2],r[3]])};});
-  return{job:j.name||"",updated:T(Date.now()),steps:ss.map(x=>x.name),cables};}
+      history:hist.map(r=>[T(r[0]),r[1],r[2],r[3]]),
+      /* laid out like the company check list: serials go at B2, check list at C7 */
+      company:{serials:CK_SCANS.map(([k,l])=>[l,ck[k]||""]),
+        checks:CK_ITEMS.map((t,i)=>{const it=(ck.items||{})[i+1];return [t,...(it&&it.at?[ckWho(it),"TRUE",ckDate(it.at),"NA","",it.remark||""]:["","FALSE","","NA","",""])];})}};});
+  return{job:j.name||"",updated:T(Date.now()),steps:ss.map(x=>x.name),scriptV:FEED_SCRIPT_V,cables};}
+const FEED_SCRIPT_V=2;
 async function gzB64(str){const cs=new Blob([str]).stream().pipeThrough(new CompressionStream("gzip"));const u=new Uint8Array(await new Response(cs).arrayBuffer());let b="";for(let i=0;i<u.length;i+=32768)b+=String.fromCharCode.apply(null,u.subarray(i,i+32768));return btoa(b);}
 /* the feed doc must stay under Firestore's 1 MB limit, so the full data goes in gzipped; the plain copies are only kept for old pasted scripts when they fit */
 async function writeFeed(j,loud){if(!j||!j.feedId||!db)return false;
@@ -3480,7 +3497,7 @@ function feedScript(j){return `// Crew Lookahead → live cable data for "${(j.n
 // Paste this in Extensions → Apps Script, save, then run "setup" once.
 // Makes a "Cables" list (click a cable to open its own tab), a tab per cable, "History" and "Summary".
 const FEED = "${feedUrl(j.feedId)}";
-const HEAD_FILL = "#e8eef7", SEC_FILL = "#f3f3f3";
+const HEAD_FILL = "#e8eef7", SEC_FILL = "#f3f3f3", COPY_FILL = "#fff2cc", SCRIPT_V = ${FEED_SCRIPT_V};
 
 function refreshCables() {
   const res = UrlFetchApp.fetch(FEED, { muteHttpExceptions: true });
@@ -3517,7 +3534,7 @@ function refreshCables() {
     c._gid === null ? String(c.name) : '=HYPERLINK("#gid=' + c._gid + '","' + String(c.name).replace(/"/g, '""') + '")',
     c.status, bar_(c.done, c.total), c.done + "/" + c.total, c.row, c.from, c.to, c.last, c.problems]));
   master.clear();
-  master.getRange(1, 1, 1, 2).setValues([[data.job + " · cables", "Updated " + data.updated]]).setFontWeight("bold");
+  master.getRange(1, 1, 1, 3).setValues([[data.job + " · cables", "Updated " + data.updated, (data.scriptV || 0) > SCRIPT_V ? "⚠ Newer script in the app: Live Google Sheet → Copy script, paste over this one, run setup" : ""]]).setFontWeight("bold");
   master.getRange(3, 2, rows.length, rows[0].length - 1).setNumberFormat("@");
   master.getRange(3, 1, rows.length, rows[0].length).setValues(rows);
   master.getRange(3, 1, 1, rows[0].length).setFontWeight("bold").setBackground(HEAD_FILL);
@@ -3537,16 +3554,27 @@ function refreshCables() {
 
 function cableTab_(ss, sh, name, c, data) {
   sh = sh || ss.insertSheet(name, ss.getNumSheets());
-  const rows = [], bold = [], fill = [];
-  const add = r => { while (r.length < 5) r.push(""); rows.push(r); };
+  const rows = [], bold = [], fill = [], copy = [], W = 7;
+  const add = r => { while (r.length < W) r.push(""); rows.push(r.slice(0, W)); };
   const block = (title, head, list) => {
     bold.push(rows.length + 1); add([title]);
     if (head) { fill.push(rows.length + 1); add(head.slice()); }
     list.forEach(r => add(r.slice()));
     add([]);
   };
-  add([c.status + " · " + c.done + "/" + c.total + " steps", "", "", "", ""]);
+  add([c.status + " · " + c.done + "/" + c.total + " steps"]);
   add([]);
+  if (c.company) {
+    bold.push(rows.length + 1); add(["For the company check list: copy the yellow cells"]);
+    fill.push(rows.length + 1); add(["Serials", "Paste at B2"]);
+    c.company.serials.forEach(r => { copy.push("B" + (rows.length + 2)); add(r.slice()); });
+    add([]);
+    fill.push(rows.length + 1); add(["Check list", "Paste at C7"]);
+    const top = rows.length + 2;
+    c.company.checks.forEach(r => add(r.slice()));
+    copy.push("B" + top + ":G" + (top + c.company.checks.length - 1));
+    add([]);
+  }
   block("Cable", null, c.info);
   block("Scans", ["What", "Value", "Scanned by", "When"], c.scans);
   block("Steps", ["Step", "Done", "Date", "By", "Sign-offs"], c.steps);
@@ -3554,11 +3582,12 @@ function cableTab_(ss, sh, name, c, data) {
   block("History", ["When", "What", "By", "Details"], c.history.length ? c.history : [["", "Nothing yet"]]);
   sh.clear();
   // row 1: back link (a formula) then the rest as plain text
-  sh.getRange(2, 1, rows.length, 5).setNumberFormat("@").setValues(rows).setWrap(true).setVerticalAlignment("top");
+  sh.getRange(2, 1, rows.length, W).setNumberFormat("@").setValues(rows).setWrap(true).setVerticalAlignment("top");
   sh.getRange(1, 1, 1, 2).setValues([['=HYPERLINK("#gid=' + ss.getSheetByName("Cables").getSheetId() + '","← All cables")', ""]]);
   sh.getRangeList(["A1:B2"].concat(bold.map(r => "A" + (r + 1)))).setFontWeight("bold");
-  if (fill.length) sh.getRangeList(fill.map(r => "A" + (r + 1) + ":E" + (r + 1))).setFontWeight("bold").setBackground(SEC_FILL);
-  [230, 300, 150, 170, 260].forEach((w, i) => sh.setColumnWidth(i + 1, w));
+  if (fill.length) sh.getRangeList(fill.map(r => "A" + (r + 1) + ":G" + (r + 1))).setFontWeight("bold").setBackground(SEC_FILL);
+  if (copy.length) sh.getRangeList(copy).setBackground(COPY_FILL);
+  [230, 300, 150, 170, 260, 60, 200].forEach((w, i) => sh.setColumnWidth(i + 1, w));
   return sh;
 }
 
@@ -3764,6 +3793,7 @@ function cableTracker(jid,q0){
     box.append(h("p",{class:"status",style:"margin:0"},"Tap as many boxes as you like; they save together right after. Steps with ✎ open a sign-off: each person records the part they did (ODF side, FBR side, ports) and who finished it. “all” marks a whole group. Saves right away for everyone."));
     box.style.minHeight="";if(sh)sh.scrollTop=shTop;if(qIn.value!==trackQ)qIn.value=trackQ;};
   openView("Cables",[box]);$(".sheet").classList.add("wide");liveSheet=draw;draw();
+  {const j0=S.jobs.find(x=>x.id===jid);if(j0&&!missingScanSteps(j0))setTimeout(()=>healScanSteps(S.jobs.find(x=>x.id===jid)),0);}
 }
 
 /* ===== CHECK OFF ONE STEP ON MANY CABLES =====
