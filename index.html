@@ -861,7 +861,7 @@ const partsOf=(j,cid,sid)=>(rawMark(j,cid,sid)||{}).parts||[];
 const isSplit=st=>!!st&&(st.split!=null?!!st.split:/port|vfl|test|term|splic|certif|otdr/i.test(st.name||""));
 const rowOf=c=>{for(const v of [c.row,c.pull,c.to,c.note,c.rack]){const m=String(v||"").match(/\brow[\s#:-]*(\d+)/i);if(m)return "ROW-"+m[1];}return "";};
 const natCmp=(a,b)=>{a=String(a||"");b=String(b||"");if(!a&&b)return 1;if(a&&!b)return -1;return a.localeCompare(b,undefined,{numeric:true,sensitivity:"base"});};
-const cabVal=(c,k)=>k==="row"?rowOf(c):String(c[k]||"").trim();
+const cabVal=(c,k)=>k==="row"?rowOf(c):k==="sheet"?String(c.sheet||[c.rack,c.type].filter(Boolean).join(" ")).trim():String(c[k]||"").trim();
 const stepCount=(j,sid)=>cablesOf(j).filter(c=>markOf(j,c.id,sid)).length;
 function jobProgress(j){const cs=cablesOf(j),ss=stepsOf(j);if(!cs.length||!ss.length)return null;let done=0;cs.forEach(c=>ss.forEach(st=>{if(markOf(j,c.id,st.id))done++;}));const total=cs.length*ss.length;return {done,total,pct:Math.round(done*100/total)};}
 const stem=x=>(x||"").toLowerCase().replace(/[^a-z]/g,"").slice(0,4);
@@ -2822,7 +2822,7 @@ const CABLE_FIELDS=[{k:"name",l:"Cable ID",re:/cable|^id$|label|tag|number|^#|ci
   {k:"len",l:"Length",re:/len|length|feet|ft|meter/},{k:"type",l:"Cable type",re:/type|media|category|^cat\b|spec|part|description/},{k:"from",l:"From",re:/from|a.?end|origin|source|near/},{k:"to",l:"To",re:/^to$|^to |b.?end|dest|far|termination/},{k:"note",l:"Notes",re:/note|comment|remark/}];
 const MAT_FIELDS=[{k:"item",l:"Item",re:/item|desc|description|material|name/},{k:"part",l:"Part #",re:/part|sku|cat.?#|catalog|mfg|model/},{k:"qty",l:"On hand",re:/qty|quantity|on.?hand|count|stock/},{k:"unit",l:"Unit",re:/unit|uom/},
   {k:"per",l:"Feet per unit",re:/per|ft.?\/|feet per|length/},{k:"location",l:"Location",re:/loc|location|where|bin|truck/},{k:"min",l:"Reorder at",re:/min|reorder|par/}];
-const GROUPS={row:"Row pulled to",rack:"Rack",pull:"Pull",type:"Cable type",len:"Length"};
+const GROUPS={sheet:"Sheet",row:"Row pulled to",rack:"Rack",pull:"Pull",type:"Cable type",len:"Length"};
 const SORTS={"":"List order",row:"Row pulled to",rack:"Rack",len:"Length",name:"Cable ID"};
 function parseLen(x){if(x==null)return NaN;const s=String(x).trim().toLowerCase();const n=parseFloat(s.replace(/[^0-9.]/g,""));if(isNaN(n))return NaN;return /m(eter)?s?$/.test(s)&&!/ft|feet|'/.test(s)?n*3.281:n;}
 const fmtFt=n=>Math.round(n).toLocaleString()+" ft";
@@ -2858,7 +2858,7 @@ function importerBox(fields,onRows,opts){opts=opts||{};
     const hasHdr=hdr.checked,head=hasHdr?rows[0]:rows[0].map((_,i)=>"Column "+(i+1)),body=hasHdr?rows.slice(1):rows;
     const used=new Set(),map={};
     [...fields.slice(1),fields[0]].forEach(f=>{const i=head.findIndex((x,ix)=>!used.has(ix)&&f.re.test(String(x).trim().toLowerCase()));if(i>=0){map[f.k]=i;used.add(i);}});
-    if(map[fields[0].k]==null&&!hasHdr)map[fields[0].k]=0;
+    if(map[fields[0].k]==null&&!hasHdr){const li=rows[0].findIndex(x=>LABEL_RE.test(String(x).trim()));map[fields[0].k]=li>=0?li:0;}
     const sels={};
     out.append(h("label",{class:"check",for:"impHdr",style:"text-transform:none;letter-spacing:0"},hdr,"First row is column names"),
       h("div",{class:"flabel"},"Match the columns ("+body.length+" rows found)"),
@@ -2875,7 +2875,8 @@ function importerBox(fields,onRows,opts){opts=opts||{};
   file.addEventListener("change",async()=>{const f=file.files[0];if(!f)return;
     try{if(/\.(csv|tsv|txt)$/i.test(f.name)){useRows(parseDelimited(await f.text()));return;}
       await loadXLSX();wb=XLSX.read(await f.arrayBuffer(),{type:"array"});const names=wb.SheetNames;
-      const pick=n=>useRows(XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:false,defval:""}));
+      const pick=n=>{const rr=XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:false,defval:""});hdr.checked=!(rr[0]||[]).some(x=>LABEL_RE.test(String(x).trim()));useRows(rr);};
+      if(names.filter(n=>/^\s*[\d.]+\s+\S/.test(n)).length>1&&!opts.noWbHint)out.before(h("p",{class:"status",style:"margin:0;color:var(--over)"},"This looks like a label workbook (a sheet per cabinet). Use “Import label workbook” to bring in every sheet at once, or keep going here for one sheet."));
       if(names.length>1){const ss=h("select",{id:"impSheet","aria-label":"Sheet"},names.map(n=>h("option",{value:n},n)));ss.addEventListener("change",()=>pick(ss.value));out.before(h("div",{class:"field"},h("label",{for:"impSheet"},"Sheet"),ss));}
       pick(names[0]);}catch(e){toast("Couldn't read that file. Try saving it as .xlsx or .csv.");}});
   box.append(h("div",{class:"field"},h("label",{for:"impFile"},"Excel or CSV file"),file),paste,out);
@@ -3715,7 +3716,7 @@ function cableReport(jid){const j=S.jobs.find(x=>x.id===jid);if(!j)return;const 
       h("button",{type:"button",class:"linkbtn",onclick:()=>{closeSheet();setTimeout(()=>cableTracker(jid),60);}},"‹ Back to cables")),out)]);
   draw();liveSheet=draw;}
 /* search words against everything we know about a cable (name, from/to, rack, row, type, notes, serial, label) */
-function cableHay(j,c){const ck=ckOf(j,c.id),lb=labelLines(j,c);return [c.name,c.from,c.to,c.rack,c.pull,rowOf(c),c.type,c.note,c.len,ck.serial,ck.src,ck.dst,lb[0],lb[1]].filter(Boolean).join(" ").toLowerCase();}
+function cableHay(j,c){const ck=ckOf(j,c.id),lb=labelLines(j,c);return [c.name,c.from,c.to,c.rack,c.pull,rowOf(c),c.type,c.note,c.len,c.tag,c.sheet,ck.serial,ck.src,ck.dst,lb[0],lb[1]].filter(Boolean).join(" ").toLowerCase();}
 const cableMatch=(j,c,q)=>{const ws=String(q||"").toLowerCase().split(/\s+/).filter(Boolean);if(!ws.length)return true;const hs=cableHay(j,c),flat=hs.replace(/[^a-z0-9]/g,"");return ws.every(w=>hs.includes(w)||flat.includes(w.replace(/[^a-z0-9]/g,"")));};
 function cableTracker(jid,q0){
   let remainingOnly=false,trackQ=q0||"";
@@ -4011,7 +4012,7 @@ function cableEditor(j){
       h("div",{class:"bulk",style:"margin-top:6px"},h("label",{for:"cbSlack",class:"status"},"Extra for slack/waste %"),sl,h("span",{class:"status"},"Set “Feet per unit” on material items (e.g. 1000 for a box) to compare.")));}
   const addStep=n=>{if(steps.some(x=>x.name.toLowerCase()===n.toLowerCase()))return;steps.push({id:nid("s"),name:n});drawSteps();};
   const addRecs=(recs,replace)=>{if(replace)cables=[];const byName=new Map(cables.map(c=>[c.name,c]));let add=0,upd=0;
-    recs.forEach(r=>{const name=(r.name||"").trim();if(!name)return;const ex=byName.get(name);const data={};["rack","pull","len","type","from","to","note"].forEach(k=>{if(r[k]!=null&&String(r[k]).trim()!=="")data[k]=String(r[k]).trim();});
+    recs.forEach(r=>{const name=(r.name||"").trim();if(!name)return;const ex=byName.get(name);if(r.tagOnly&&!ex)return;const data={};["rack","pull","len","type","from","to","note","sheet","tag"].forEach(k=>{if(r[k]!=null&&String(r[k]).trim()!=="")data[k]=String(r[k]).trim();});
       if(ex){Object.assign(ex,data);upd++;}else{const c=Object.assign({id:nid("c"),name},data);cables.push(c);byName.set(name,c);add++;}});
     drawCables();drawMat();toast((add?"Added "+add:"")+(add&&upd?", ":"")+(upd?"updated "+upd:"")+(add||upd?" cables":"Nothing new to add"));};
   const paste=h("textarea",{id:"cbPaste",placeholder:"One cable per line, in pull order\ne.g.\nKNC3A-C12-001\nKNC3A-C12-002",style:"min-height:80px"});
@@ -4050,7 +4051,7 @@ function cableEditor(j){
         h("button",{type:"button",class:"btn ghost small",onclick:()=>{steps.push({id:nid("s"),name:"New step"});drawSteps();}},"+ Other"))),
     h("div",{class:"field full"},h("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"},h("span",{class:"flabel"},"Cables in pull order · ",cabCount),
       h("div",{style:"display:flex;gap:6px;flex-wrap:wrap"},h("button",{type:"button",class:"btn small",onclick:()=>{lwbWrap.hidden=!lwbWrap.hidden;impWrap.hidden=true;}},"Import label workbook"),
-        h("button",{type:"button",class:"btn ghost small",onclick:()=>{impWrap.hidden=!impWrap.hidden;lwbWrap.hidden=true;}},"Import from Excel / Sheets"))),lwbWrap,impWrap,cabBox),
+        h("button",{type:"button",class:"btn ghost small",onclick:()=>{impWrap.hidden=!impWrap.hidden;lwbWrap.hidden=true;}},"Import one sheet or CSV"))),lwbWrap,impWrap,cabBox),
     h("div",{class:"field full"},h("span",{class:"flabel"},"Set a group for many cables at once"),h("div",{class:"bulk"},h("span",{class:"status"},"Rows"),bf,h("span",{class:"status"},"to"),bt,bk,bv,h("button",{type:"button",class:"btn ghost small",onclick:bulkApply},"Apply"))),
     h("div",{class:"field full"},h("label",{for:"cbPaste"},"Paste a simple list"),paste,h("div",{},h("button",{type:"button",class:"btn ghost small",onclick:()=>{addRecs(paste.value.split(/\r?\n|,|\t/).map(x=>({name:x})));paste.value="";}},"Add these cables"))),
     h("div",{class:"field full"},h("span",{class:"flabel"},"Or make a numbered range"),h("div",{class:"rangegen"},
@@ -4058,7 +4059,7 @@ function cableEditor(j){
       h("button",{type:"button",class:"btn ghost small",onclick:genRange},"Add range"))),
     h("div",{class:"field full"},h("span",{class:"flabel"},"Material check (from your Material list)"),matBox)],
     async()=>{const ss=steps.filter(x=>(x.name||"").trim()).map(x=>({id:x.id,name:x.name.trim(),split:isSplit(x)}));
-      const cc=cables.filter(x=>(x.name||"").trim()).map(x=>{const o={id:x.id,name:x.name.trim()};["rack","pull","len","type","from","to","note"].forEach(k=>{if(x[k])o[k]=String(x[k]).trim();});if(Array.isArray(x.label)&&x.label.some(Boolean))o.label=x.label;return o;});
+      const cc=cables.filter(x=>(x.name||"").trim()).map(x=>{const o={id:x.id,name:x.name.trim()};["rack","pull","len","type","from","to","note","sheet","tag"].forEach(k=>{if(x[k])o[k]=String(x[k]).trim();});if(Array.isArray(x.label)&&x.label.some(Boolean))o.label=x.label;return o;});
       await saveVersion(j,"Before cable edit");await db.collection("jobs").doc(j.id).update({steps:ss,cables:cc,typeMat,slack,sysOrder:sysOrder.filter(Boolean),updatedAt:Date.now()});
       logEvent("Cables updated: "+j.name+" ("+cc.length+" cables, "+ss.map(x=>x.name).join(" → ")+")",{ev:"cables",jobId:j.id});});
   $(".sheet").classList.add("wide");
@@ -4076,6 +4077,64 @@ const labelNum=n=>{const m=String(n||"").match(/(\d+)\s*$/);return m?parseInt(m[
 function pullKey(idf,sys,name){return idf+" "+sys+" · "+String(name||"").trim();}
 function pullShort(c){const p=String(c.pull||""),i=p.indexOf(" · ");return i>=0?p.slice(i+3):p;}
 /* read every sheet; returns {recs, sum:{idf:{sys:n}}, warn:[]} */
+/* ---- sheet-by-sheet column picker for a label workbook ----
+   Every sheet is its own group (cabinet + system). For each sheet you say what it's for
+   (cables / labels only / skip) and which column is the port number and which is the device name. */
+function mapWorkbook(wb,el){return new Promise(resolve=>{
+  const colL=i=>String.fromCharCode(65+(i%26));
+  const cfg=wb.SheetNames.map(sn=>{
+    const rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:false,defval:""}).map(r=>r.map(x=>String(x==null?"":x).trim())).filter(r=>r.some(Boolean));
+    const ncol=Math.max(0,...rows.map(r=>r.length));
+    const hits=[...Array(ncol)].map((_,i)=>rows.filter(r=>LABEL_RE.test(r[i]||"")).length),fill=[...Array(ncol)].map((_,i)=>rows.filter(r=>r[i]).length);
+    let port=hits.indexOf(Math.max(0,...hits));if(port<0||!hits[port])port=fill.indexOf(Math.max(0,...fill));
+    let other=-1;for(let i=0;i<ncol;i++)if(i!==port&&fill[i]>=Math.max(1,rows.length*.5)){other=i;break;}
+    const m=sn.trim().match(/^([\d.]+)\s+(.+)$/);
+    const role=!rows.length?"skip":/label/i.test(sn)?"labels":"cables";
+    const hdr=rows.length>1&&port>=0&&!LABEL_RE.test(rows[0][port]||"")&&hits[port]>0;
+    return {sn,rows,ncol,role,cab:m?m[1]:"",sys:m?sysName(m[2]):sn.trim(),port:Math.max(0,port),dev:other,hdr};});
+  const box=h("div",{class:"stack",style:"gap:10px"});
+  function build(){const recs=new Map(),tags=new Map(),sum={},warn=[];
+    cfg.forEach(c=>{if(c.role==="skip")return;let wrong=0,dup=0;
+      c.rows.slice(c.hdr?1:0).forEach(r=>{const port=(r[c.port]||"").trim();if(!port)return;
+        const other=c.dev>=0?(r[c.dev]||"").trim():"";
+        if(c.role==="labels"){if(other)tags.set(port,other);return;}
+        if(c.cab&&LABEL_RE.test(port)&&port.split("-")[0]!==c.cab){wrong++;return;}
+        if(recs.has(port)){dup++;return;}
+        const o={name:port,rack:c.cab,type:c.sys,sheet:c.sn.trim()};if(other)o.from=other;recs.set(port,o);
+        const k=c.cab||"—";sum[k]=sum[k]||{};sum[k][c.sys]=(sum[k][c.sys]||0)+1;});
+      if(wrong)warn.push("“"+c.sn+"”: "+wrong+" label"+(wrong===1?"":"s")+" belong to a different cabinet, so they were left out. It may be a copy of another sheet.");
+      if(dup)warn.push("“"+c.sn+"”: "+dup+" port number"+(dup===1?" was":"s were")+" already on another sheet, so "+(dup===1?"it was":"they were")+" left out.");});
+    let tagN=0;tags.forEach((t,p)=>{const r=recs.get(p);if(r){r.tag=t;tagN++;}else{recs.set(p,{name:p,tag:t,tagOnly:true});tagN++;}});
+    return {recs:[...recs.values()],sum,warn,tagN};}
+  function draw(){box.textContent="";const r=build(),n=r.recs.filter(x=>!x.tagOnly).length;
+    box.append(h("p",{class:"status",style:"margin:0"},"Each sheet is its own group. Check them below, then tap Use these at the bottom."));
+    cfg.forEach((c,ci)=>{const id="mw"+ci;
+      const colOpts=(sel,none)=>[none?h("option",{value:"-1",selected:sel<0},none):null,...[...Array(c.ncol)].map((_,i)=>{const smp=(c.rows[c.hdr?1:0]||[])[i]||"";
+        return h("option",{value:String(i),selected:sel===i},"Column "+colL(i)+(c.hdr&&c.rows[0][i]?" ("+c.rows[0][i]+")":"")+(smp?": "+smp:""));})].filter(Boolean);
+      const roleSel=h("select",{id:id+"r","aria-label":"What “"+c.sn+"” is for"},[["cables","Cables"],["labels","Labels only"],["skip","Skip"]].map(([v,l])=>h("option",{value:v,selected:c.role===v},l)));
+      roleSel.addEventListener("change",()=>{c.role=roleSel.value;draw();});
+      const card=h("div",{class:"panel stack",style:"gap:8px;padding:10px"+(c.role==="skip"?";opacity:.6":"")},
+        h("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"},h("strong",{},c.sn),
+          h("span",{class:"status"},c.rows.length?(c.rows.length-(c.hdr?1:0))+" rows":"empty"),roleSel));
+      if(c.role!=="skip"&&c.rows.length){
+        const portSel=h("select",{id:id+"p"},colOpts(c.port));portSel.addEventListener("change",()=>{c.port=+portSel.value;draw();});
+        const devSel=h("select",{id:id+"d"},colOpts(c.dev,c.role==="labels"?"— pick a column —":"None (port # is the device)"));devSel.addEventListener("change",()=>{c.dev=+devSel.value;draw();});
+        const hb=h("input",{type:"checkbox",id:id+"h",checked:c.hdr});hb.addEventListener("change",()=>{c.hdr=hb.checked;draw();});
+        const grid=h("div",{class:"mapgrid"},
+          h("div",{class:"field"},h("label",{for:id+"p"},"Port # / cable ID"),portSel),
+          h("div",{class:"field"},h("label",{for:id+"d"},c.role==="labels"?"Label text":"Device name"),devSel));
+        if(c.role==="cables"){const cabIn=h("input",{id:id+"c",value:c.cab,placeholder:"e.g. 1.14"}),sysIn=h("input",{id:id+"s",value:c.sys,placeholder:"e.g. BMS"});
+          cabIn.addEventListener("change",()=>{c.cab=cabIn.value.trim();draw();});sysIn.addEventListener("change",()=>{c.sys=sysName(sysIn.value)||sysIn.value.trim();draw();});
+          grid.prepend(h("div",{class:"field"},h("label",{for:id+"c"},"Cabinet"),cabIn),h("div",{class:"field"},h("label",{for:id+"s"},"System"),sysIn));}
+        const ex=c.rows[c.hdr?1:0]||[];
+        card.append(grid,h("label",{class:"check",for:id+"h",style:"text-transform:none;letter-spacing:0"},hb,"First row is column names"),
+          h("div",{class:"status mono",style:"margin:0"},"First row: "+(ex[c.port]||"–")+(c.dev>=0&&ex[c.dev]?"  →  "+ex[c.dev]:"")));}
+      box.append(card);});
+    box.append(...r.warn.map(w=>h("p",{class:"status",style:"color:var(--over);margin:0"},"⚠ "+w)),
+      h("div",{style:"display:flex;gap:8px;flex-wrap:wrap;align-items:center"},
+        h("button",{type:"button",class:"btn",disabled:!r.recs.length,onclick:()=>{const out=build();el.textContent="";resolve(out);}},"Use these ("+n+" cables"+(r.tagN?", "+r.tagN+" labels":"")+")")));}
+  el.textContent="";el.append(box);draw();});}
+
 function readLabelWorkbook(wb){const recs=new Map(),sum={},warn=[];
   wb.SheetNames.forEach(sn=>{const m=sn.trim().match(/^([\d.]+)\s+(.+)$/);if(!m){warn.push("Skipped sheet “"+sn+"” (name isn't like “1.14 BMS”).");return;}
     const idf=m[1],sys=sysName(m[2]);
@@ -4092,15 +4151,15 @@ function readLabelWorkbook(wb){const recs=new Map(),sum={},warn=[];
 function labelWorkbookBox(j,onRecs){
   const box=h("div",{class:"imp stack"}),file=h("input",{type:"file",id:"lwbFile",accept:".xlsx,.xls"}),out=h("div",{class:"stack"});
   file.addEventListener("change",async()=>{const f=file.files[0];if(!f)return;out.textContent="Reading…";
-    try{await loadXLSX();const r=readLabelWorkbook(XLSX.read(await f.arrayBuffer(),{type:"array"}));out.textContent="";
+    try{await loadXLSX();const r=await mapWorkbook(XLSX.read(await f.arrayBuffer(),{type:"array"}),out);out.textContent="";
       if(!r.recs.length){out.append(h("p",{class:"err"},"No labels found. Each sheet should be named like “1.14 BMS” with one label per row."));return;}
       const syss=[...new Set(Object.values(r.sum).flatMap(o=>Object.keys(o)))].sort((a,b)=>sysRank(j,a)-sysRank(j,b));
       out.append(h("div",{class:"preview"},h("table",{},h("tr",{style:"font-weight:600"},h("td",{},"Cabinet"),syss.map(s=>h("td",{},s))),
         Object.keys(r.sum).sort(natCmp).map(idf=>h("tr",{},h("td",{},idf),syss.map(s=>h("td",{},String(r.sum[idf][s]||"–"))))))),
         ...r.warn.map(w=>h("p",{class:"status",style:"color:var(--over);margin:0"},"⚠ "+w)),
-        h("button",{type:"button",class:"btn small",onclick:()=>{onRecs(r.recs,syss);out.textContent="";file.value="";}},"Add these "+r.recs.length+" labels"));}
+        h("button",{type:"button",class:"btn small",onclick:()=>{onRecs(r.recs,syss);out.textContent="";file.value="";}},"Add these "+r.recs.filter(x=>!x.tagOnly).length+" cables"));}
     catch(e){out.textContent="";toast("Couldn't read that file. Save it as .xlsx and try again.");}});
-  box.append(h("p",{class:"status",style:"margin:0"},"One sheet per cabinet and system, named like “1.14 BMS” or “1.15 Cameras”. Labels that are already on the job get updated, not doubled."),
+  box.append(h("p",{class:"status",style:"margin:0"},"One sheet per cabinet and system, like “1.14 BMS”. Next you'll check each sheet's columns. Cables already on the job get updated, not doubled."),
     h("div",{class:"field"},h("label",{for:"lwbFile"},"Label workbook (.xlsx)"),file),out);
   return box;}
 
@@ -4167,7 +4226,7 @@ function pullBuilder(jid){
     bottom.append(h("div",{class:"pr"},h("span",{class:"n"},idf+" "+sys),h("span",{class:"bar"},h("i",{style:"width:"+(p.length?Math.round(done*100/p.length):0)+"%"})),h("span",{class:"c"},done+"/"+p.length+" in a pull"),h("span")));
     if(free.length){bottom.append(h("div",{class:"flabel"},"Not in a pull yet ("+free.length+") · tap to add"),
       h("div",{class:"chips",style:"gap:6px"},free.map(c=>h("button",{type:"button",class:"chipbtn","aria-pressed":String(pick.has(c.id)),title:c.name,onclick:()=>{pick.has(c.id)?pick.delete(c.id):pick.add(c.id);draw();}},
-        h("span",{class:"mono"},String(labelNum(c.name)).padStart(3,"0")),c.from?h("small",{style:"opacity:.75;margin-left:4px"},c.from):null))));}
+        h("span",{class:"mono"},String(labelNum(c.name)).padStart(3,"0")),(c.from||c.tag)?h("small",{style:"opacity:.75;margin-left:4px"},c.from||c.tag):null))));}
     else bottom.append(h("p",{class:"status",style:"color:var(--ok)"},"✓ Every "+sys+" label for "+idf+" is in a pull."));
     const ss=stepsOf(j);
     Object.keys(pulls).sort(natCmp).forEach(k=>{const gl=pulls[k],fin=ss.length?gl.filter(c=>ss.every(st=>markOf(j,c.id,st.id))).length:0;
@@ -4215,15 +4274,15 @@ function jobWizard(){
     if(scr==="cables"){
       if(W.kind==="cat6"){const file=h("input",{type:"file",id:"wzFile",accept:".xlsx,.xls"}),sm=h("div",{class:"stack",style:"gap:4px"});
         const show=()=>{sm.textContent="";if(!W.recs)return;const cabs=Object.keys(W.sum).sort(natCmp);
-          sm.append(h("p",{style:"margin:0;color:var(--ok);font-weight:600"},"✓ "+W.recs.length+" labels · "+cabs.length+" cabinets · "+W.syss.join(", ")),
+          sm.append(h("p",{style:"margin:0;color:var(--ok);font-weight:600"},"✓ "+W.recs.filter(x=>!x.tagOnly).length+" cables · "+cabs.length+" cabinets · "+W.syss.join(", ")),
             h("p",{class:"status",style:"margin:0"},cabs.map(c=>c+": "+W.syss.map(s=>(W.sum[c][s]||0)+" "+s).join(", ")).join(" · ")),
             ...W.warn.map(w=>h("p",{class:"status",style:"color:var(--over);margin:0"},"⚠ "+w)));};
         file.addEventListener("change",async()=>{const f=file.files[0];if(!f)return;sm.textContent="Reading…";
-          try{await loadXLSX();const r=readLabelWorkbook(XLSX.read(await f.arrayBuffer(),{type:"array"}));
+          try{await loadXLSX();const r=await mapWorkbook(XLSX.read(await f.arrayBuffer(),{type:"array"}),sm);
             if(!r.recs.length){W.recs=null;sm.textContent="";sm.append(h("p",{class:"err"},"No labels found. Name each sheet like “1.14 BMS” with one label per row."));return;}
-            W.recs=r.recs;W.sum=r.sum;W.warn=r.warn;W.syss=[...new Set(r.recs.map(x=>x.type))].sort((a,b)=>sysRank({},a)-sysRank({},b)||natCmp(a,b));show();}
+            W.recs=r.recs;W.sum=r.sum;W.warn=r.warn;W.syss=[...new Set(r.recs.map(x=>x.type).filter(Boolean))].sort((a,b)=>sysRank({},a)-sysRank({},b)||natCmp(a,b));show();}
           catch(e){sm.textContent="";toast("Couldn't read that file. Save it as .xlsx and try again.");}});
-        body.append(...q("Load the label workbook","One sheet per cabinet and system, named like “1.14 BMS”. Cabinets, systems and device names come from the file."),
+        body.append(...q("Load the label workbook","One sheet per cabinet and system, named like “1.14 BMS”. Next you'll check each sheet: what it's for and which column is the port # and device name."),
           h("div",{class:"field"},h("label",{for:"wzFile"},"Label workbook (.xlsx)"),file),sm,nav("Next",null,h("button",{type:"button",class:"btn ghost",onclick:()=>{W.recs=null;next();}},"Skip for now")));show();}
       else{const sm=h("div",{class:"status"},W.fiber?"✓ "+W.fiber.length+" cables loaded":"");
         body.append(...q("Load the cable list","Excel, CSV, or copy and paste from a sheet. Scans and the cable checklist get turned on for fiber."),
@@ -4266,7 +4325,7 @@ function jobWizard(){
     if(scr==="crew"){const end=iso(addDays(parseD(W.start),W.weeks*7-1)),days=[];for(let d=parseD(W.start),i=0;i<W.weeks*7&&i<120;i++,d=addDays(d,1))days.push(iso(d));
       body.append(...q("Who's on this job?","This is the job's crew. You can put people on specific tasks later, picking from this list."),techChips(W.crew,days,"",false),
         h("p",{class:"status",style:"margin:0"},W.start&&end?"Shows time off and other jobs between "+fmtS(W.start)+" and "+fmtS(end)+".":""),nav("Next",null,h("button",{type:"button",class:"btn ghost",onclick:()=>{W.crew.clear();next();}},"Skip")));return;}
-    if(scr==="review"){const ncab=W.kind==="cat6"?(W.recs||[]).length:W.kind==="fiber"?(W.fiber||[]).length:0;
+    if(scr==="review"){const ncab=W.kind==="cat6"?(W.recs||[]).filter(x=>!x.tagOnly).length:W.kind==="fiber"?(W.fiber||[]).length:0;
       body.append(...q("Look right?"),h("div",{class:"panel stack",style:"gap:6px"},
         h("div",{},h("strong",{},W.name)," · starts "+fmtS(W.start)+" · about "+W.weeks+" week"+(W.weeks>1?"s":"")),
         isCable()?h("div",{},ncab?ncab+(W.kind==="cat6"?" labels":" cables"):"No cables yet (you can load them later)"):null,
@@ -4283,7 +4342,7 @@ function jobWizard(){
       W.cabs.forEach(cb=>{const s=W.recs?[...new Set(W.recs.filter(r=>r.rack===cb).map(r=>r.type))]:[];sy[cb]=(s.length?s:SYS_ORDER_DEFAULT.slice()).sort((a,b)=>sysRank({},a)-sysRank({},b)||natCmp(a,b));});
       const plan=cabSysPlan(W.cabs,sy);phases=plan.phases;tasks=plan.tasks;}
     let cables=[];
-    if(W.kind==="cat6"&&W.recs)cables=W.recs.map(r=>{const o={id:nid("c"),name:r.name,rack:r.rack,type:r.type};if(r.from)o.from=r.from;return o;});
+    if(W.kind==="cat6"&&W.recs)cables=W.recs.filter(r=>!r.tagOnly).map(r=>{const o={id:nid("c"),name:r.name,rack:r.rack,type:r.type};["from","sheet","tag"].forEach(k=>{if(r[k])o[k]=r[k];});return o;});
     if(W.kind==="fiber"&&W.fiber)cables=W.fiber.map(r=>{const o={id:nid("c"),name:String(r.name).trim()};["rack","pull","len","type","from","to","note"].forEach(k=>{if(r[k]&&String(r[k]).trim())o[k]=String(r[k]).trim();});return o;});
     const body_={name:W.name.trim(),start:W.start||TODAY(),days:0,weeks:W.weeks,phases,tasks,crew:[...W.crew],projectId:"",loc:null,site:"",techs:W.crew.size,scope:"",conf:"locked",pri:3,notes:"",
       scanCk:W.kind==="fiber",kind:W.kind,cabinets:W.cabs.slice(),cables,steps,createdAt:Date.now(),updatedAt:Date.now(),by:myId||"",addedBy:myId||"",addedAt:Date.now()};
@@ -4383,19 +4442,19 @@ function cableJobSetup(j){
   function drawSteps(){stepBox.textContent="";const opts=[...QUICK_STEP_SETS.map((s,i)=>["q"+i,s.join(" → ")]),...(profilesCache||[]).filter(p=>Array.isArray(p.steps)&&p.steps.length).map(p=>[p.id,p.name])];
     opts.forEach(([k,l])=>stepBox.append(h("button",{type:"button",class:"chipbtn","aria-pressed":String(stepPick===k),onclick:()=>{stepPick=k;drawSteps();}},l)));}
   file.addEventListener("change",async()=>{const f=file.files[0];if(!f)return;sum.textContent="Reading…";
-    try{await loadXLSX();const r=readLabelWorkbook(XLSX.read(await f.arrayBuffer(),{type:"array"}));sum.textContent="";
+    try{await loadXLSX();const r=await mapWorkbook(XLSX.read(await f.arrayBuffer(),{type:"array"}),sum);sum.textContent="";
       if(!r.recs.length){recs=null;sum.append(h("p",{class:"err"},"No labels found. Name each sheet like “1.14 BMS” with one label per row."));return;}
-      recs=r.recs;syss=[...new Set(recs.map(x=>x.type))].sort((a,b)=>SYS_ORDER_DEFAULT.indexOf(a)-SYS_ORDER_DEFAULT.indexOf(b));
+      recs=r.recs;syss=[...new Set(recs.map(x=>x.type).filter(Boolean))].sort((a,b)=>SYS_ORDER_DEFAULT.indexOf(a)-SYS_ORDER_DEFAULT.indexOf(b));
       if(nameIn&&!nameIn.value.trim())nameIn.value=f.name.replace(/\.[^.]+$/,"").replace(/[_]+/g," ").replace(/\blabels?\b/i,"").trim();
       const cabs=Object.keys(r.sum).sort(natCmp);
-      sum.append(h("p",{style:"margin:0;color:var(--ok);font-weight:600"},"✓ "+recs.length+" labels · "+cabs.length+" cabinets · "+syss.join(", ")),
+      sum.append(h("p",{style:"margin:0;color:var(--ok);font-weight:600"},"✓ "+recs.filter(x=>!x.tagOnly).length+" cables · "+cabs.length+" cabinets · "+syss.join(", ")),
         h("p",{class:"status",style:"margin:0"},cabs.map(c=>c+": "+syss.map(s=>(r.sum[c][s]||0)+" "+s).join(", ")).join(" · ")),
         ...r.warn.map(w=>h("p",{class:"status",style:"color:var(--over);margin:0"},"⚠ "+w)));}
     catch(e){recs=null;sum.textContent="";toast("Couldn't read that file. Save it as .xlsx and try again.");}});
   drawSteps();
   const fields=[];
   if(!j)fields.push(h("div",{class:"field full"},h("label",{for:"cjName"},"Job name"),nameIn),h("div",{class:"field full"},h("label",{for:"cjStart"},"Start"),startIn));
-  fields.push(h("div",{class:"field full"},h("label",{for:"cjFile"},"Label workbook"),file,h("p",{class:"status",style:"margin:0"},"One sheet per cabinet and system, like “1.14 BMS”. Cabinets, systems and device names come from the file."),sum),
+  fields.push(h("div",{class:"field full"},h("label",{for:"cjFile"},"Label workbook"),file,h("p",{class:"status",style:"margin:0"},"One sheet per cabinet and system, like “1.14 BMS”. Next you'll check each sheet: what it's for and which column is the port # and device name."),sum),
     h("div",{class:"field full"},h("span",{class:"flabel"},"Steps each pull goes through"),stepBox),
     j?null:h("p",{class:"status full",style:"margin:0"},"Add crew later from the job's Crew button."));
   openSheet(j?"Load labels · "+j.name:"New cable pull job",fields.filter(Boolean),async()=>{
@@ -4404,7 +4463,7 @@ function cableJobSetup(j){
     if(!recs){formErr("Pick the label workbook.");return false;}
     const nid=p=>p+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
     const old=j?cablesOf(j):[],byName=new Map(old.map(c=>[c.name,Object.assign({},c)]));
-    recs.forEach(r=>{const ex=byName.get(r.name),d={rack:r.rack,type:r.type};if(r.from)d.from=r.from;if(ex)Object.assign(ex,d);else byName.set(r.name,Object.assign({id:nid("c"),name:r.name},d));});
+    recs.forEach(r=>{const ex=byName.get(r.name);if(r.tagOnly){if(ex)ex.tag=r.tag;return;}const d={rack:r.rack,type:r.type};["from","sheet","tag"].forEach(k=>{if(r[k])d[k]=r[k];});if(ex)Object.assign(ex,d);else byName.set(r.name,Object.assign({id:nid("c"),name:r.name},d));});
     const cables=[...byName.values()],keepSteps=j&&stepsOf(j).length;
     const steps=keepSteps?stepsOf(j):stepsFor(stepPick).map(s=>({id:nid("s"),name:s.name,split:!!s.split}));
     const sysOrder=j?[...new Set([...sysOrderOf(j),...syss])]:syss;
