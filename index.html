@@ -3230,6 +3230,7 @@ function scanStepsOn(j,ck){const sC=scanStepFor(j,"cable"),sS=scanStepFor(j,"src
   if(sC&&ck.serial&&ck.qr&&!cableBad)on.add(sC);
   if(sS&&sS===sD){if(ck.src&&ck.dst&&!encBad)on.add(sS);}else{if(sS&&ck.src)on.add(sS);if(sD&&ck.dst&&!encBad)on.add(sD);}
   return {on,ids:[sC,sS,sD].filter(Boolean)};}
+const scanKindsFor=(j,sid)=>{const out=[];if(scanStepFor(j,"cable")===sid)out.push("serial","qr");if(scanStepFor(j,"src")===sid)out.push("src");if(scanStepFor(j,"dst")===sid)out.push("dst");return out;};
 const scanIdsOf=j=>new Set(["cable","src","dst"].map(k=>scanStepFor(j,k)).filter(Boolean));
 /* keep scan steps and scans linked: a scan step is checked exactly when its scans are in */
 const scanSyncBusy=new Set();
@@ -3311,7 +3312,7 @@ document.addEventListener("keydown",e=>{
   wedgeBuf+=e.key;});
 /* one cable's checklist: four scans and five sign-offs */
 let ckBack=null;
-function ckSheet(jid,cid,back){if(back)ckBack={cid,fn:back};else if(!ckBack||ckBack.cid!==cid)ckBack=null;const box=h("div",{class:"full stack"});ckOpen={jid,cid};
+function ckSheet(jid,cid,back,focus){if(back)ckBack={cid,fn:back};else if(!ckBack||ckBack.cid!==cid)ckBack=null;const box=h("div",{class:"full stack"});ckOpen={jid,cid};
   const draw=()=>{const j=S.jobs.find(x=>x.id===jid),c=j&&cablesOf(j).find(x=>x.id===cid);if(!c){closeSheet();return;}
     const ck=JSON.parse(JSON.stringify(ckOf(j,cid))),can=CAN_POST(),me=myTech();box.textContent="";
     $("#sheetTitle").textContent=c.name+" · checklist";
@@ -3321,7 +3322,7 @@ function ckSheet(jid,cid,back){if(back)ckBack={cid,fn:back};else if(!ckBack||ckB
     if(hasKeyboardScanner()&&can)box.append(h("div",{class:"status",style:"margin-top:-4px"},"Handheld scanner: just scan. The serial, label QR, source and destination fill in by themselves."));
     CK_SCANS.forEach(([k,l,hint])=>{const v=ck[k]||"";
       const pf=ck[k+"Photo"]?S.files.find(f=>f.id===ck[k+"Photo"]):null;
-      box.append(h("div",{class:"ckrow"+(v?" ok":"")},h("div",{class:"ckl"},h("strong",{},l),v?h("div",{class:"mono ckv"},v):h("div",{class:"status"},"Not scanned"),
+      box.append(h("div",{class:"ckrow"+(v?" ok":""),"data-ck":k},h("div",{class:"ckl"},h("strong",{},l),v?h("div",{class:"mono ckv"},v):h("div",{class:"status"},"Not scanned"),
           v&&ck[k+"By"]?h("div",{class:"status"},"Scanned by "+realName(ck[k+"By"])+(ck[k+"At"]?" · "+fmt(new Date(ck[k+"At"]),{month:"short",day:"numeric"})+" "+fmtTime(ck[k+"At"]):"")):null,
           pf?h("button",{type:"button",class:"linkbtn",style:"justify-self:start",onclick:()=>openDoc(pf,()=>ckSheet(jid,cid))},"📷 View scan photo"):null),
         can?h("div",{class:"ckb"},h("button",{type:"button",class:"btn small"+(v?" ghost":""),onclick:async()=>{const r=await scanCode(l,hint);if(!r.codes.length)return;await applyCodesToCk(jid,cid,r.codes,r.photo,k);draw();}},v?"Rescan":(isLaptop()?"Scan":"📷 Scan")),
@@ -3351,7 +3352,11 @@ function ckSheet(jid,cid,back){if(back)ckBack={cid,fn:back};else if(!ckBack||ckB
         h("button",{type:"button",class:"btn small",onclick:()=>copyText(CK_SCANS.map(([k])=>ckOf(S.jobs.find(x=>x.id===jid),cid)[k]||"").join("\n"),"Serials copied. Paste at B2.")},"Copy serials (B2)"),
         h("button",{type:"button",class:"btn small",onclick:()=>{const c2=ckOf(S.jobs.find(x=>x.id===jid),cid);copyText(CK_ITEMS.map((_,i)=>{const it=(c2.items||{})[i+1];return it&&it.at?[ckWho(it),"TRUE",ckDate(it.at),"NA","",it.remark||""].join("\t"):["","FALSE","","NA","",""].join("\t");}).join("\n"),"Check list copied. Paste at C7.");}},"Copy check list (C7)"))));};
   let confirmed5=false;
-  openView("Checklist",[box]);if(ckBack&&ckBack.cid===cid){sheetBack=ckBack.fn;try{history.pushState({sheet:1},"");}catch(e){}}liveSheet=draw;draw();}
+  openView("Checklist",[box]);if(ckBack&&ckBack.cid===cid){sheetBack=ckBack.fn;try{history.pushState({sheet:1},"");}catch(e){}}liveSheet=draw;draw();
+  /* jump to the scan that was asked for (or the first one still missing), not the bottom */
+  {const sh=$(".sheet");if(sh)sh.scrollTop=0;const want=Array.isArray(focus)?focus:focus?[focus]:[];
+    setTimeout(()=>{const ck=ckOf(S.jobs.find(x=>x.id===jid)||{},cid),k=want.find(x=>!(ck[x]||"").trim())||want[0];if(!k)return;
+      const el=box.querySelector('[data-ck="'+k+'"]');if(!el)return;el.scrollIntoView({block:"center"});el.style.outline="3px solid var(--accent)";el.style.outlineOffset="2px";setTimeout(()=>{el.style.outline="";},2500);},80);}}
 async function copyText(txt,msg){try{await navigator.clipboard.writeText(txt);}catch(e){const ta=h("textarea",{style:"position:fixed;opacity:0"});ta.value=txt;document.body.append(ta);ta.select();try{document.execCommand("copy");}catch(e2){}ta.remove();}toast(msg||"Copied");}
 /* every cable's checklist in one table */
 function ckTable(j){const head=["Cable","Cable Serial #","Cable QR code URL","Source Patch Panel Serial #","Dest Patch Panel Serial #",...CK_ITEMS.flatMap((_,i)=>["#"+(i+1)+" Owner","#"+(i+1)+" Date","#"+(i+1)+" Remarks"])];
@@ -3833,10 +3838,10 @@ function cableTracker(jid,q0,f0){
       if(open){const steps=h("div",{class:"csteps"},ss.map(st=>{const m=markOf(j,c.id,st.id),sp=isSplit(st),pp=sp?partsOf(j,c.id,st.id):[];
           const tip=(m?st.name+" "+fmtTime(m.at)+" "+fmt(new Date(m.at))+(m.by?" · "+(names[m.by]||""):""):"")+(pp.length?(m?" · ":"")+pp.map(p=>partWho(p)+(partTxt(p)?" ("+partTxt(p)+")":"")).join(", "):"");
           return h("button",{type:"button",class:"sbtn"+(!m&&pp.length?" part":""),"aria-pressed":String(!!m),"data-l":st.name,disabled:!can&&!sp,"aria-label":c.name+" "+st.name+(sp?" sign-off":""),title:tip,
-            onclick:e=>scanIds.has(st.id)?(closeSheet(),setTimeout(()=>ckSheet(j.id,c.id,backToCable(j.id,c.id)),60)):sp?signOff(j.id,c.id,st.id):queueMark(j,c.id,st.id,e.currentTarget,()=>recolor(el,j,c))},m?"✓ "+st.name:scanIds.has(st.id)?"📷 "+st.name:sp?(pp.length?"✎ "+st.name+" ("+pp.length+")":"✎ "+st.name):st.name);}));
+            onclick:e=>scanIds.has(st.id)?(closeSheet(),setTimeout(()=>ckSheet(j.id,c.id,backToCable(j.id,c.id),scanKindsFor(j,st.id)),60)):sp?signOff(j.id,c.id,st.id):queueMark(j,c.id,st.id,e.currentTarget,()=>recolor(el,j,c))},m?"✓ "+st.name:scanIds.has(st.id)?"📷 "+st.name:sp?(pp.length?"✎ "+st.name+" ("+pp.length+")":"✎ "+st.name):st.name);}));
         el.append(steps);
         {const ck=ckOf(j,c.id),sn=ckScanN(ck),inn=ckItemN(ck);
-          el.append(h("div",{class:"cdet"},h("button",{type:"button",class:"btn ghost small",onclick:()=>{closeSheet();setTimeout(()=>ckSheet(j.id,c.id,backToCable(j.id,c.id)),60);}},"📋 Checklist & scans · "+sn+"/4 scanned · "+inn+"/5 checked"),ckProblems(ck).length?h("span",{style:"color:var(--over);margin-left:6px"},"⚠"):null));}
+          el.append(h("div",{class:"cdet"},h("button",{type:"button",class:"btn ghost small",onclick:()=>{closeSheet();setTimeout(()=>ckSheet(j.id,c.id,backToCable(j.id,c.id),["serial","qr","src","dst"].filter(k=>!(ck[k]||"").trim())),60);}},"📋 Checklist & scans · "+sn+"/4 scanned · "+inn+"/5 checked"),ckProblems(ck).length?h("span",{style:"color:var(--over);margin-left:6px"},"⚠"):null));}
         const dated=ss.map(st=>{const m=markOf(j,c.id,st.id);return m&&m.at?st.name+" "+fmt(new Date(m.at),{month:"short",day:"numeric"})+(m.by?" ("+(realName(m.by).split(" ")[0])+")":""):"";}).filter(Boolean);
         if(dated.length)el.append(h("div",{class:"cdet"},"✓ "+dated.join(" · ")));
         issuesOf(j,c.id).forEach(i=>{const ph=(i.photos||[]).map(id=>S.files.find(f=>f.id===id)).filter(Boolean);
