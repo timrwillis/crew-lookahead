@@ -1208,7 +1208,7 @@ function taskRow(j,t,d){
   const m=MGR(),btn=(l,f,pri)=>h("button",{type:"button",class:"btn "+(pri?"":"ghost ")+"small",onclick:f},l);
   return h("div",{class:"titem"+(st==="done"?" done":"")},
     h("span",{class:"st "+st},lbl),
-    h("span",{class:"nm"},t.name,(()=>{const ps=[t.scope?scopePill(j,t):step?cablePill(j,t):null,docPill(j,t,false)].filter(Boolean);return ps.length?h("span",{class:"pills"},ps):null;})(),h("small",{},sub)),
+    h("span",{class:"nm"},t.name,(()=>{const ps=[t.scope?urgentPill(j,{cab:t.scope.rack,sys:t.scope.type,sysOnly:true}):null,t.scope?scopePill(j,t):step?cablePill(j,t):null,docPill(j,t,false)].filter(Boolean);return ps.length?h("span",{class:"pills"},ps):null;})(),h("small",{},sub)),
     h("span",{class:"ac"},
       m&&st==="hold"&&t.hold?btn("Resume",()=>resumeHold(j,t),true):null,
       m&&st==="wait"?btn("Start now",()=>startEarly(j,t)):null,
@@ -1220,7 +1220,9 @@ function jobPanel(j){
   const box=h("div",{class:"dpanel"});
   box.append(h("div",{class:"jhead"},
     h("div",{class:"ttl"},h("div",{},h("h3",{},j.name),h("div",{class:"status"},[pj?pj.name:"",j.site,j.scope,fmtS(j.start)+" – "+fmtS(jobEnd(j)),CONF[j.conf||"likely"]].filter(Boolean).join(" · ")),
-        (()=>{const ps=[cablePill(j,null),docPill(j,null,false)].filter(Boolean);return ps.length?h("div",{class:"pills"},ps):null;})()),
+        (()=>{const on=openNotesOf(j),u=on.filter(x=>x.sev==="urgent").length;
+          const np=on.length||CAN_POST()?h("button",{type:"button",class:"tpill "+(on.length?"":"ghost"),style:u?"background:var(--over);color:#fff":on.length?"background:var(--locked);color:#fff":"",title:"Notes for everyone on this job",onclick:e=>{e.stopPropagation();notesSheet(j.id);}},u?"⚠ "+u+" urgent · Notes "+on.length:on.length?"Notes "+on.length:"+ Note"):null;
+          const ps=[cablePill(j,null),docPill(j,null,false),np].filter(Boolean);return ps.length?h("div",{class:"pills"},ps):null;})()),
       h("div",{class:"acts"},m&&!j.doneOn?priControl(j):h("span",{class:"pill pri"+priOf(j)},PRI[priOf(j)]+" priority"),heldOn(j,d)?h("span",{class:"pill bad"},"Job on hold"):null,runningLong(j)?h("span",{class:"pill bad"},"Running long"):null)),
     pg?h("button",{type:"button",class:"pr prbtn","aria-expanded":String(openSteps.has(j.id)),title:"Show each step",onclick:()=>{openSteps.has(j.id)?openSteps.delete(j.id):openSteps.add(j.id);render();}},
         h("span",{class:"n"},(openSteps.has(j.id)?"▾ ":"▸ ")+"Progress"),h("span",{class:"bar"},h("i",{style:"width:"+(pct||0)+"%"})),h("span",{class:"c"},pct==null?"—":pct+"%"),h("span"))
@@ -1250,11 +1252,12 @@ function jobPanel(j){
         const pctC=pc&&pc.of?Math.round(pc.n*100/pc.of):Math.round(nd*100/list.length),all=nd===list.length;
         const card=h("div",{class:"cabcard"+(isOpen?" open":"")+(all?" fin":"")});
         card.append(h("button",{type:"button",class:"cabhd","aria-expanded":String(isOpen),onclick:()=>{isOpen?openCabs.delete(key):openCabs.add(key);render();}},
-          h("span",{class:"cabtop"},h("strong",{},"Cabinet "+p.cab),h("span",{class:"cabpct"},all?"✓ Done":pctC+"%"),h("span",{class:"chev","aria-hidden":"true"},isOpen?"▾":"▸")),
+          h("span",{class:"cabtop"},h("strong",{},"Cabinet "+p.cab),urgentNotes(j,{cab:p.cab}).length?h("span",{style:"color:#fff;background:var(--over);border-radius:999px;padding:1px 8px;font-size:.75rem;font-weight:700"},"⚠ "+urgentNotes(j,{cab:p.cab}).length+" urgent"):null,h("span",{class:"cabpct"},all?"✓ Done":pctC+"%"),h("span",{class:"chev","aria-hidden":"true"},isOpen?"▾":"▸")),
           h("span",{class:"bar"},h("i",{style:"width:"+pctC+"%"})),
           h("span",{class:"cabsys"},list.map(t=>h("span",{class:isDone(t)?"ok":""},(isDone(t)?"✓ ":"")+t.name)),h("span",{class:"cabn"},nd+"/"+list.length+" done"))));
         if(isOpen){const open=list.filter(t=>!isDone(t));
           if(pc)card.append(h("button",{type:"button",class:"linkbtn",style:"justify-self:start",onclick:()=>cableTracker(j.id,"",pc.cab?{cab:pc.cab}:undefined)},pc.n+"/"+pc.of+" cables done ›"));
+          {const un=urgentNotes(j,{cab:p.cab}).filter(x=>!x.sys);if(un.length)card.append(urgentPill(j,{cab:p.cab},un.length+" urgent for the whole cabinet"));}
           card.append(open.length?h("div",{class:"tlist"},open.map(t=>taskRow(j,t,d))):h("div",{class:"status",style:"padding:4px 0"},"All done ✓"));}
         grid.append(card);});
       box.append(h("div",{class:"phasehd"},"Cabinets · tap one to open"),grid);}
@@ -3787,6 +3790,7 @@ function cableTracker(jid,q0,f0){
       h("div",{style:"display:flex;gap:6px;flex-wrap:wrap"},can?h("button",{class:"btn ghost small",type:"button",onclick:()=>scanFindCable(j.id)},(isLaptop()?"⌨ Scan a cable":"📷 Scan a cable")):null,
         can&&bulkSteps(j).length?h("button",{class:"btn small",type:"button",onclick:()=>bulkSignOff(j.id)},"✍ Sign off several"):null,h("button",{class:"btn ghost small",type:"button",onclick:()=>{closeSheet();setTimeout(()=>cableReport(j.id),60);}},"📅 Dates & report"),
         h("button",{class:"btn ghost small",type:"button",onclick:()=>{closeSheet();setTimeout(()=>cableLabels(j.id),60);}},"🏷 Labels"),
+        h("button",{class:"btn ghost small",type:"button",style:urgentNotes(j,{cab:fCab||undefined,sys:fSys||undefined}).length?"border-color:var(--over);color:var(--over)":"",onclick:()=>{closeSheet();setTimeout(()=>notesSheet(j.id,{cab:fCab,sys:fSys}),60);}},"📝 Notes"+(openNotesOf(j).length?" ("+openNotesOf(j).length+")":"")),
         MGR()&&cs.some(c=>c.rack&&c.type)?h("button",{class:"btn ghost small",type:"button",onclick:()=>{closeSheet();setTimeout(()=>pullBuilder(j.id),60);}},"🧩 Build pulls"):null,
         MGR()?h("button",{class:"btn ghost small",type:"button",onclick:()=>{closeSheet();cableEditor(j);}},"Edit cables & steps"):null)));
     const sub=c=>[trackGroup!=="row"&&rowOf(c)&&!/row/i.test((c.pull||"")+(c.to||""))?rowOf(c):"",trackGroup!=="rack"&&c.rack&&!fCab?"Cabinet "+c.rack:"",!fSys&&c.type&&trackGroup!=="type"?c.type:"",c.from&&c.type?c.from:"",trackGroup!=="pull"&&c.pull&&!/row/i.test(c.pull)?"Pull "+c.pull:"",trackGroup!=="len"&&c.len?c.len+(/^\d+(\.\d+)?$/.test(String(c.len).trim())?" m":""):""].filter(Boolean).join(" · ");
@@ -3818,7 +3822,7 @@ function cableTracker(jid,q0,f0){
       order.forEach(g=>{const gl=grp[g],shown=gl.filter(visible);if(!shown.length)return;const fin=gl.filter(c=>ss.every(st=>markOf(j,c.id,st.id))).length,gopen=openGrp.has(g);
         const gst=fin===gl.length?"done":gl.some(c=>cabState(j,c,ss)!=="none")?"part":"none";
         const gh=h("div",{class:"cgrp "+gst},h("button",{type:"button",class:"chd","aria-expanded":String(gopen),onclick:()=>{gopen?openGrp.delete(g):openGrp.add(g);draw();}},
-          h("span",{class:"car"},gopen?"▾":"▸"),h("span",{class:"nm"},(trackGroup==="row"?"":GROUPS[trackGroup]+" ")+g,h("span",{class:"sub"},gopen?"Mark the whole group, or tap a cable below":"Tap to see its "+gl.length+" cable"+(gl.length===1?"":"s"))),h("span",{class:"ctag"},fin+"/"+gl.length+" done")));
+          h("span",{class:"car"},gopen?"▾":"▸"),h("span",{class:"nm"},(trackGroup==="row"?"":GROUPS[trackGroup]+" ")+(trackGroup==="pull"?pullShort({pull:g}):g),trackGroup==="pull"&&urgentNotes(j,{pull:g}).length?h("span",{style:"color:#fff;background:var(--over);border-radius:999px;padding:1px 8px;font-size:.72rem;font-weight:700;margin-left:6px"},"⚠ urgent"):null,h("span",{class:"sub"},gopen?"Mark the whole group, or tap a cable below":"Tap to see its "+gl.length+" cable"+(gl.length===1?"":"s"))),h("span",{class:"ctag"},fin+"/"+gl.length+" done")));
         if(gopen&&can)gh.append(h("div",{class:"csteps"},ss.map(st=>{const allOn=gl.every(c=>markOf(j,c.id,st.id));
           return h("button",{type:"button",class:"sbtn","aria-pressed":String(allOn),onclick:()=>setMarks(j,gl.filter(c=>!!markOf(j,c.id,st.id)===allOn).map(c=>[c.id,st.id]),!allOn)},(allOn?"✓ ":"")+"All "+(st.name===st.name.toUpperCase()?st.name:st.name.toLowerCase()));})));
         body.push(gh);if(gopen||trackQ.trim())shown.forEach(c=>body.push(row(c)));});}
@@ -4351,7 +4355,7 @@ function pullBuilder(jid){
     const ss=stepsOf(j);
     Object.keys(pulls).sort(natCmp).forEach(k=>{const gl=pulls[k],fin=ss.length?gl.filter(c=>ss.every(st=>markOf(j,c.id,st.id))).length:0;
       bottom.append(h("div",{class:"panel stack",style:"gap:6px;padding:10px"},
-        h("div",{style:"display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"},h("strong",{},pullShort({pull:k})),h("span",{class:"status"},gl.length+" cables"+(ss.length?" · "+fin+" done":""))),
+        h("div",{style:"display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"},h("strong",{},pullShort({pull:k}),urgentNotes(j,{pull:k}).length?h("span",{style:"color:#fff;background:var(--over);border-radius:999px;padding:1px 8px;font-size:.72rem;font-weight:700;margin-left:6px"},"⚠ urgent"):null),h("span",{class:"status"},gl.length+" cables"+(ss.length?" · "+fin+" done":""))),
         h("div",{class:"chips",style:"gap:4px"},gl.map(c=>h("button",{type:"button",class:"chip",title:"Take "+c.name+" out of this pull","aria-label":"Take "+c.name+" out of this pull",onclick:()=>assign([c],null)},String(labelNum(c.name)).padStart(3,"0")," ✕")))));});}
   box.append(h("div",{style:"display:flex;justify-content:flex-end"},h("button",{type:"button",class:"btn ghost small",onclick:()=>pullLabelSheet(jid)},"🏷 Label sheets by pull")));
   box.append(h("p",{class:"status",style:"margin:0"},"Pick the cabinet and system, tap where you're pulling (Row, Tray, Wall), then type the label numbers off the prints (801-806, 811) or tap them. Each label can only be in one pull."),top,mid,bottom);
@@ -4540,6 +4544,65 @@ function organizeByCabinet(j){
       await db.collection("jobs").doc(j.id).update({phases:plan.phases,tasks:plan.tasks,steps:st,cabinets:cabs,kind:j.kind||"cat6",updatedAt:Date.now()});
       logEvent("Set up by cabinet: "+j.name+" ("+plan.tasks.length+" tasks)",{ev:"cables",jobId:j.id});});
   $(".sheet").classList.add("wide");}
+
+/* ===== JOB NOTES =====
+   Anyone on the crew can post; they live in marks._note_<id> (the part of a job crew may write).
+   Severity: urgent (red) / fyi (blue) / suggest (purple) / other (grey). Leads and the super mark them done → archived. */
+const NOTE_SEV=[["urgent","Urgent","var(--over)"],["fyi","FYI","var(--locked)"],["suggest","Suggestion for the future","var(--quick)"],["other","Other","var(--idea)"]];
+const sevInfo=k=>NOTE_SEV.find(x=>x[0]===k)||NOTE_SEV[3];
+const sevRank=k=>{const i=NOTE_SEV.findIndex(x=>x[0]===k);return i<0?9:i;};
+function notesOf(j){const mk=(j&&j.marks)||{};return Object.keys(mk).filter(k=>k.startsWith("_note_")&&mk[k]&&mk[k].text).map(k=>Object.assign({id:k.slice(6)},mk[k]));}
+const openNotesOf=j=>notesOf(j).filter(n=>!n.doneAt);
+/* urgent notes that touch a cabinet / system / pull */
+function urgentNotes(j,w){w=w||{};return openNotesOf(j).filter(n=>n.sev==="urgent"&&(!w.cab||n.cab===w.cab)&&(!w.sys||!n.sys||n.sys===w.sys)&&(!w.pull||n.pull===w.pull)&&(!w.sysOnly||n.sys===w.sys));}
+function urgentPill(j,w,label){const u=urgentNotes(j,w);if(!u.length)return null;
+  return h("button",{type:"button",class:"tpill",style:"background:var(--over);color:#fff",title:u.map(n=>n.text).join("\n"),onclick:e=>{e.stopPropagation();notesSheet(j.id,w);}},"⚠ "+(label||u.length+" urgent"));}
+async function saveNote(j,id,val){const upd={updatedAt:Date.now()};upd["marks._note_"+id]=val;
+  try{await db.collection("jobs").doc(j.id).update(upd);return true;}catch(e){writeErr(e);return false;}}
+function noteWhere(n){return [n.cab?"Cabinet "+n.cab:"",n.sys||"",n.pull?pullShort({pull:n.pull}):""].filter(Boolean).join(" · ");}
+function notesSheet(jid,pre){pre=pre||{};
+  const job=()=>S.jobs.find(x=>x.id===jid);if(!job())return;
+  let sev="fyi",cab=pre.cab||"",sys=pre.sys||"",pull=pre.pull||"",order="sev",showDone=false,busy=false;
+  const box=h("div",{class:"full stack",style:"gap:10px"}),form=h("div",{class:"panel stack",style:"gap:8px;padding:10px"}),list=h("div",{class:"stack",style:"gap:8px"});
+  const txt=h("textarea",{id:"ntText",placeholder:"What does everyone need to know?",style:"min-height:70px"});
+  const can=CAN_POST(),m=MGR();
+  function drawForm(){form.textContent="";if(!can)return;const j=job(),cs=cablesOf(j);
+    const cabs=cabsOf(j),syss=[...new Set(cs.filter(c=>!cab||c.rack===cab).map(c=>c.type).filter(Boolean))].sort((a,b)=>sysRank(j,a)-sysRank(j,b)),
+      pulls=[...new Set(cs.filter(c=>c.pull&&(!cab||c.rack===cab)&&(!sys||c.type===sys)).map(c=>c.pull))].sort(natCmp);
+    const sel=(lbl,val,opts,on)=>{const s_=h("select",{"aria-label":lbl},h("option",{value:""},lbl+": any"),opts.map(([v,l])=>h("option",{value:v,selected:val===v},l)));s_.addEventListener("change",()=>on(s_.value));return s_;};
+    form.append(h("strong",{},"Add a note"),
+      h("div",{class:"chips",style:"gap:6px"},NOTE_SEV.map(([k,l,col])=>h("button",{type:"button",class:"chipbtn","aria-pressed":String(sev===k),style:sev===k?"background:"+col+";border-color:"+col+";color:#fff":"border-color:"+col+";color:"+col,onclick:()=>{sev=k;drawForm();}},l))),
+      txt,
+      (cabs.length||pulls.length)?h("div",{style:"display:flex;gap:6px;flex-wrap:wrap"},
+        cabs.length?sel("Cabinet",cab,cabs.map(c=>[c,"Cabinet "+c]),v=>{cab=v;sys="";pull="";drawForm();}):null,
+        syss.length?sel("System",sys,syss.map(s_=>[s_,s_]),v=>{sys=v;pull="";drawForm();}):null,
+        pulls.length?sel("Pull",pull,pulls.map(p=>[p,pullShort({pull:p})]),v=>{pull=v;if(v){const c=cs.find(x=>x.pull===v);if(c){cab=c.rack||cab;sys=c.type||sys;}}drawForm();}):null):null,
+      h("div",{style:"display:flex;gap:8px;align-items:center"},h("button",{type:"button",class:"btn",onclick:post},"Post note"),h("span",{class:"status"},"Everyone on the job can see it.")));}
+  async function post(){const t=txt.value.trim();if(!t){toast("Type the note first");txt.focus();return;}if(busy)return;busy=true;
+    const id=Date.now().toString(36)+Math.random().toString(36).slice(2,5);
+    const n={text:t,sev,at:Date.now(),by:myId||"",cab:cab||"",sys:sys||"",pull:pull||""};
+    if(await saveNote(job(),id,n)){txt.value="";logEvent(meName()+" posted a"+(sev==="urgent"?"n URGENT":"")+" note on "+job().name+": "+t.slice(0,80),{ev:"note",jobId:jid});toast(sev==="urgent"?"Urgent note posted":"Note posted");}
+    busy=false;drawList();}
+  function card(n){const [k,l,col]=sevInfo(n.sev),done=!!n.doneAt,where=noteWhere(n);
+    return h("div",{class:"panel stack",style:"gap:4px;padding:10px;border-left:6px solid "+col+(done?";opacity:.65":"")},
+      h("div",{style:"display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"},
+        h("span",{class:"tpill",style:"background:"+col+";color:#fff;cursor:default"},l),
+        h("span",{class:"status"},(names[n.by]||"Someone")+" · "+fmtS(iso(new Date(n.at)))+" "+fmtTime(n.at))),
+      h("div",{style:"white-space:pre-wrap"},n.text),
+      where?h("div",{class:"status",style:"margin:0"},"📍 "+where):null,
+      done?h("div",{class:"status",style:"margin:0"},"✓ Done by "+(names[n.doneBy]||"a lead")+" "+ago(n.doneAt)):null,
+      m?h("div",{style:"display:flex;gap:6px;justify-content:flex-end"},done?h("button",{type:"button",class:"btn ghost small",onclick:async()=>{const v=Object.assign({},n,{doneAt:0,doneBy:""});delete v.id;await saveNote(job(),n.id,v);drawList();}},"Reopen")
+          :h("button",{type:"button",class:"btn small",onclick:async()=>{const v=Object.assign({},n,{doneAt:Date.now(),doneBy:myId||""});delete v.id;if(await saveNote(job(),n.id,v)){toast("Marked done and archived");logEvent(meName()+" closed a note on "+job().name,{ev:"note",jobId:jid});}drawList();}},"✓ Done")):null);}
+  function drawList(){list.textContent="";const j=job();if(!j)return;const all=notesOf(j),open=all.filter(n=>!n.doneAt),done=all.filter(n=>n.doneAt);
+    const srt=a=>a.slice().sort((x,y)=>order==="sev"?(sevRank(x.sev)-sevRank(y.sev)||y.at-x.at):(y.at-x.at));
+    list.append(h("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"},h("strong",{},"Open notes ("+open.length+")"),
+      h("div",{class:"seg-ctl"},[["sev","By severity"],["time","Newest first"]].map(([k,l])=>h("button",{type:"button","aria-pressed":String(order===k),onclick:()=>{order=k;drawList();}},l)))));
+    if(!open.length)list.append(h("p",{class:"status",style:"margin:0"},"No open notes."));
+    srt(open).forEach(n=>list.append(card(n)));
+    if(done.length)list.append(h("button",{type:"button",class:"linkbtn",style:"justify-self:start",onclick:()=>{showDone=!showDone;drawList();}},(showDone?"▾ ":"▸ ")+"Archived ("+done.length+")"));
+    if(showDone)done.sort((x,y)=>y.doneAt-x.doneAt).forEach(n=>list.append(card(n)));}
+  box.append(form,list);drawForm();drawList();
+  openView("Notes · "+job().name,[box]);$(".sheet").classList.add("wide");liveSheet=()=>{if(document.activeElement!==txt)drawList();};}
 
 /* phase progress from cable steps that share the phase's id */
 function phaseCables(j,p){if(p.cab){const r=scopeDone(j,{rack:p.cab});return r.gl.length?{n:r.done,of:r.gl.length,cab:p.cab}:null;}const cs=cablesOf(j);if(!cs.length||!stepsOf(j).some(s=>s.id===p.id))return null;return {n:stepCount(j,p.id),of:cs.length};}
