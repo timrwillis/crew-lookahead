@@ -3980,6 +3980,36 @@ async function labelsExcel(j,cabs){try{const X=await loadXlsx();
   const ws=X.utils.aoa_to_sheet(rows);ws["!cols"]=[{wch:22},{wch:34},{wch:34}];const wb=X.utils.book_new();X.utils.book_append_sheet(wb,ws,"Labels");
   X.writeFile(wb,(j.name||"cables").replace(/[^\w\- ]+/g,"").trim()+" labels.xlsx");toast("Label sheet downloaded");}
   catch(e){toast("Couldn't make the Excel file. Check your signal and try again.");}}
+/* print-ready label workbook: one sheet per cabinet + system, labels grouped by pull, pulls in order */
+function pullLabelLines(j,c){if(Array.isArray(c.label)&&c.label.some(Boolean))return [c.label[0]||"",c.label[1]||""];
+  if(c.rack&&c.type)return [c.name,c.from||""];return labelLines(j,c);}
+async function pullLabelWorkbook(j,o){o=o||{};try{const X=await loadXlsx();const cs=cablesOf(j);if(!cs.length){toast("No cables on this job yet");return;}
+  const groups=new Map();
+  cs.forEach(c=>{const k=c.rack&&c.type?c.rack+" "+c.type:(c.sheet||"Cables");if(!groups.has(k))groups.set(k,{rack:c.rack||"",type:c.type||"",list:[]});groups.get(k).list.push(c);});
+  const keys=[...groups.keys()].sort((a,b)=>{const A=groups.get(a),B=groups.get(b);return natCmp(A.rack,B.rack)||sysRank(j,A.type)-sysRank(j,B.type)||natCmp(a,b);});
+  const wb=X.utils.book_new();let nSheets=0,nLab=0;const usedNames=new Set();
+  keys.forEach(k=>{const g=groups.get(k),byPull=new Map();
+    g.list.forEach(c=>{const pk=c.pull?pullShort(c):"";if(!pk&&!o.loose)return;if(!byPull.has(pk))byPull.set(pk,[]);byPull.get(pk).push(c);});
+    const pks=[...byPull.keys()].sort((a,b)=>(!a)-(!b)||natCmp(a,b));if(!pks.length)return;
+    const rows=[["Line 1","Line 2","Pull","Cable"]];
+    pks.forEach((pk,i)=>{if(i&&o.gap)rows.push([]);
+      byPull.get(pk).sort((a,b)=>(labelNum(a.name)-labelNum(b.name))||natCmp(a.name,b.name)).forEach(c=>{const l=pullLabelLines(j,c);rows.push([l[0],l[1],pk||"Not in a pull yet",c.name]);nLab++;});});
+    const ws=X.utils.aoa_to_sheet(rows);ws["!cols"]=[{wch:28},{wch:28},{wch:18},{wch:16}];
+    let nm=k.replace(/[\[\]:*?\/\\]/g," ").slice(0,31).trim()||"Sheet";let n2=nm,i2=2;while(usedNames.has(n2))n2=(nm.slice(0,28)+" "+i2++);usedNames.add(n2);
+    X.utils.book_append_sheet(wb,ws,n2);nSheets++;});
+  if(!nSheets){toast(o.loose?"No labels to put on the sheet":"No pulls yet. Build pulls first, or include labels not in a pull.");return;}
+  X.writeFile(wb,(j.name||"job").replace(/[^\w\- ]+/g,"").trim()+" labels by pull.xlsx");toast(nLab+" labels on "+nSheets+" sheet"+(nSheets>1?"s":"")+" downloaded");}
+  catch(e){toast("Couldn't make the Excel file. Check your signal and try again.");}}
+function pullLabelSheet(jid){const j=S.jobs.find(x=>x.id===jid);if(!j)return;const cs=cablesOf(j),inPull=cs.filter(c=>c.pull).length;
+  const gap=h("input",{type:"checkbox",id:"plGap",checked:true}),loose=h("input",{type:"checkbox",id:"plLoose",checked:inPull<cs.length&&inPull===0});
+  const syss=[...new Set(cs.map(c=>c.rack&&c.type?c.rack+" "+c.type:"").filter(Boolean))];
+  openView("Label sheets by pull",[h("div",{class:"full stack",style:"gap:10px"},
+    h("p",{style:"margin:0"},"One Excel workbook for the job. Each cabinet + system gets its own sheet"+(syss.length?" ("+syss.length+")":"")+", with the labels for each pull kept together and the pulls in order (row 39, row 41…)."),
+    h("p",{class:"status",style:"margin:0"},inPull+" of "+cs.length+" labels are in a pull."),
+    h("label",{class:"check",for:"plGap",style:"text-transform:none;letter-spacing:0"},gap,"Blank row between pulls"),
+    h("label",{class:"check",for:"plLoose",style:"text-transform:none;letter-spacing:0"},loose,"Also add labels not in a pull yet (at the end of each sheet)"),
+    h("p",{class:"status",style:"margin:0"},"Columns: Line 1, Line 2, Pull, Cable. Point the EZ-Mark at Line 1 and Line 2."),
+    h("button",{type:"button",class:"btn",onclick:()=>pullLabelWorkbook(S.jobs.find(x=>x.id===jid)||j,{gap:gap.checked,loose:loose.checked})},"⬇ Download label workbook"))]);}
 function cableLabels(jid){const m=MGR();let q="",edits={},fmt=null;
   const box=h("div",{class:"full stack"});
   const qIn=h("input",{type:"search",class:"full-in",placeholder:"Search cables","aria-label":"Search cables",autocomplete:"off"});qIn.addEventListener("input",()=>{q=qIn.value;drawList();});
@@ -3999,7 +4029,8 @@ function cableLabels(jid){const m=MGR();let q="",edits={},fmt=null;
   function drawFoot(){foot.textContent="";const j=job();if(!j)return;const nEd=Object.keys(edits).length,fmtCh=!!fmt;
     if(m&&(nEd||fmtCh))foot.append(h("button",{type:"button",class:"btn",onclick:async()=>{const cables=cablesOf(j).map(c=>edits[c.id]?Object.assign({},c,{label:edits[c.id].some(Boolean)?edits[c.id]:null}):c);
       const upd={cables,updatedAt:Date.now()};if(fmt)upd.labelFmt=fmt;try{await db.collection("jobs").doc(j.id).update(upd);edits={};fmt=null;toast("Labels saved");drawFoot();drawList();}catch(err){writeErr(err);}}},"Save labels"));
-    foot.append(h("button",{type:"button",class:"btn"+(m&&(nEd||fmtCh)?" ghost":""),onclick:()=>{if(Object.keys(edits).length||fmt){toast("Save first so the sheet matches");return;}const jj=job();if(jj)labelsExcel(jj,cablesOf(jj));}},"⬇ Excel for EZ-Mark"));}
+    foot.append(h("button",{type:"button",class:"btn"+(m&&(nEd||fmtCh)?" ghost":""),onclick:()=>{if(Object.keys(edits).length||fmt){toast("Save first so the sheet matches");return;}const jj=job();if(jj)labelsExcel(jj,cablesOf(jj));}},"⬇ Excel for EZ-Mark"),
+      h("button",{type:"button",class:"btn ghost",onclick:()=>{if(Object.keys(edits).length||fmt){toast("Save first so the sheet matches");return;}closeSheet();setTimeout(()=>pullLabelSheet(jid),60);}},"⬇ Sheets by pull"));}
   box.append(h("p",{class:"status",style:"margin:0"},"Two lines per cable, built from each cable's From and To. "+(m?"Type over a line to change it; tap Save labels to keep it. ":"")+"The Excel file has one row per cable (Cable, Line 1, Line 2): in Easy-Mark, import it and match Line 1 / Line 2 to the label's text lines."),
     opts,qIn,list,foot);
   drawOpts();drawList();drawFoot();
@@ -4284,6 +4315,7 @@ function pullBuilder(jid){
       bottom.append(h("div",{class:"panel stack",style:"gap:6px;padding:10px"},
         h("div",{style:"display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"},h("strong",{},pullShort({pull:k})),h("span",{class:"status"},gl.length+" cables"+(ss.length?" · "+fin+" done":""))),
         h("div",{class:"chips",style:"gap:4px"},gl.map(c=>h("button",{type:"button",class:"chip",title:"Take "+c.name+" out of this pull","aria-label":"Take "+c.name+" out of this pull",onclick:()=>assign([c],null)},String(labelNum(c.name)).padStart(3,"0")," ✕")))));});}
+  box.append(h("div",{style:"display:flex;justify-content:flex-end"},h("button",{type:"button",class:"btn ghost small",onclick:()=>pullLabelSheet(jid)},"🏷 Label sheets by pull")));
   box.append(h("p",{class:"status",style:"margin:0"},"Pick the cabinet and system, tap where you're pulling (Row, Tray, Wall), then type the label numbers off the prints (801-806, 811) or tap them. Each label can only be in one pull."),top,mid,bottom);
   openView("Build pulls · "+j0.name,[box]);$(".sheet").classList.add("wide");liveSheet=()=>{if(!busy&&document.activeElement!==numIn&&document.activeElement!==whereIn)draw();};draw();}
 
