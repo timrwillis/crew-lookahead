@@ -845,7 +845,11 @@ function membersOn(j,d){const set=new Set(crewOn(j,d));tasksOf(j).forEach(t=>{if
 // Within a job, a tech works the first unfinished task they're on.
 const taskFor=(j,tid,d)=>tasksOf(j).find(t=>taskOpen(t,d)&&!heldOn(t,d)&&!blockedOn(j,t,d)&&crewOn(t,d).includes(tid))||null;
 function assignOn(tid,d){const k="a"+tid+d;if(k in memo)return memo[k];let r=null;
-  if(!offRec(tid,d))r=jobsOn(d).find(j=>!heldOn(j,d)&&membersOn(j,d).includes(tid))||null;return memo[k]=r;}
+  if(!offRec(tid,d)){const c=jobsOn(d).filter(j=>!heldOn(j,d)&&membersOn(j,d).includes(tid));
+    if(c.length>1){const at=j=>{let a=+((j.crewAt||{})[tid])||0;if(crewOn(j,d).includes(tid)===false)a=0;tasksOf(j).forEach(t=>{if(taskOpen(t,d)&&!heldOn(t,d)&&crewOn(t,d).includes(tid))a=Math.max(a,+((t.crewAt||{})[tid])||0);});
+        if(crewOn(j,d).includes(tid))a=Math.max(a,+((j.crewAt||{})[tid])||0);return a;};
+      r=c.reduce((b,j)=>at(j)>at(b)?j:b,c[0]);}else r=c[0]||null;}
+  return memo[k]=r;}
 const workingOn=(j,d)=>membersOn(j,d).filter(t=>assignOn(t,d)===j);
 const queuedOn=(j,d)=>membersOn(j,d).filter(t=>{const a=assignOn(t,d);return a&&a!==j;});
 function crewGroups(j,d,ids){const g=[];tasksOf(j).forEach(t=>{const m=ids.filter(x=>{const tf=taskFor(j,x,d);return tf&&tf.id===t.id;});if(m.length)g.push([t.name,m]);});
@@ -871,13 +875,15 @@ function crewOn(j,d){const log=j.crewLog||{};let best=null;for(const k in log)if
 function refDay(j){const t=TODAY();if(j.start>t)return j.start;const e=endOf(j);return e<t?e:t;}
 function nextWorkday(j,d){let n=addDays(parseD(d),1);while(n.getDay()===0)n=addDays(n,1);const s=iso(n);return s<=endOf(j)?s:null;}
 function nextDayIn(d,end){let n=addDays(parseD(d),1);while(n.getDay()===0)n=addDays(n,1);const s=iso(n);return s<=end?s:null;}
+function stampAt(old,ids,at){const o=new Set(old||[]),r=Object.assign({},at||{}),n=Date.now();(ids||[]).forEach(t=>{if(!o.has(t))r[t]=n;});return r;}
 function logChange(obj,start,end,d,ids,just){
   const log=Object.assign({},obj.crewLog||{});
   if(!Object.keys(log).length&&start<d)log[start]=(obj.crew||[]).slice();
   if(just){const nd=nextDayIn(d,end);if(nd&&!(nd in log))log[nd]=crewOn(obj,nd).slice();}
   else Object.keys(log).forEach(k=>{if(k>d)delete log[k];});
+  const prev=new Set(crewOn(obj,d)),at=Object.assign({},obj.crewAt||{}),now=Date.now();ids.forEach(t=>{if(!prev.has(t))at[t]=now;});
   log[d]=ids;let latest=null;for(const k in log)if(!latest||k>latest)latest=k;
-  return {crewLog:log,crew:log[latest]};
+  return {crewLog:log,crew:log[latest],crewAt:at};
 }
 async function setCrew(j,d,ids,just,taskId){
   if(!taskId){await db.collection("jobs").doc(j.id).update(Object.assign(logChange(j,j.start,endOf(j),d,ids,just),{updatedAt:Date.now()}));return;}
@@ -1194,10 +1200,11 @@ function moreBtn(title,items){items=items.filter(Boolean);if(!items.length)retur
 function taskRow(j,t,d){
   const [st,lbl]=taskStatus(j,t,d);
   const crew=st==="active"?workingOn(j,d).filter(x=>(taskFor(j,x,d)||{}).id===t.id):crewOn(t,d);
+  const elsewhere=st==="active"?crewOn(t,d).filter(x=>!crew.includes(x)&&!offRec(x,d)).map(x=>{const a=assignOn(x,d);return a&&a!==j?(techById(x)||{}).name+" (on "+a.name+")":"";}).filter(Boolean):[];
   const step=stepForTask(j,t),sp=step?stepCount(j,step.id)+"/"+cablesOf(j).length+" "+step.name.toLowerCase():"";
   const cs=tstate(j,t),csTxt=cs&&st!=="done"?(cs.state==="working"?"Working since "+fmtTime(cs.at):cs.state==="hold"?"Crew says on hold: "+(cs.reason||""):""):"";
   const sub=[csTxt,st==="wait"?waitTxt({job:j,task:t,waits:waitsOn(j,t,d)}):"",st==="hold"?(t.hold||j.hold||{}).reason||"":"",st==="done"&&t.doneOn?"Done "+fmtS(t.doneOn)+(t.crewDone&&t.doneBy?" by "+(names[t.doneBy]||"crew"):""):"",
-    crew.length?(st==="active"?"On it: ":"Crew: ")+crewNames(crew):(st==="done"?"":"No crew yet"),step&&cablePill(j,t)?"":sp].filter(Boolean).join(" · ");
+    crew.length?(st==="active"?"On it: ":"Crew: ")+crewNames(crew):(st==="done"||elsewhere.length?"":"No crew yet"),elsewhere.length?"Also on it: "+elsewhere.join(", "):"",step&&cablePill(j,t)?"":sp].filter(Boolean).join(" · ");
   const m=MGR(),btn=(l,f,pri)=>h("button",{type:"button",class:"btn "+(pri?"":"ghost ")+"small",onclick:f},l);
   return h("div",{class:"titem"+(st==="done"?" done":"")},
     h("span",{class:"st "+st},lbl),
@@ -2761,14 +2768,14 @@ function jobForm(j,sec){
     const keep=new Set(tasks.filter(t=>(t.name||"").trim()).map(t=>t.id));
     if(!j){body.addedBy=myId||"";body.addedAt=Date.now();}
     body.tasks=tasks.filter(t=>(t.name||"").trim()).map(t=>{const tid=[...t.set].filter(techById);const base={id:t.id,name:t.name.trim(),phase:phases.some(p=>p.id===t.phase)?t.phase:"",doneOn:t.doneOn||"",after:t.after.filter(x=>keep.has(x)&&x!==t.id),startedOn:t.startedOn||"",addedBy:t.orig?(t.orig.addedBy||""):(myId||""),addedAt:t.orig?(t.orig.addedAt||0):Date.now()};
-      if(!t.orig){base.crew=tid;base.crewLog=started?{[start]:[],[eff]:tid}:{};return base;}
+      if(!t.orig){base.crew=tid;base.crewAt=stampAt([],tid);base.crewLog=started?{[start]:[],[eff]:tid}:{};return base;}
       const tHasLog=Object.keys(t.orig.crewLog||{}).length>0;
-      if(!started&&!tHasLog){base.crew=tid;base.crewLog={};return base;}
-      if(sameSet(tid,crewOn(t.orig,eff))){base.crew=t.orig.crew||[];base.crewLog=t.orig.crewLog||{};return base;}
+      if(!started&&!tHasLog){base.crewAt=stampAt(t.orig.crew,tid,t.orig.crewAt);base.crew=tid;base.crewLog={};return base;}
+      if(sameSet(tid,crewOn(t.orig,eff))){base.crew=t.orig.crew||[];base.crewLog=t.orig.crewLog||{};if(t.orig.crewAt)base.crewAt=t.orig.crewAt;return base;}
       return Object.assign(base,logChange(t.orig,start,endD,eff,tid,false));});
-    if(!j){body.crew=ids;body.createdAt=Date.now();body.by=myId||"";const ref=await db.collection("jobs").add(body);lastNewJob=Object.assign({id:ref.id},body);return;}
+    if(!j){body.crew=ids;body.crewAt=stampAt([],ids);body.createdAt=Date.now();body.by=myId||"";const ref=await db.collection("jobs").add(body);lastNewJob=Object.assign({id:ref.id},body);return;}
     if(j.doneOn){const dn=val("fDone");if(dn)body.doneOn=dn;}
-    if(!started&&!hasLog)body.crew=ids;
+    if(!started&&!hasLog){body.crewAt=stampAt(j.crew,ids,j.crewAt);body.crew=ids;}
     else if(!sameSet(ids,crewOn(j,eff)))Object.assign(body,logChange(j,start,endD,eff,ids,false));
     await saveVersion(j);await db.collection("jobs").doc(j.id).update(body);if(body.scanCk)setTimeout(()=>ensureScanSteps(S.jobs.find(x=>x.id===j.id)),400);readyAfter(j,j,Object.assign({},j,body));},
     j&&!ro&&!sec?()=>softDelete("jobs",j.id,j.name):null,ro);
