@@ -2999,7 +2999,9 @@ function ckProblems(ck){const out=[],sn=snFromUrl(ck.qr);
   return out;}
 async function saveCk(j,cid,ck){const val=Object.assign({},ck,{updatedAt:Date.now()});
   j.marks=Object.assign({},j.marks||{});j.marks[cid]=Object.assign({},j.marks[cid]||{},{_ck:val});
-  try{await db.collection("jobs").doc(j.id).update({["marks."+cid+"._ck"]:val,updatedAt:Date.now()});}catch(err){writeErr(err);}}
+  try{await db.collection("jobs").doc(j.id).update({["marks."+cid+"._ck"]:val,updatedAt:Date.now()});
+    if(needsScan(j)){const r=scanStepsOn(j,val),upd={};r.ids.forEach(sid=>{if(!r.on.has(sid)&&markOf(j,cid,sid))upd["marks."+cid+"."+sid]=null;});
+      if(Object.keys(upd).length){upd.updatedAt=Date.now();await db.collection("jobs").doc(j.id).update(upd);}}}catch(err){writeErr(err);}}
 const ckDate=at=>{const x=new Date(at);return (x.getMonth()+1)+"/"+x.getDate()+"/"+x.getFullYear();};
 const ckWho=it=>it?(it.techId&&techById(it.techId)?techName(it.techId):realName(it.by)):"";
 
@@ -3213,13 +3215,32 @@ function keepPhotoAsk(c,lines){return new Promise(resolve=>{
 /* steps a cable's scans should have checked off but haven't yet. cable = serial (or label QR); src / dst = enclosures */
 function scanStepsDue(j,cid,ck){const sC=scanStepFor(j,"cable"),sS=scanStepFor(j,"src"),sD=scanStepFor(j,"dst"),want=new Set(),sn=snFromUrl(ck.qr);
   const cableBad=ck.serial&&ck.qr&&sn&&sn!==String(ck.serial).trim(),encBad=ck.src&&ck.dst&&ck.src.trim()===ck.dst.trim();
-  if(sC&&(ck.serial||ck.qr)&&!cableBad)want.add(sC);
+  if(sC&&ck.serial&&ck.qr&&!cableBad)want.add(sC);
   if(sS&&sS===sD){if(ck.src&&ck.dst&&!encBad)want.add(sS);}
   else{if(sS&&ck.src)want.add(sS);if(sD&&ck.dst&&!encBad)want.add(sD);}
   return [...want].filter(id=>!markOf(j,cid,id)).map(id=>stepsOf(j).find(x=>x.id===id)).filter(Boolean);}
+/* the scan steps a cable's scans say should be checked (both ways: missing scans un-check them) */
+function scanStepsOn(j,ck){const sC=scanStepFor(j,"cable"),sS=scanStepFor(j,"src"),sD=scanStepFor(j,"dst"),on=new Set(),sn=snFromUrl(ck.qr);
+  const cableBad=ck.serial&&ck.qr&&sn&&sn!==String(ck.serial).trim(),encBad=ck.src&&ck.dst&&ck.src.trim()===ck.dst.trim();
+  if(sC&&ck.serial&&ck.qr&&!cableBad)on.add(sC);
+  if(sS&&sS===sD){if(ck.src&&ck.dst&&!encBad)on.add(sS);}else{if(sS&&ck.src)on.add(sS);if(sD&&ck.dst&&!encBad)on.add(sD);}
+  return {on,ids:[sC,sS,sD].filter(Boolean)};}
+const scanIdsOf=j=>new Set(["cable","src","dst"].map(k=>scanStepFor(j,k)).filter(Boolean));
+/* keep scan steps and scans linked: a scan step is checked exactly when its scans are in */
+const scanSyncBusy=new Set();
+async function syncScanSteps(j){if(!j||!CAN_POST()||!needsScan(j)||scanSyncBusy.has(j.id))return;
+  const upd={};let on=0,off=0;
+  cablesOf(j).forEach(c=>{const ck=ckOf(j,c.id),r=scanStepsOn(j,ck);r.ids.forEach(sid=>{const m=markOf(j,c.id,sid),should=r.on.has(sid);
+    if(should&&!m){const f=sid===scanStepFor(j,"cable")?(ck.qrAt>ck.serialAt?"qr":"serial"):(sid===scanStepFor(j,"dst")&&ck.dst?"dst":"src");upd["marks."+c.id+"."+sid]={at:ck[f+"At"]||Date.now(),by:ck[f+"By"]||myId||"",auto:true};on++;}
+    else if(!should&&m){upd["marks."+c.id+"."+sid]=null;off++;}});});
+  if(!on&&!off)return;scanSyncBusy.add(j.id);upd.updatedAt=Date.now();
+  try{await db.collection("jobs").doc(j.id).update(upd);
+    logEvent("Scan steps matched to scans on "+j.name+(on?": "+on+" checked":"")+(off?(on?",":":")+" "+off+" un-checked (scan missing)":""),{ev:"cables",jobId:j.id});
+    if(off&&MGR())toast(off+" scan step"+(off===1?" was":"s were")+" checked without the scan. Un-checked so they match the scans.");}
+  catch(e){}finally{setTimeout(()=>scanSyncBusy.delete(j.id),4000);}}
 /* cables scanned before their step existed (or held back by an old rule): check those steps now, credited to whoever scanned */
 const scanHealed=new Set();
-async function healScanSteps(j){if(!j||!CAN_POST()||scanHealed.has(j.id)||!needsScan(j))return;scanHealed.add(j.id);
+async function healScanSteps(j){if(j&&needsScan(j))return syncScanSteps(j);if(!j||!CAN_POST()||scanHealed.has(j.id)||!needsScan(j))return;scanHealed.add(j.id);
   const upd={},sC=scanStepFor(j,"cable");let n=0;
   cablesOf(j).forEach(c=>{const ck=ckOf(j,c.id);scanStepsDue(j,c.id,ck).forEach(st=>{
     const f=st.id===sC?(ck.serial?"serial":"qr"):(st.id===scanStepFor(j,"dst")&&ck.dst?"dst":"src");
@@ -3766,13 +3787,13 @@ function cableTracker(jid,q0,f0){
       sSel.addEventListener("change",()=>{fSys=sSel.value;saveF();draw();});
       box.append(h("div",{style:"display:flex;gap:8px;flex-wrap:wrap"},cSel,sysL.length?sSel:null));}
     const inF=c=>(!fCab||c.rack===fCab)&&(!fSys||c.type===fSys);
-    const fl=cs.filter(inF),fn=fl.length||1;
+    const fl=cs.filter(inF),fn=fl.length||1,scanSet=needsScan(j)?scanIdsOf(j):new Set(),isScanSt=id=>scanSet.has(id);
     const pg={pct:Math.round(fl.reduce((a,c)=>a+ss.filter(st=>markOf(j,c.id,st.id)).length,0)*100/(fn*ss.length))};
     box.append(h("div",{class:"prog"},h("div",{class:"pr"},h("span",{class:"n"},fCab||fSys?"This "+(fSys?"system":"cabinet"):"Overall"),h("span",{class:"bar"},h("i",{style:"width:"+pg.pct+"%"})),h("span",{class:"c"},pg.pct+"%"),h("span")),
       ss.map(st=>{const n=fl.filter(c=>markOf(j,c.id,st.id)).length,left=fl.length-n,inner=[h("span",{class:"n"},st.name),h("span",{class:"bar"},h("i",{style:"width:"+Math.round(n*100/fn)+"%"})),h("span",{class:"c"},n+"/"+fl.length),
-          h("span",{class:"status",style:"white-space:nowrap"},!left?"Done ✓":can?"Mark ›":"")];
-        /* tap a step to check it off on many cables from one list */
-        return can?h("button",{type:"button",class:"pr prbtn steprow",title:"Check off "+st.name+" on several cables",onclick:()=>stepMarkSheet(j.id,st.id,fCab||fSys?inF:null)},inner):h("div",{class:"pr"},inner);})),
+          h("span",{class:"status",style:"white-space:nowrap"},!left?"Done ✓":can?(isScanSt(st.id)?"📷 Scan ›":"Mark ›"):"")];
+        /* tap a step to check it off on many cables from one list; scan steps only check off from real scans */
+        return can?h("button",{type:"button",class:"pr prbtn steprow",title:isScanSt(st.id)?st.name+" checks itself off when the scan is saved":"Check off "+st.name+" on several cables",onclick:()=>isScanSt(st.id)?scanFindCable(j.id):stepMarkSheet(j.id,st.id,fCab||fSys?inF:null)},inner):h("div",{class:"pr"},inner);})),
       can?h("div",{class:"status",style:"margin:-2px 0 0"},"Tap a step to check it off on several cables at once."):null);
     if(!cabL.length){const cp=cabinetProgress(j);if(cp)box.append(cp);}
     const have=Object.keys(GROUPS).filter(k=>cs.some(c=>cabVal(c,k)));
@@ -3795,6 +3816,7 @@ function cableTracker(jid,q0,f0){
         MGR()?h("button",{class:"btn ghost small",type:"button",onclick:()=>{closeSheet();cableEditor(j);}},"Edit cables & steps"):null)));
     const sub=c=>[trackGroup!=="row"&&rowOf(c)&&!/row/i.test((c.pull||"")+(c.to||""))?rowOf(c):"",trackGroup!=="rack"&&c.rack&&!fCab?"Cabinet "+c.rack:"",!fSys&&c.type&&trackGroup!=="type"?c.type:"",c.from&&c.type?c.from:"",trackGroup!=="pull"&&c.pull&&!/row/i.test(c.pull)?"Pull "+c.pull:"",trackGroup!=="len"&&c.len?c.len+(/^\d+(\.\d+)?$/.test(String(c.len).trim())?" m":""):""].filter(Boolean).join(" · ");
     const detail=c=>[c.type,c.from||c.to?[c.from,c.to].filter(Boolean).join(" → "):"",c.note].filter(Boolean).join(" · ");
+    const scanIds=needsScan(j)?scanIdsOf(j):new Set();
     const row=c=>{const stt=cabState(j,c,ss),n=ss.filter(st=>markOf(j,c.id,st.id)).length,open=openCab.has(c.id);
       const el=h("div",{class:"cab "+stt,"data-cid":c.id});
       const hd=h("button",{type:"button",class:"chd","aria-expanded":String(open),onclick:()=>{open?openCab.delete(c.id):openCab.add(c.id);draw();}},
@@ -3803,7 +3825,7 @@ function cableTracker(jid,q0,f0){
       if(open){const steps=h("div",{class:"csteps"},ss.map(st=>{const m=markOf(j,c.id,st.id),sp=isSplit(st),pp=sp?partsOf(j,c.id,st.id):[];
           const tip=(m?st.name+" "+fmtTime(m.at)+" "+fmt(new Date(m.at))+(m.by?" · "+(names[m.by]||""):""):"")+(pp.length?(m?" · ":"")+pp.map(p=>partWho(p)+(partTxt(p)?" ("+partTxt(p)+")":"")).join(", "):"");
           return h("button",{type:"button",class:"sbtn"+(!m&&pp.length?" part":""),"aria-pressed":String(!!m),"data-l":st.name,disabled:!can&&!sp,"aria-label":c.name+" "+st.name+(sp?" sign-off":""),title:tip,
-            onclick:e=>sp?signOff(j.id,c.id,st.id):queueMark(j,c.id,st.id,e.currentTarget,()=>recolor(el,j,c))},m?"✓ "+st.name:sp?(pp.length?"✎ "+st.name+" ("+pp.length+")":"✎ "+st.name):st.name);}));
+            onclick:e=>scanIds.has(st.id)?(closeSheet(),setTimeout(()=>ckSheet(j.id,c.id),60)):sp?signOff(j.id,c.id,st.id):queueMark(j,c.id,st.id,e.currentTarget,()=>recolor(el,j,c))},m?"✓ "+st.name:scanIds.has(st.id)?"📷 "+st.name:sp?(pp.length?"✎ "+st.name+" ("+pp.length+")":"✎ "+st.name):st.name);}));
         el.append(steps);
         {const ck=ckOf(j,c.id),sn=ckScanN(ck),inn=ckItemN(ck);
           el.append(h("div",{class:"cdet"},h("button",{type:"button",class:"btn ghost small",onclick:()=>{closeSheet();setTimeout(()=>ckSheet(j.id,c.id),60);}},"📋 Checklist & scans · "+sn+"/4 scanned · "+inn+"/5 checked"),ckProblems(ck).length?h("span",{style:"color:var(--over);margin-left:6px"},"⚠"):null));}
