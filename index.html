@@ -3592,11 +3592,27 @@ function refreshCables() {
 // Crew Lookahead → Refresh now: always rebuild every tab, even if nothing changed
 function refreshAll() {
   PropertiesService.getDocumentProperties().deleteProperty("feedAt");
-  PropertiesService.getDocumentProperties().deleteProperty("cableTabs");
+  const p = PropertiesService.getDocumentProperties();
+  Object.keys(p.getProperties()).filter(k => k.indexOf("cableTabs") === 0).forEach(k => p.deleteProperty(k));
   refreshCables();
 }
 
 // shows the last check right on the Cables tab, so a stuck refresh is easy to spot
+// Google allows 9 KB per saved value, so the list of cable tabs is saved in pieces
+function loadKnown_(props) {
+  const all = props.getProperties();
+  if (all.cableTabs) return JSON.parse(all.cableTabs || "{}");
+  let s = "", i = 0;
+  while (all["cableTabs_" + i] != null) s += all["cableTabs_" + (i++)];
+  try { return JSON.parse(s || "{}"); } catch (e) { return {}; }
+}
+function saveKnown_(props, known) {
+  const s = JSON.stringify(known), all = props.getProperties(), out = {};
+  Object.keys(all).filter(k => k.indexOf("cableTabs") === 0).forEach(k => props.deleteProperty(k));
+  for (let i = 0; i * 8000 < s.length || i === 0; i++) out["cableTabs_" + i] = s.slice(i * 8000, (i + 1) * 8000);
+  props.setProperties(out);
+}
+
 function status_(msg) {
   try {
     const sh = SpreadsheetApp.getActive().getSheetByName("Cables");
@@ -3630,7 +3646,7 @@ function refresh_() {
   if (!data.cables) throw new Error("The feed is from an older app version. In the app, tap Update feed now, then run this again.");
   const ss = SpreadsheetApp.getActive();
   const props = PropertiesService.getDocumentProperties();
-  const known = JSON.parse(props.getProperty("cableTabs") || "{}");
+  const known = loadKnown_(props);
   const seen = {};
   const master = tab_(ss, "Cables", 0);
   // one tab per cable, rewritten only when that cable changed
@@ -3638,7 +3654,7 @@ function refresh_() {
   let partial = false;
   data.cables.forEach((c, i) => {
     const name = tabName_(c.name, seen);
-    const hash = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, JSON.stringify(c)));
+    const hash = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, JSON.stringify(c))).slice(0, 12);
     let sh = ss.getSheetByName(name);
     // big jobs: stop making tabs after ~4 minutes; the next refresh picks up the rest
     if ((!sh || known[name] !== hash) && Date.now() - start >= 240000) partial = true;
@@ -3647,7 +3663,7 @@ function refresh_() {
   });
   // remove tabs for cables that left the job
   Object.keys(known).forEach(n => { if (!seen[n]) { const s = ss.getSheetByName(n); if (s) ss.deleteSheet(s); delete known[n]; } });
-  props.setProperty("cableTabs", JSON.stringify(known));
+  saveKnown_(props, known);
   // the master list
   const rows = [["Cable", "Status", "Progress", "Steps done", "Row", "Source", "Destination", "Last update", "Problems"]];
   data.cables.forEach(c => rows.push([
