@@ -2805,7 +2805,7 @@ function jobEditMenu(j){if(!j)return;if(!MGR()){jobForm(j);return;}const go=f=>(
     opt("🧵","Cables & steps",cn?cn+" cables · steps, profile, material":"Type or paste a cable list instead",()=>cableEditor(j)),
     cablesOf(j).some(c=>c.rack&&c.type)?opt("🧩","Build pulls",(()=>{const cs=cablesOf(j).filter(c=>c.rack&&c.type),n=cs.filter(c=>!c.pull).length;return n?n+" of "+cs.length+" labels not in a pull yet":"Every label is in a pull";})(),()=>pullBuilder(j.id)):null,
     opt("📎","Documents",dn?dn+" files":"Photos, prints, PDFs",()=>docsGallery(j.id)),
-    cablesOf(j).length?opt("📊","Live Google Sheet",j.feedId?"On · refreshes every 5 minutes":"Keep a Google Sheet filled with this job's cable data",()=>liveSheetPanel(j.id)):null,
+    cablesOf(j).length?opt("📊","Live Google Sheet",j.feedId?(HOOK_RE.test(String(j.feedHook||""))?"On · updates within seconds":"On · refreshes every minute"):"Keep a Google Sheet filled with this job's cable data",()=>liveSheetPanel(j.id)):null,
     opt("⏸","Hold or finish",heldOn(j,TODAY())?"On hold now":j.doneOn?"Done "+fmtS(j.doneOn):"Put on hold, or mark the job done",()=>holdOrDone(j)),
     opt("⧉","Duplicate job","Copy it as a new job: same setup, fresh progress",()=>duplicateJob(j)),
     h("button",{type:"button",class:"emenu",onclick:()=>confirmDelete(j)},h("span",{class:"ic","aria-hidden":"true"},"🗑"),h("span",{},h("strong",{style:"color:var(--over)"},"Delete job"),h("small",{},"Asks first. You can undo it, or restore it from Messages → Deleted")),h("span",{class:"go"},"›")),
@@ -3524,7 +3524,7 @@ function cableData(j){const cs=cablesOf(j),ss=stepsOf(j),who=u=>u?realName(u):""
       company:{serials:CK_SCANS.map(([k,l])=>[l,ck[k]||""]),
         checks:CK_ITEMS.map((t,i)=>{const it=(ck.items||{})[i+1];return [t,...(it&&it.at?[ckWho(it),"TRUE",ckDate(it.at),"NA","",it.remark||""]:["","FALSE","","NA","",""])];})}};});
   return{job:j.name||"",updated:T(Date.now()),steps:ss.map(x=>x.name),scriptV:FEED_SCRIPT_V,cables};}
-const FEED_SCRIPT_V=2;
+const FEED_SCRIPT_V=3;
 async function gzB64(str){const cs=new Blob([str]).stream().pipeThrough(new CompressionStream("gzip"));const u=new Uint8Array(await new Response(cs).arrayBuffer());let b="";for(let i=0;i<u.length;i+=32768)b+=String.fromCharCode.apply(null,u.subarray(i,i+32768));return btoa(b);}
 /* the feed doc must stay under Firestore's 1 MB limit, so the full data goes in gzipped; the plain copies are only kept for old pasted scripts when they fit */
 async function writeFeed(j,loud){if(!j||!j.feedId||!db)return false;
@@ -3536,9 +3536,16 @@ async function writeFeed(j,loud){if(!j||!j.feedId||!db)return false;
     if(typeof CompressionStream!=="undefined"){doc.gz=await gzB64(JSON.stringify({data,history,summary}));if(doc.gz.length>950000)throw new Error("too big");}
     if(data.length+history.length+(doc.gz||"").length<900000){doc.data=data;doc.history=history;}
     else if(!doc.gz)throw new Error("too big");
-    await db.collection("feeds").doc(j.feedId).set(doc);delete feedPending[j.id];return true;}
+    await db.collection("feeds").doc(j.feedId).set(doc);delete feedPending[j.id];pingSheet(j);return true;}
   catch(e){if(loud){if(e&&e.message==="too big")toast("This job has too much cable data for the live sheet ("+cablesOf(j).length+" cables). Tell Claude so it can split the feed.");else writeErr(e);}return false;}}
 const feedTimers={},feedPending={};
+/* instant sheet refresh: call the Google Sheet's own web app (at most every 15 s per job, the last change always goes through) */
+const HOOK_RE=/^https:\/\/script\.google\.com\/(a\/[^/]+\/)?macros\/s\/[\w-]+\/exec$/;
+const pingLast={},pingTimer={};
+function pingSheet(j){const u=String(j&&j.feedHook||"").trim();if(!HOOK_RE.test(u))return;
+  const go=()=>{pingLast[j.id]=Date.now();try{fetch(u+"?t="+Date.now(),{mode:"no-cors",cache:"no-store",keepalive:true}).catch(()=>{});}catch(e){}};
+  const wait=15000-(Date.now()-(pingLast[j.id]||0));clearTimeout(pingTimer[j.id]);
+  if(wait<=0)go();else pingTimer[j.id]=setTimeout(go,wait);}
 function scheduleFeed(jid){feedPending[jid]=1;clearTimeout(feedTimers[jid]);feedTimers[jid]=setTimeout(()=>{writeFeed(S.jobs.find(x=>x.id===jid));},2500);}
 /* phone pocketed or app closed before the timer fired: send it now */
 function flushFeeds(){Object.keys(feedPending).forEach(jid=>{clearTimeout(feedTimers[jid]);writeFeed(S.jobs.find(x=>x.id===jid));});}
@@ -3554,6 +3561,19 @@ const FEED = "${feedUrl(j.feedId)}";
 const HEAD_FILL = "#e8eef7", SEC_FILL = "#f3f3f3", COPY_FILL = "#fff2cc", SCRIPT_V = ${FEED_SCRIPT_V};
 
 function refreshCables() {
+  // one refresh at a time (the app's instant ping and the timer can land together)
+  const lock = LockService.getDocumentLock();
+  if (!lock.tryLock(20000)) return;
+  try { refresh_(); } finally { lock.releaseLock(); }
+}
+
+// the app calls this the moment something changes (needs the Web app deployment, see step 6 in the app)
+function doGet(e) {
+  refreshCables();
+  return ContentService.createTextOutput("ok");
+}
+
+function refresh_() {
   const res = UrlFetchApp.fetch(FEED, { muteHttpExceptions: true });
   if (res.getResponseCode() !== 200) throw new Error("Couldn't reach the app's feed (" + res.getResponseCode() + "). Ask your lead for a new link.");
   const f = JSON.parse(res.getContentText()).fields || {};
@@ -3678,7 +3698,7 @@ function bar_(done, total) {
 
 function setup() {
   ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
-  ScriptApp.newTrigger("refreshCables").timeBased().everyMinutes(5).create();
+  ScriptApp.newTrigger("refreshCables").timeBased().everyMinutes(1).create();
   refreshCables();
 }
 
@@ -3688,7 +3708,7 @@ function onOpen() {
 `;}
 function liveSheetPanel(jid){const box=h("div",{class:"full stack"});
   const draw=()=>{const j=S.jobs.find(x=>x.id===jid);if(!j){closeSheet();return;}box.textContent="";const m=MGR();
-    if(!j.feedId){box.append(h("p",{style:"margin:0"},"Keep a Google Sheet filled with this job's cable data: every cable, its serials and QR codes, each step with the date and who did it, the check list, plus a history and a summary. It refreshes by itself every 5 minutes."),
+    if(!j.feedId){box.append(h("p",{style:"margin:0"},"Keep a Google Sheet filled with this job's cable data: every cable, its serials and QR codes, each step with the date and who did it, the check list, plus a history and a summary. It refreshes by itself every minute, or within seconds once you add the web app link."),
         h("p",{class:"status",style:"margin:0"},"This makes a private link. Anyone who has it can read this job's cable data (not change it), so share the Google Sheet like you'd share the file itself. You can turn it off or replace the link any time."),
         m?h("button",{type:"button",class:"btn",onclick:async e=>{e.currentTarget.disabled=true;const id=feedKey();
           try{await db.collection("jobs").doc(j.id).update({feedId:id,updatedAt:Date.now()});j.feedId=id;await writeFeed(Object.assign({},j,{feedId:id}));logEvent(meName()+" turned on the live Google Sheet for "+j.name,{ev:"doc",jobId:j.id});draw();}catch(err){writeErr(err);draw();}}},"Turn on the live Google Sheet"):h("div",{class:"status"},"Ask Tim or the superintendent to turn this on."));return;}
@@ -3699,7 +3719,15 @@ function liveSheetPanel(jid){const box=h("div",{class:"full stack"});
         h("li",{},"In the sheet: ",h("strong",{},"Extensions → Apps Script"),". Delete what's there."),
         h("li",{},"Tap ",h("strong",{},"Copy script")," below, paste it in, and click the 💾 Save icon."),
         h("li",{},"Pick ",h("strong",{},"setup")," in the function menu at the top, then click ",h("strong",{},"▶ Run"),". Google asks you to allow it once: choose your account → Advanced → Go to the project → Allow."),
-        h("li",{},"Back in the sheet you'll have a ",h("strong",{},"Cables")," list (click a cable to open its own tab), a tab for each cable, plus ",h("strong",{},"History")," and ",h("strong",{},"Summary"),". It refreshes every 5 minutes, and ",h("strong",{},"Crew Lookahead → Refresh now")," pulls right away. Already set it up before? Paste the new script over the old one and run setup again.")),
+        h("li",{},"Back in the sheet you'll have a ",h("strong",{},"Cables")," list (click a cable to open its own tab), a tab for each cable, plus ",h("strong",{},"History")," and ",h("strong",{},"Summary"),". It refreshes every minute, and ",h("strong",{},"Crew Lookahead → Refresh now")," pulls right away. Already set it up before? Paste the new script over the old one and run setup again."),
+        h("li",{},h("strong",{},"For instant updates"),": in Apps Script click ",h("strong",{},"Deploy → New deployment"),", gear ⚙ → ",h("strong",{},"Web app"),". Execute as ",h("strong",{},"Me"),", Who has access ",h("strong",{},"Anyone"),", then ",h("strong",{},"Deploy"),". Copy the ",h("strong",{},"Web app URL")," and paste it below. Without this the sheet still updates every minute.")),
+      (()=>{const hk=h("input",{id:"feedHook",value:j.feedHook||"",placeholder:"https://script.google.com/macros/s/…/exec",class:"full-in",autocomplete:"off",disabled:!m});
+        const ok=HOOK_RE.test(String(j.feedHook||"").trim());
+        return h("div",{class:"field"},h("label",{for:"feedHook"},"Sheet web app URL (instant updates)"),hk,
+          h("div",{style:"display:flex;gap:8px;flex-wrap:wrap;align-items:center"},m?h("button",{type:"button",class:"btn small",onclick:async()=>{const v=hk.value.trim();
+              if(v&&!HOOK_RE.test(v)){toast("That isn't a Web app URL. It starts with https://script.google.com/ and ends with /exec");return;}
+              try{await db.collection("jobs").doc(j.id).update({feedHook:v,updatedAt:Date.now()});j.feedHook=v;toast(v?"Saved. The sheet now updates within seconds of a change.":"Instant updates off");if(v){pingLast[j.id]=0;pingSheet(j);}draw();}catch(err){writeErr(err);}}},"Save"):null,
+            h("span",{class:"status"},ok?"✓ Instant updates on":"Off: the sheet updates every minute")));})(),
       h("div",{style:"display:flex;gap:8px;flex-wrap:wrap"},h("button",{type:"button",class:"btn",onclick:()=>copyText(code,"Script copied. Paste it into Apps Script.")},"Copy script"),
         h("button",{type:"button",class:"btn ghost",onclick:async()=>{if(await writeFeed(S.jobs.find(x=>x.id===j.id)||j,true))toast("Feed updated. In the sheet: Crew Lookahead → Refresh now");}},"Update feed now")),
       h("details",{},h("summary",{class:"status"},"Show the script"),h("pre",{class:"mono",style:"white-space:pre-wrap;font-size:.72rem;background:var(--bg);padding:10px;border-radius:8px;max-height:260px;overflow:auto"},code)),
