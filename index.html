@@ -3972,7 +3972,8 @@ function labelSide(txt,f){let t=String(txt||"").replace(/\([^)]*\)/g," ");if(!f.
 /* Cat6 label-workbook cables: line 1 = cabinet + port (1.14-1.801), line 2 = device name when there is one (cameras) */
 const isPortCable=c=>!!(c&&c.rack&&c.type&&!c.to);
 function labelAuto(j,c,fm){if(isPortCable(c))return [c.name,c.from||""];const f=fm||labelFmt(j),a=labelSide(c.from,f),b=labelSide(c.to,f);return f.top==="to"?[b,a]:[a,b];}
-function labelLines(j,c){const auto=labelAuto(j,c),own=Array.isArray(c.label)?c.label:[];return [own[0]||auto[0]||"",own[1]||auto[1]||""];}
+const swapOf=(f,c)=>!!(f&&(f.swapSys?f.swapSys[(c&&c.type)||"_"]:f.swap));
+function labelLines(j,c,fm){const auto=labelAuto(j,c,fm),own=Array.isArray(c.label)?c.label:[],l=[own[0]||auto[0]||"",own[1]||auto[1]||""];return swapOf(fm||labelFmt(j),c)?[l[1],l[0]]:l;}
 let xlsxLib=null;
 function loadXlsx(){if(window.XLSX)return Promise.resolve(window.XLSX);if(xlsxLib)return xlsxLib;
   xlsxLib=new Promise((res,rej)=>{const sc=document.createElement("script");sc.src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
@@ -4027,14 +4028,22 @@ function cableLabels(jid){const m=MGR();let q="",edits={},fmt=null,fCab="",fSys=
       const sSel=h("select",{"aria-label":"System",style:st},h("option",{value:""},"All systems"),sysL.map(sy=>h("option",{value:sy,selected:fSys===sy},sy)));
       cSel.addEventListener("change",()=>{fCab=cSel.value;fSys="";drawOpts();drawList();});sSel.addEventListener("change",()=>{fSys=sSel.value;drawList();});
       opts.append(cSel,sSel);}
-    if(cs.length&&cs.every(isPortCable)){opts.append(h("span",{class:"status",style:"flex-basis:100%"},"Line 1 is the cabinet and port (1.14-1.801). Cameras add the camera name on line 2. WAPs use the AP label lines if you loaded them."));return;}
+    const f0=fmt||labelFmt(j||{});
+    /* flip line 1 / line 2, separately for each system */
+    const allSys=[...new Set(cs.map(c=>c.type||"_"))].sort((a,b)=>sysRank(j,a)-sysRank(j,b)||natCmp(a,b));
+    const shownSys=fSys?[fSys]:[...new Set(cs.filter(c=>!fCab||c.rack===fCab).map(c=>c.type||"_"))].sort((a,b)=>sysRank(j,a)-sysRank(j,b)||natCmp(a,b));
+    const cur=sy=>!!(f0.swapSys?f0.swapSys[sy]:f0.swap);
+    opts.append(h("div",{class:"chips",style:"gap:6px;align-items:center;flex-basis:100%"},h("span",{class:"status"},"Swap line 1 and 2:"),shownSys.map(sy=>h("button",{type:"button",class:"chipbtn","aria-pressed":String(cur(sy)),disabled:!m,
+      title:"Flip line 1 and line 2 on every "+(sy==="_"?"":sy+" ")+"label",onclick:()=>{const base=fmt||labelFmt(job());const ss_={};allSys.forEach(x=>ss_[x]=base.swapSys?!!base.swapSys[x]:!!base.swap);ss_[sy]=!ss_[sy];
+        fmt=Object.assign({},base,{swapSys:ss_});delete fmt.swap;drawOpts();drawList();drawFoot();}},"⇅ "+(sy==="_"?"All labels":sy)+(cur(sy)?" · flipped":"")))));
+    if(cs.length&&cs.every(isPortCable)){opts.append(h("span",{class:"status",style:"flex-basis:100%"},"Normally line 1 is the cabinet and port (1.14-1.801) and cameras add the camera name on line 2. Tap a system above to flip its two lines, then Save labels."));return;}
     opts.append(h("span",{class:"status"},"Top line:"),sel("Top line","top",[["to","To (destination)"],["from","From (source)"]]),
     sel("RU numbers","ru",[["false","Leave out RU"],["true","Keep RU"]]),sel("Separator","sep",[[",","comma ( , )"],[";","semicolon ( ; )"],[" ","space"]]));}
   function drawList(){const j=job();if(!j)return;const f=fmt||labelFmt(j);list.textContent="";
     const cs=cablesOf(j).filter(c=>(!fCab||c.rack===fCab)&&(!fSys||c.type===fSys)&&cableMatch(j,c,q));
     if(!cs.length)list.append(h("p",{class:"status"},"No cable matches."));
     cs.forEach(c=>{const auto=labelAuto(j,c,f),own=edits[c.id]||(Array.isArray(c.label)?c.label:["",""]);
-      const inp=i=>{const el=h("input",{class:"full-in mono",value:own[i]||"",placeholder:auto[i]||"(empty)",disabled:!m,"aria-label":c.name+" label line "+(i+1),style:"font-size:.85rem;padding:6px 8px"});
+      const inp=p_=>{const i=swapOf(f,c)?1-p_:p_;const el=h("input",{class:"full-in mono",value:own[i]||"",placeholder:auto[i]||"(empty)",disabled:!m,"aria-label":c.name+" label line "+(p_+1),style:"font-size:.85rem;padding:6px 8px"});
         el.addEventListener("input",()=>{const cur=(edits[c.id]||(Array.isArray(c.label)?c.label.slice():["",""])).slice();cur[i]=el.value.trim();edits[c.id]=cur;drawFoot();});return el;};
       list.append(h("div",{class:"panel",style:"padding:8px 10px;display:grid;gap:4px"},h("div",{style:"display:flex;justify-content:space-between;gap:8px"},h("strong",{},c.name),h("span",{class:"status"},(own[0]||own[1])?"edited":"from cable list")),inp(0),inp(1)));});}
   function drawFoot(){foot.textContent="";const j=job();if(!j)return;const nEd=Object.keys(edits).length,fmtCh=!!fmt;
