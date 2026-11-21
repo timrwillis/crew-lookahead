@@ -4215,7 +4215,15 @@ function pullBuilder(jid){
   let idf=null,sys=null,pick=new Set(),busy=false;
   try{idf=localStorage.getItem("pbIdf:"+jid);sys=localStorage.getItem("pbSys:"+jid);}catch(e){}
   const box=h("div",{class:"full stack"}),top=h("div",{class:"stack",style:"gap:6px"}),mid=h("div",{class:"stack"}),bottom=h("div",{class:"stack"});
-  const nameIn=h("input",{id:"pbName",class:"full-in",placeholder:"Pull name, e.g. Rows 1-19",autocomplete:"off"});
+  const nameIn=h("input",{id:"pbName",class:"full-in",placeholder:"Pull name",autocomplete:"off"});
+  /* where the pull runs: Row 47 / Tray T3 / Wall / anything typed. Rows follow the crew's pattern (39, 41, 43…) */
+  const WK={row:"Row",tray:"Tray",wall:"Wall",other:"Other"};let wKind="row";try{wKind=localStorage.getItem("pbKind:"+jid)||"row";}catch(e){}
+  const whereIn=h("input",{id:"pbWhere",autocomplete:"off",style:"width:150px"});
+  const pv=h("div",{class:"status",style:"margin:0"});
+  const compose=()=>{const v=whereIn.value.trim();nameIn.value=wKind==="other"?v:v?WK[wKind].toLowerCase()+" "+v:"";pv.textContent="";if(nameIn.value)pv.append("Pull: ",h("strong",{},nameIn.value));};
+  whereIn.addEventListener("input",compose);
+  const parseName=nm=>{const m=String(nm||"").trim().match(/^(row|tray|wall)\b\s*(.*)$/i);if(m){wKind=m[1].toLowerCase();whereIn.value=m[2];}else{wKind="other";whereIn.value=String(nm||"");}compose();};
+  const rowNum=k=>{const m=pullShort({pull:k}).match(/^row\s*(\d+)/i);return m?+m[1]:null;};
   const numIn=h("input",{id:"pbNums",class:"full-in mono",placeholder:"Labels: 801-806, 811  or  CDCF-22A",autocomplete:"off",inputmode:"text"});
   const pool=()=>cablesOf(job()).filter(c=>c.rack===idf&&c.type===sys);
   const remember=()=>{try{localStorage.setItem("pbIdf:"+jid,idf||"");localStorage.setItem("pbSys:"+jid,sys||"");}catch(e){}};
@@ -4237,14 +4245,32 @@ function pullBuilder(jid){
     const p=pool().slice().sort((a,b)=>natCmp(a.name,b.name)),free=p.filter(c=>!c.pull),pulls={};
     p.filter(c=>c.pull).forEach(c=>{(pulls[c.pull]=pulls[c.pull]||[]).push(c);});
     pick=new Set([...pick].filter(id=>free.some(c=>c.id===id)));
-    const addBtn=h("button",{type:"button",class:"btn",onclick:async()=>{const nm=nameIn.value.trim();if(!nm){toast("Name the pull first, e.g. Rows 1-19");nameIn.focus();return;}
+    const addBtn=h("button",{type:"button",class:"btn",onclick:async()=>{
+      if(!whereIn.value.trim()&&(wKind==="tray"||wKind==="wall")){let n=1;while(Object.keys(pulls).some(k=>pullShort({pull:k}).toLowerCase()===wKind+" "+n))n++;whereIn.value=String(n);}
+      compose();let nm=nameIn.value.trim();if(!nm){toast(wKind==="row"?"Type the row number":"Name the pull");whereIn.focus();return;}
+      {const same=Object.keys(pulls).find(k=>pullShort({pull:k}).toLowerCase()===nm.toLowerCase());if(same)nm=pullShort({pull:same});}
       const r=parsePullInput(numIn.value,p),cabs=[...new Set([...r.cabs,...free.filter(c=>pick.has(c.id))])];
       if(r.miss.length){toast("Not on "+idf+" "+sys+": "+r.miss.slice(0,6).join(", ")+(r.miss.length>6?"…":""));if(!cabs.length)return;}
       if(!cabs.length){toast("Type label numbers or tap labels below");return;}
       if(await assign(cabs,pullKey(idf,sys,nm))){numIn.value="";pick.clear();}}},"Add to pull");
     mid.append(h("div",{class:"panel stack",style:"gap:8px"},
-      h("div",{class:"field"},h("label",{for:"pbName"},"Pull"),nameIn),
-      Object.keys(pulls).length?h("div",{class:"chips",style:"gap:6px"},Object.keys(pulls).sort(natCmp).map(k=>h("button",{type:"button",class:"chipbtn","aria-pressed":String(pullKey(idf,sys,nameIn.value)===k),onclick:()=>{nameIn.value=pullShort({pull:k});draw();}},"↺ "+pullShort({pull:k})))):null,
+      (()=>{const used=Object.keys(pulls).map(rowNum).filter(n=>n!=null).sort((a,b)=>a-b);
+        const allCab=[...new Set(cablesOf(j).filter(c=>c.rack===idf&&c.pull).map(c=>c.pull))];
+        const cabRows=[...new Set(allCab.map(rowNum).filter(n=>n!=null))].sort((a,b)=>a-b);
+        const diffs={};cabRows.forEach((n,i)=>{if(i){const d=n-cabRows[i-1];if(d>0&&d<=4)diffs[d]=(diffs[d]||0)+1;}});
+        const step=+(Object.keys(diffs).sort((a,b)=>diffs[b]-diffs[a])[0]||1);
+        const fromOther=cabRows.filter(n=>!used.includes(n));
+        const cur=parseInt(whereIn.value,10);
+        const next=!isNaN(cur)?cur+step:used.length?used[used.length-1]+step:fromOther.length?fromOther[0]:null;
+        whereIn.placeholder=wKind==="row"?"Row #":wKind==="tray"?"Tray # or name (optional)":wKind==="wall"?"Which wall (optional)":"Pull name";
+        whereIn.setAttribute("inputmode",wKind==="row"?"numeric":"text");
+        const setRow=n=>{wKind="row";whereIn.value=String(n);compose();draw();};
+        return h("div",{class:"field stack",style:"gap:6px"},h("label",{for:"pbWhere"},"Pulling in"),
+          h("div",{class:"chips",style:"gap:6px;align-items:center"},Object.keys(WK).map(k=>h("button",{type:"button",class:"chipbtn","aria-pressed":String(wKind===k),onclick:()=>{if(wKind!==k){wKind=k;try{localStorage.setItem("pbKind:"+jid,k);}catch(e){}whereIn.value="";compose();}draw();setTimeout(()=>whereIn.focus(),20);}},WK[k])),whereIn,
+            wKind==="row"&&next!=null?h("button",{type:"button",class:"btn ghost small",onclick:()=>setRow(next)},(isNaN(cur)?"":"Next: ")+"Row "+next+" ›"):null),
+          wKind==="row"&&fromOther.length?h("div",{class:"chips",style:"gap:4px;align-items:center"},h("span",{class:"status"},"Rows from other systems here:"),fromOther.map(n=>h("button",{type:"button",class:"chipbtn",onclick:()=>setRow(n)},String(n)))):null,
+          (compose(),pv));})(),
+      Object.keys(pulls).length?h("div",{class:"chips",style:"gap:6px"},Object.keys(pulls).sort(natCmp).map(k=>h("button",{type:"button",class:"chipbtn","aria-pressed":String(pullKey(idf,sys,nameIn.value)===k),onclick:()=>{parseName(pullShort({pull:k}));draw();}},"↺ "+pullShort({pull:k})))):null,
       h("div",{class:"field"},h("label",{for:"pbNums"},"Labels from the prints"),numIn),
       h("div",{style:"display:flex;gap:8px;align-items:center;flex-wrap:wrap"},addBtn,h("span",{class:"status"},pick.size?pick.size+" tapped":"Ranges, single numbers, or a device ID start"))));
     const done=p.length-free.length;
@@ -4258,8 +4284,8 @@ function pullBuilder(jid){
       bottom.append(h("div",{class:"panel stack",style:"gap:6px;padding:10px"},
         h("div",{style:"display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"},h("strong",{},pullShort({pull:k})),h("span",{class:"status"},gl.length+" cables"+(ss.length?" · "+fin+" done":""))),
         h("div",{class:"chips",style:"gap:4px"},gl.map(c=>h("button",{type:"button",class:"chip",title:"Take "+c.name+" out of this pull","aria-label":"Take "+c.name+" out of this pull",onclick:()=>assign([c],null)},String(labelNum(c.name)).padStart(3,"0")," ✕")))));});}
-  box.append(h("p",{class:"status",style:"margin:0"},"Pick the cabinet and system, name the pull, then type the label numbers off the prints (801-806, 811) or tap them. Each label can only be in one pull."),top,mid,bottom);
-  openView("Build pulls · "+j0.name,[box]);$(".sheet").classList.add("wide");liveSheet=()=>{if(!busy&&document.activeElement!==numIn&&document.activeElement!==nameIn)draw();};draw();}
+  box.append(h("p",{class:"status",style:"margin:0"},"Pick the cabinet and system, tap where you're pulling (Row, Tray, Wall), then type the label numbers off the prints (801-806, 811) or tap them. Each label can only be in one pull."),top,mid,bottom);
+  openView("Build pulls · "+j0.name,[box]);$(".sheet").classList.add("wide");liveSheet=()=>{if(!busy&&document.activeElement!==numIn&&document.activeElement!==whereIn)draw();};draw();}
 
 /* ===== NEW JOB, ONE QUESTION AT A TIME =====
    What kind → name/dates → cables (Cat6 label workbook / fiber cable list) → phase 1 → its tasks → next phase… → crew → review.
