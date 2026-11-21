@@ -1233,7 +1233,7 @@ function jobPanel(j){
     const isDone=t=>!!t.doneOn;
     const sect=(title,list,pc)=>{if(!list.length)return;const nd=list.filter(isDone).length,open=list.filter(t=>!isDone(t));
       box.append(h("div",{class:"phasehd",style:"display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"},h("span",{},title),
-          pc?h("button",{type:"button",class:"linkbtn",style:"color:"+(pc.n===pc.of?"var(--ok)":"var(--muted)"),onclick:()=>cableTracker(j.id,pc.cab?pc.cab+"-":undefined)},pc.n+"/"+pc.of+" cables"+(pc.cab?" done":"")+(pc.n===pc.of?" ✓":" ›")):h("span",{style:"color:var(--muted)"},nd+"/"+list.length+" done")),
+          pc?h("button",{type:"button",class:"linkbtn",style:"color:"+(pc.n===pc.of?"var(--ok)":"var(--muted)"),onclick:()=>cableTracker(j.id,"",pc.cab?{cab:pc.cab}:undefined)},pc.n+"/"+pc.of+" cables"+(pc.cab?" done":"")+(pc.n===pc.of?" ✓":" ›")):h("span",{style:"color:var(--muted)"},nd+"/"+list.length+" done")),
         open.length?h("div",{class:"tlist"},open.map(t=>taskRow(j,t,d))):h("div",{class:"status",style:"padding:6px 0 10px"},"All done ✓"));};
     /* cabinets: one compact card each (name, progress bar, systems); tap to open its tasks */
     const cabPh=ph.filter(p=>p.cab&&tk.some(t=>t.phase===p.id));
@@ -1246,7 +1246,7 @@ function jobPanel(j){
           h("span",{class:"bar"},h("i",{style:"width:"+pctC+"%"})),
           h("span",{class:"cabsys"},list.map(t=>h("span",{class:isDone(t)?"ok":""},(isDone(t)?"✓ ":"")+t.name)),h("span",{class:"cabn"},nd+"/"+list.length+" done"))));
         if(isOpen){const open=list.filter(t=>!isDone(t));
-          if(pc)card.append(h("button",{type:"button",class:"linkbtn",style:"justify-self:start",onclick:()=>cableTracker(j.id,pc.cab?pc.cab+"-":undefined)},pc.n+"/"+pc.of+" cables done ›"));
+          if(pc)card.append(h("button",{type:"button",class:"linkbtn",style:"justify-self:start",onclick:()=>cableTracker(j.id,"",pc.cab?{cab:pc.cab}:undefined)},pc.n+"/"+pc.of+" cables done ›"));
           card.append(open.length?h("div",{class:"tlist"},open.map(t=>taskRow(j,t,d))):h("div",{class:"status",style:"padding:4px 0"},"All done ✓"));}
         grid.append(card);});
       box.append(h("div",{class:"phasehd"},"Cabinets · tap one to open"),grid);}
@@ -3718,8 +3718,11 @@ function cableReport(jid){const j=S.jobs.find(x=>x.id===jid);if(!j)return;const 
 /* search words against everything we know about a cable (name, from/to, rack, row, type, notes, serial, label) */
 function cableHay(j,c){const ck=ckOf(j,c.id),lb=labelLines(j,c);return [c.name,c.from,c.to,c.rack,c.pull,rowOf(c),c.type,c.note,c.len,c.tag,c.sheet,ck.serial,ck.src,ck.dst,lb[0],lb[1]].filter(Boolean).join(" ").toLowerCase();}
 const cableMatch=(j,c,q)=>{const ws=String(q||"").toLowerCase().split(/\s+/).filter(Boolean);if(!ws.length)return true;const hs=cableHay(j,c),flat=hs.replace(/[^a-z0-9]/g,"");return ws.every(w=>hs.includes(w)||flat.includes(w.replace(/[^a-z0-9]/g,"")));};
-function cableTracker(jid,q0){
-  let remainingOnly=false,trackQ=q0||"";
+function cableTracker(jid,q0,f0){
+  let remainingOnly=false,trackQ=q0||"",fCab=null,fSys="";
+  try{fCab=localStorage.getItem("ctCab:"+jid);fSys=localStorage.getItem("ctSys:"+jid)||"";}catch(e){}
+  if(f0){fCab=f0.cab||"";fSys=f0.sys||"";}
+  const saveF=()=>{try{localStorage.setItem("ctCab:"+jid,fCab||"");localStorage.setItem("ctSys:"+jid,fSys||"");}catch(e){}};
   const box=h("div",{class:"full stack"});
   /* kept between redraws so typing isn't interrupted */
   const qIn=h("input",{type:"search",class:"full-in",placeholder:"Search cables: BLK, rack, PP, from/to, serial…","aria-label":"Search cables",autocomplete:"off",style:"width:100%"});
@@ -3730,19 +3733,33 @@ function cableTracker(jid,q0){
     box.textContent="";const cs=cablesOf(j),ss=stepsOf(j),can=CAN_POST();
     $("#sheetTitle").textContent=j.name+" · cables";
     if(!cs.length||!ss.length){box.append(h("div",{class:"empty"},h("strong",{},"No cables set up yet"),MGR()?"Add the cable list and the steps each one goes through.":"A lead needs to add the cable list."),MGR()?h("button",{class:"btn",type:"button",onclick:()=>{closeSheet();cableEditor(j);}},"Set up cables"):null);return;}
-    const pg=jobProgress(j);
-    box.append(h("div",{class:"prog"},h("div",{class:"pr"},h("span",{class:"n"},"Overall"),h("span",{class:"bar"},h("i",{style:"width:"+pg.pct+"%"})),h("span",{class:"c"},pg.pct+"%"),h("span")),
-      ss.map(st=>{const n=stepCount(j,st.id),left=cs.length-n,inner=[h("span",{class:"n"},st.name),h("span",{class:"bar"},h("i",{style:"width:"+Math.round(n*100/cs.length)+"%"})),h("span",{class:"c"},n+"/"+cs.length),
+    /* cabinet + system drop-downs: show one cabinet / one system at a time */
+    const cabL=cabsOf(j).filter(cb=>cs.some(c=>c.rack===cb));
+    if(cabL.length){if(fCab===null)fCab=(cabL.find(cb=>cs.some(c=>c.rack===cb&&ss.some(st=>!markOf(j,c.id,st.id))))||cabL[0]);if(fCab&&!cabL.includes(fCab))fCab=cabL[0];}else{fCab="";fSys="";}
+    const sysL=[...new Set(cs.filter(c=>!fCab||c.rack===fCab).map(c=>c.type).filter(Boolean))].sort((a,b)=>sysRank(j,a)-sysRank(j,b)||natCmp(a,b));
+    if(fSys&&!sysL.includes(fSys))fSys="";
+    const selSt="font:inherit;font-size:.95rem;padding:7px 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);font-weight:600";
+    if(cabL.length){const cnt=(cb,sy)=>{const gl=cs.filter(c=>(!cb||c.rack===cb)&&(!sy||c.type===sy));return gl.filter(c=>ss.every(st=>markOf(j,c.id,st.id))).length+"/"+gl.length;};
+      const cSel=h("select",{id:"ctCab","aria-label":"Cabinet",style:selSt},h("option",{value:"",selected:!fCab},"All cabinets ("+cnt("","")+")"),cabL.map(cb=>h("option",{value:cb,selected:fCab===cb},"Cabinet "+cb+" ("+cnt(cb,"")+")")));
+      cSel.addEventListener("change",()=>{fCab=cSel.value;fSys="";saveF();draw();});
+      const sSel=h("select",{id:"ctSys","aria-label":"System",style:selSt},h("option",{value:"",selected:!fSys},"All systems"),sysL.map(sy=>h("option",{value:sy,selected:fSys===sy},sy+" ("+cnt(fCab,sy)+")")));
+      sSel.addEventListener("change",()=>{fSys=sSel.value;saveF();draw();});
+      box.append(h("div",{style:"display:flex;gap:8px;flex-wrap:wrap"},cSel,sysL.length?sSel:null));}
+    const inF=c=>(!fCab||c.rack===fCab)&&(!fSys||c.type===fSys);
+    const fl=cs.filter(inF),fn=fl.length||1;
+    const pg={pct:Math.round(fl.reduce((a,c)=>a+ss.filter(st=>markOf(j,c.id,st.id)).length,0)*100/(fn*ss.length))};
+    box.append(h("div",{class:"prog"},h("div",{class:"pr"},h("span",{class:"n"},fCab||fSys?"This "+(fSys?"system":"cabinet"):"Overall"),h("span",{class:"bar"},h("i",{style:"width:"+pg.pct+"%"})),h("span",{class:"c"},pg.pct+"%"),h("span")),
+      ss.map(st=>{const n=fl.filter(c=>markOf(j,c.id,st.id)).length,left=fl.length-n,inner=[h("span",{class:"n"},st.name),h("span",{class:"bar"},h("i",{style:"width:"+Math.round(n*100/fn)+"%"})),h("span",{class:"c"},n+"/"+fl.length),
           h("span",{class:"status",style:"white-space:nowrap"},!left?"Done ✓":can?"Mark ›":"")];
         /* tap a step to check it off on many cables from one list */
-        return can?h("button",{type:"button",class:"pr prbtn steprow",title:"Check off "+st.name+" on several cables",onclick:()=>stepMarkSheet(j.id,st.id)},inner):h("div",{class:"pr"},inner);})),
+        return can?h("button",{type:"button",class:"pr prbtn steprow",title:"Check off "+st.name+" on several cables",onclick:()=>stepMarkSheet(j.id,st.id,fCab||fSys?inF:null)},inner):h("div",{class:"pr"},inner);})),
       can?h("div",{class:"status",style:"margin:-2px 0 0"},"Tap a step to check it off on several cables at once."):null);
-    {const cp=cabinetProgress(j);if(cp)box.append(cp);}
+    if(!cabL.length){const cp=cabinetProgress(j);if(cp)box.append(cp);}
     const have=Object.keys(GROUPS).filter(k=>cs.some(c=>cabVal(c,k)));
     if(trackSort&&!have.includes(trackSort)&&trackSort!=="name")trackSort="";
     const sortSel=h("select",{id:"ctSort","aria-label":"Sort by",style:"font:inherit;font-size:.85rem;padding:5px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink)"},Object.keys(SORTS).filter(k=>!k||k==="name"||have.includes(k)).map(k=>h("option",{value:k,selected:trackSort===k},"Sort: "+SORTS[k].toLowerCase())));
     sortSel.addEventListener("change",()=>{trackSort=sortSel.value;try{localStorage.setItem("ctSort",trackSort);}catch(e){}draw();});
-    const list=trackSort?cs.slice().sort((a,b)=>natCmp(cabVal(a,trackSort),cabVal(b,trackSort))||natCmp(a.name,b.name)):cs;
+    const list=(trackSort?cs.slice().sort((a,b)=>natCmp(cabVal(a,trackSort),cabVal(b,trackSort))||natCmp(a.name,b.name)):cs).filter(inF);
     if(trackGroup&&!have.includes(trackGroup))trackGroup="";
     const gs=h("select",{id:"ctGroup","aria-label":"Group by",style:"font:inherit;font-size:.85rem;padding:5px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink)"},h("option",{value:""},"No grouping"),have.map(k=>h("option",{value:k,selected:trackGroup===k},"Group by "+GROUPS[k].toLowerCase())));
     gs.addEventListener("change",()=>{trackGroup=gs.value;try{localStorage.setItem("ctGroup",trackGroup);}catch(e){}draw();});
@@ -3755,7 +3772,7 @@ function cableTracker(jid,q0){
         h("button",{class:"btn ghost small",type:"button",onclick:()=>{closeSheet();setTimeout(()=>cableLabels(j.id),60);}},"🏷 Labels"),
         MGR()&&cs.some(c=>c.rack&&c.type)?h("button",{class:"btn ghost small",type:"button",onclick:()=>{closeSheet();setTimeout(()=>pullBuilder(j.id),60);}},"🧩 Build pulls"):null,
         MGR()?h("button",{class:"btn ghost small",type:"button",onclick:()=>{closeSheet();cableEditor(j);}},"Edit cables & steps"):null)));
-    const sub=c=>[trackGroup!=="row"&&rowOf(c)&&!/row/i.test((c.pull||"")+(c.to||""))?rowOf(c):"",trackGroup!=="rack"&&c.rack?"Rack "+c.rack:"",trackGroup!=="pull"&&c.pull&&!/row/i.test(c.pull)?"Pull "+c.pull:"",trackGroup!=="len"&&c.len?c.len+(/^\d+(\.\d+)?$/.test(String(c.len).trim())?" m":""):""].filter(Boolean).join(" · ");
+    const sub=c=>[trackGroup!=="row"&&rowOf(c)&&!/row/i.test((c.pull||"")+(c.to||""))?rowOf(c):"",trackGroup!=="rack"&&c.rack&&!fCab?"Cabinet "+c.rack:"",!fSys&&c.type&&trackGroup!=="type"?c.type:"",c.from&&c.type?c.from:"",trackGroup!=="pull"&&c.pull&&!/row/i.test(c.pull)?"Pull "+c.pull:"",trackGroup!=="len"&&c.len?c.len+(/^\d+(\.\d+)?$/.test(String(c.len).trim())?" m":""):""].filter(Boolean).join(" · ");
     const detail=c=>[c.type,c.from||c.to?[c.from,c.to].filter(Boolean).join(" → "):"",c.note].filter(Boolean).join(" · ");
     const row=c=>{const stt=cabState(j,c,ss),n=ss.filter(st=>markOf(j,c.id,st.id)).length,open=openCab.has(c.id);
       const el=h("div",{class:"cab "+stt,"data-cid":c.id});
@@ -3791,7 +3808,7 @@ function cableTracker(jid,q0){
     else list.filter(visible).forEach(c=>body.push(row(c)));
     const anyOpen=list.some(c=>openCab.has(c.id));
     const nShown=list.filter(visible).length;
-    const wrap=h("div",{class:"clist"},h("div",{class:"clhd"},h("span",{},trackQ.trim()?nShown+" of "+cs.length+" cables match":"Cables ("+cs.length+") · tap one to see its steps"),
+    const wrap=h("div",{class:"clist"},h("div",{class:"clhd"},h("span",{},trackQ.trim()?nShown+" of "+list.length+" cables match":"Cables ("+list.length+") · tap one to see its steps"),
         h("button",{type:"button",class:"btn ghost small",onclick:()=>{if(anyOpen)openCab.clear();else list.filter(visible).forEach(c=>openCab.add(c.id));draw();}},anyOpen?"Close all":"Open all")),
       body.length?body:h("div",{class:"status",style:"padding:12px"},trackQ.trim()?"No cable matches \""+trackQ.trim()+"\".":"Every cable is finished."));
     box.append(wrap);
@@ -3805,7 +3822,7 @@ function cableTracker(jid,q0){
 /* ===== CHECK OFF ONE STEP ON MANY CABLES =====
    Opened by tapping a step in the cable tracker. Tap a cable to check / uncheck it; saves right away.
    Steps with sign-offs (✎) open the sign-off for that cable. */
-function stepMarkSheet(jid,sid){
+function stepMarkSheet(jid,sid,filt){
   const wrap=h("div",{class:"popwrap"}),pop=h("div",{class:"pop",role:"dialog","aria-modal":"true","aria-label":"Check off a step",style:"max-height:90vh;display:flex;flex-direction:column;gap:6px"});wrap.append(pop);
   let q="",show="todo";const prevLive=liveSheet;
   const close=()=>{wrap.remove();if(liveSheet===redraw)liveSheet=prevLive;if(prevLive)prevLive();};
@@ -3815,7 +3832,7 @@ function stepMarkSheet(jid,sid){
   const seg=h("div",{class:"seg-ctl"}),body=h("div",{style:"overflow:auto;flex:1;min-height:0;display:flex;flex-direction:column;gap:6px"}),foot=h("div",{style:"display:flex;gap:8px;flex-wrap:wrap;align-items:center"});
   pop.append(head,qIn,seg,body,foot);
   function draw(){const j=S.jobs.find(x=>x.id===jid),st=j&&stepsOf(j).find(x=>x.id===sid);if(!st){close();return;}
-    const cs=cablesOf(j),sp=isSplit(st),n=stepCount(j,sid);
+    const cs=filt?cablesOf(j).filter(filt):cablesOf(j),sp=isSplit(st),n=cs.filter(c=>markOf(j,c.id,sid)).length;
     head.textContent="";head.append(h("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:8px"},
       h("div",{},h("strong",{style:"font-size:1.1rem"},st.name),h("div",{class:"status"},n+" of "+cs.length+" done"+(sp?" · each cable opens its sign-off":" · tap a cable to check it off"))),
       h("button",{type:"button",class:"iconbtn","aria-label":"Close",onclick:close},"✕")));
@@ -4378,7 +4395,7 @@ function cabinetsForm(j){const list=cabsOf(j);
 function cabinetStrip(j){const cabs=cabsOf(j);if(!cabs.length)return null;const ss=stepsOf(j),cs=cablesOf(j);
   return h("div",{class:"chips",style:"gap:6px;margin:4px 0 10px"},h("span",{class:"status",style:"align-self:center"},"Cabinets"),cabs.map(cb=>{const gl=cs.filter(c=>c.rack===cb);
     const dn=ss.length?gl.filter(c=>ss.every(st=>markOf(j,c.id,st.id))).length:0,all=gl.length&&dn===gl.length;
-    return h("button",{type:"button",class:"chipbtn",style:all?"border-color:var(--ok);color:var(--ok)":"",title:"Open "+cb+"'s cables",onclick:()=>gl.length?cableTracker(j.id,cb+"-"):(MGR()&&cabinetsForm(j))},
+    return h("button",{type:"button",class:"chipbtn",style:all?"border-color:var(--ok);color:var(--ok)":"",title:"Open "+cb+"'s cables",onclick:()=>gl.length?cableTracker(j.id,"",{cab:cb}):(MGR()&&cabinetsForm(j))},
       cb+(gl.length?" · "+dn+"/"+gl.length+(all?" ✓":""):""));}));}
 /* ===== CABINET → SYSTEM → STEPS =====
    Each cabinet is a phase (p.cab, no waiting on the one before: you go where pathways are ready).
@@ -4390,7 +4407,7 @@ function scopeDone(j,sc){const gl=scopeCables(j,sc),ss=stepsOf(j);return {gl,don
 function scopePill(j,t){const sc=t.scope;if(!sc)return null;const gl=scopeCables(j,sc),ss=stepsOf(j);if(!gl.length||!ss.length)return null;
   const parts=ss.map(st=>{const n=gl.filter(c=>markOf(j,c.id,st.id)).length;return (st.name.split(/[ &]/)[0])+" "+n+"/"+gl.length;});
   const all=ss.every(st=>gl.every(c=>markOf(j,c.id,st.id)));
-  return h("button",{type:"button",class:"tpill cab"+(all?" done":""),title:"Open "+sc.rack+" "+(sc.type||"")+" cables",onclick:e=>{e.stopPropagation();cableTracker(j.id,(sc.rack+" "+(sc.type||"")).trim());}},(all?"✓ ":"")+parts.join(" · "));}
+  return h("button",{type:"button",class:"tpill cab"+(all?" done":""),title:"Open "+sc.rack+" "+(sc.type||"")+" cables",onclick:e=>{e.stopPropagation();cableTracker(j.id,"",{cab:sc.rack,sys:sc.type||""});}},(all?"✓ ":"")+parts.join(" · "));}
 function cabSysPlan(cabs,syss){const phases=[],tasks=[];const nid=p=>p+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
   cabs.forEach(cb=>{const p={id:nid("p"),name:cb,cab:cb,afterPrev:false};phases.push(p);
     (syss[cb]||[]).forEach(sy=>tasks.push({id:nid("t"),name:sy,phase:p.id,scope:{rack:cb,type:sy},doneOn:"",after:[],startedOn:"",crew:[],crewLog:{},addedBy:myId||"",addedAt:Date.now()}));});
