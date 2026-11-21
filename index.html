@@ -3828,13 +3828,13 @@ function cableTracker(jid,q0,f0){
       sSel.addEventListener("change",()=>{fSys=sSel.value;saveF();draw();});
       box.append(h("div",{style:"display:flex;gap:8px;flex-wrap:wrap"},cSel,sysL.length?sSel:null));}
     const inF=c=>(!fCab||c.rack===fCab)&&(!fSys||c.type===fSys);
-    const fl=cs.filter(inF),fn=fl.length||1,scanSet=needsScan(j)?scanIdsOf(j):new Set(),isScanSt=id=>scanSet.has(id);
+    const fl=cs.filter(inF),fn=fl.length||1,scanSet=needsScan(j)?scanIdsOf(j):new Set(),isScanSt=id=>scanSet.has(id),bulkSet=new Set(bulkSteps(j).map(x=>x.id)),isBulkSt=id=>bulkSet.has(id);
     const pg={pct:Math.round(fl.reduce((a,c)=>a+ss.filter(st=>markOf(j,c.id,st.id)).length,0)*100/(fn*ss.length))};
     box.append(h("div",{class:"prog"},h("div",{class:"pr"},h("span",{class:"n"},fCab||fSys?"This "+(fSys?"system":"cabinet"):"Overall"),h("span",{class:"bar"},h("i",{style:"width:"+pg.pct+"%"})),h("span",{class:"c"},pg.pct+"%"),h("span")),
       ss.map(st=>{const n=fl.filter(c=>markOf(j,c.id,st.id)).length,left=fl.length-n,inner=[h("span",{class:"n"},st.name),h("span",{class:"bar"},h("i",{style:"width:"+Math.round(n*100/fn)+"%"})),h("span",{class:"c"},n+"/"+fl.length),
-          h("span",{class:"status",style:"white-space:nowrap"},!left?"Done ✓":can?(isScanSt(st.id)?"📷 Scan ›":"Mark ›"):"")];
+          h("span",{class:"status",style:"white-space:nowrap"},!left?"Done ✓":can?(isScanSt(st.id)?"📷 Scan ›":isBulkSt(st.id)?"✍ Sign off ›":"Mark ›"):"")];
         /* tap a step to check it off on many cables from one list; scan steps only check off from real scans */
-        return can?h("button",{type:"button",class:"pr prbtn steprow",title:isScanSt(st.id)?st.name+" checks itself off when the scan is saved":"Check off "+st.name+" on several cables",onclick:()=>isScanSt(st.id)?scanFindCable(j.id):stepMarkSheet(j.id,st.id,fCab||fSys?inF:null)},inner):h("div",{class:"pr"},inner);})),
+        return can?h("button",{type:"button",class:"pr prbtn steprow",title:isScanSt(st.id)?st.name+" checks itself off when the scan is saved":"Check off "+st.name+" on several cables",onclick:()=>isScanSt(st.id)?scanFindCable(j.id):isBulkSt(st.id)?bulkSignOff(j.id,st.id,fCab||fSys?inF:null):stepMarkSheet(j.id,st.id,fCab||fSys?inF:null)},inner):h("div",{class:"pr"},inner);})),
       can?h("div",{class:"status",style:"margin:-2px 0 0"},"Tap a step to check it off on several cables at once."):null);
     if(!cabL.length){const cp=cabinetProgress(j);if(cp)box.append(cp);}
     const have=Object.keys(GROUPS).filter(k=>cs.some(c=>cabVal(c,k)));
@@ -3943,16 +3943,16 @@ function stepMarkSheet(jid,sid,filt){
    One person, one step, many cables: for when someone did the work and forgot to update as they went.
    Afterwards: "Find any problems?" → which cable or enclosure, port, damaged or not, notes, photos.
    Problems live on the cable as marks[cid]._issues (crew can only write marks) and send the lead a flag. */
-const bulkSteps=j=>stepsOf(j).filter(st=>/port|vfl/i.test(st.name||""));
+const bulkSteps=j=>{const sc=needsScan(j)?scanIdsOf(j):new Set();return stepsOf(j).filter(st=>!sc.has(st.id)&&(isSplit(st)||/port|vfl|test|certif|document/i.test(st.name||"")));};
 const issuesOf=(j,cid)=>(((j.marks||{})[cid]||{})._issues)||[];
 const ISSUE_WHERE={cable:"Cable",src:"Source enclosure",dst:"Dest enclosure"};
 const issueTxt=(j,i)=>{const st=stepsOf(j).find(x=>x.id===i.step);return [ISSUE_WHERE[i.where]||"Cable",i.port?"port "+i.port:"",i.damaged?"DAMAGED":"not damaged",i.note,st?"("+st.name+")":""].filter(Boolean).join(" · ");};
-function bulkSignOff(jid,sid0){
+function bulkSignOff(jid,sid0,filt){
   const j0=S.jobs.find(x=>x.id===jid);if(!j0)return;const steps=bulkSteps(j0);
-  if(!steps.length){toast("This job has no Ported or VFL step.");return;}
+  if(!steps.length){toast("This job has no sign-off steps (porting, testing…).");return;}
   const wrap=h("div",{class:"popwrap"}),pop=h("div",{class:"pop",role:"dialog","aria-modal":"true","aria-label":"Sign off several cables",style:"max-height:92vh;display:flex;flex-direction:column;gap:8px"});wrap.append(pop);
-  let sid=steps.some(x=>x.id===sid0)?sid0:steps[0].id,who=(myTech()||{}).id||"",when=TODAY(),note="",q="",showAll=false,stage="pick",busy=false;
-  const pick=new Set(),probs=[];
+  let sid=steps.some(x=>x.id===sid0)?sid0:steps[0].id,when=TODAY(),note="",q="",showAll=false,stage="pick",busy=false;
+  const pick=new Set(),probs=[],whoSet=new Set();if((myTech()||{}).id)whoSet.add(myTech().id);
   const close=()=>{wrap.remove();probs.forEach(p=>p.files.forEach(f=>{try{URL.revokeObjectURL(f.u);}catch(e){}}));if(liveSheet)liveSheet();};
   const top=(title,sub)=>h("div",{style:"display:flex;justify-content:space-between;align-items:flex-start;gap:8px"},h("div",{},h("strong",{style:"font-size:1.1rem"},title),sub?h("div",{class:"status"},sub):null),h("button",{type:"button",class:"iconbtn","aria-label":"Close",onclick:close},"✕"));
   const qIn=h("input",{type:"search",class:"full-in",placeholder:"Search: BLK, rack, PP, from/to…","aria-label":"Search cables",autocomplete:"off"});
@@ -3961,20 +3961,24 @@ function bulkSignOff(jid,sid0){
   function draw(){const j=S.jobs.find(x=>x.id===jid);if(!j){close();return;}const st=stepsOf(j).find(x=>x.id===sid);if(!st){close();return;}
     const keepScroll=pop.scrollTop;pop.textContent="";const cs=cablesOf(j),chosen=cs.filter(c=>pick.has(c.id));
     if(stage==="pick"){
-      pop.append(top("Sign off several cables","One person, one step. Pick every cable they did."));
+      pop.append(top("Sign off several cables","Pick the step, who did it (one or more people), then every cable they did."));
       pop.append(h("div",{class:"flabel"},"Step"),h("div",{class:"skillpick"},steps.map(x=>h("button",{type:"button",class:"skill","aria-pressed":String(x.id===sid),onclick:()=>{sid=x.id;pick.clear();draw();}},x.name))));
-      if(MGR()){const sel=h("select",{class:"full-in","aria-label":"Who did it"},h("option",{value:""},"Pick the tech…"),activeTechs().map(t=>h("option",{value:t.id,selected:t.id===who},t.name)));
-        sel.addEventListener("change",()=>{who=sel.value;draw();});pop.append(h("div",{class:"flabel"},"Who did it"),sel);}
-      else pop.append(h("div",{class:"flabel"},"Who did it"),h("div",{},(myTech()||{}).name||names[myId]||"You"));
+      {const crewNow=new Set(membersOn(j,TODAY())),ts=activeTechs().slice().sort((a,b)=>(crewNow.has(b.id)-crewNow.has(a.id))||(a.name||"").localeCompare(b.name||""));
+        pop.append(h("div",{class:"flabel"},"Who did it ("+whoSet.size+")"),h("div",{class:"skillpick"},ts.map(t=>h("button",{type:"button",class:"skill","aria-pressed":String(whoSet.has(t.id)),onclick:()=>{whoSet.has(t.id)?whoSet.delete(t.id):whoSet.add(t.id);draw();}},t.name))));}
       const dIn=h("input",{type:"date",value:when,max:TODAY(),"aria-label":"Day it was done",style:"font:inherit;padding:7px 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink)"});
       dIn.addEventListener("change",()=>{when=dIn.value||TODAY();});
       pop.append(h("div",{style:"display:flex;gap:8px;align-items:center;flex-wrap:wrap"},h("span",{class:"flabel",style:"margin:0"},"Day it was done"),dIn));
-      const list=cs.filter(c=>cableMatch(j,c,q)&&(showAll||!markOf(j,c.id,sid)||pick.has(c.id)));
-      const left=cs.filter(c=>!markOf(j,c.id,sid)).length;
+      const pool=filt?cs.filter(filt):cs;
+      const list=pool.filter(c=>cableMatch(j,c,q)&&(showAll||!markOf(j,c.id,sid)||pick.has(c.id)));
+      const left=pool.filter(c=>!markOf(j,c.id,sid)).length;
       pop.append(h("div",{class:"flabel"},"Cables ("+pick.size+" picked)"),qIn,
         h("div",{style:"display:flex;gap:8px;align-items:center;flex-wrap:wrap"},
-          h("div",{class:"seg-ctl"},[[false,"Not done ("+left+")"],[true,"All ("+cs.length+")"]].map(([k,l])=>h("button",{type:"button","aria-pressed":String(showAll===k),onclick:()=>{showAll=k;draw();}},l))),
+          h("div",{class:"seg-ctl"},[[false,"Not done ("+left+")"],[true,"All ("+pool.length+")"]].map(([k,l])=>h("button",{type:"button","aria-pressed":String(showAll===k),onclick:()=>{showAll=k;draw();}},l))),
           list.length?h("button",{type:"button",class:"linkbtn",onclick:()=>{const all=list.every(c=>pick.has(c.id));list.forEach(c=>all?pick.delete(c.id):pick.add(c.id));draw();}},list.every(c=>pick.has(c.id))?"Unpick these":"Pick all shown"):null));
+      /* whole pulls in one tap */
+      {const pl=[...new Set(pool.filter(c=>c.pull).map(c=>c.pull))].sort(natCmp);
+        if(pl.length)pop.append(h("div",{class:"chips",style:"gap:6px;align-items:center"},h("span",{class:"status"},"Whole pull:"),pl.map(pk=>{const gl=pool.filter(c=>c.pull===pk&&(showAll||!markOf(j,c.id,sid))),all=gl.length&&gl.every(c=>pick.has(c.id));
+          return h("button",{type:"button",class:"chipbtn","aria-pressed":String(!!all),disabled:!gl.length,onclick:()=>{gl.forEach(c=>all?pick.delete(c.id):pick.add(c.id));draw();}},pullShort({pull:pk})+" ("+gl.length+")");})));}
       const body=h("div",{style:"display:flex;flex-direction:column;gap:6px"});
       if(!list.length)body.append(h("p",{class:"status"},q.trim()?"No cable matches \""+q.trim()+"\".":"Every cable has "+st.name+" done ✓"));
       list.forEach(c=>{const on=pick.has(c.id),m=markOf(j,c.id,sid);
@@ -3985,10 +3989,10 @@ function bulkSignOff(jid,sid0){
       pop.append(body);
       const nIn=h("input",{type:"text",class:"full-in",placeholder:"Note for all of them (optional)",value:note});nIn.addEventListener("input",()=>note=nIn.value);
       pop.append(nIn,h("div",{style:"display:flex;gap:8px;flex-wrap:wrap;position:sticky;bottom:-16px;background:var(--panel);padding:8px 0"},
-        h("button",{type:"button",class:"btn",disabled:!pick.size||(MGR()&&!who),onclick:()=>{stage="ask";draw();}},pick.size?"Sign off "+pick.size+" cable"+(pick.size===1?"":"s"):"Pick cables first"),
-        MGR()&&!who?h("span",{class:"status",style:"align-self:center"},"Pick the tech first"):null));}
+        h("button",{type:"button",class:"btn",disabled:!pick.size||!whoSet.size,onclick:()=>{stage="ask";draw();}},pick.size?"Sign off "+pick.size+" cable"+(pick.size===1?"":"s"):"Pick cables first"),
+        !whoSet.size?h("span",{class:"status",style:"align-self:center"},"Pick who did it first"):null));}
     else if(stage==="ask"){
-      pop.append(top(st.name+" · "+pick.size+" cable"+(pick.size===1?"":"s"),(who?techName(who):"You")+" · "+fmtS(when,{weekday:"short",month:"short",day:"numeric"})),
+      pop.append(top(st.name+" · "+pick.size+" cable"+(pick.size===1?"":"s"),[...whoSet].map(techName).join(" + ")+" · "+fmtS(when,{weekday:"short",month:"short",day:"numeric"})),
         h("p",{style:"margin:6px 0 0;font-size:1.05rem;font-weight:600"},"Did you find any problems with these cables?"),
         h("div",{class:"status"},chosen.map(c=>c.name).join(", ")),
         h("div",{style:"display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"},
@@ -3996,7 +4000,7 @@ function bulkSignOff(jid,sid0){
           h("button",{type:"button",class:"btn ghost",onclick:()=>{if(!probs.length)probs.push(newProb());stage="probs";draw();}},"Yes, report a problem")),
         h("button",{type:"button",class:"linkbtn",style:"justify-self:start",onclick:()=>{stage="pick";draw();}},"‹ Back to the cable list"));}
     else{
-      pop.append(top("Report problems",st.name+" · "+(who?techName(who):"You")));
+      pop.append(top("Report problems",st.name+" · "+[...whoSet].map(techName).join(" + ")));
       probs.forEach((p,i)=>{const c=cs.find(x=>x.id===p.cid);const card=h("div",{class:"panel stack",style:"gap:8px;padding:12px"});
         card.append(h("div",{style:"display:flex;justify-content:space-between;align-items:center"},h("strong",{},"Problem "+(i+1)),probs.length>1?h("button",{type:"button",class:"linkbtn",onclick:()=>{probs.splice(i,1);draw();}},"Remove"):null));
         const cSel=h("select",{class:"full-in","aria-label":"Which cable"},h("option",{value:""},"Which cable?"),chosen.map(x=>h("option",{value:x.id,selected:x.id===p.cid},x.name)));
@@ -4023,12 +4027,12 @@ function bulkSignOff(jid,sid0){
     pop.scrollTop=keepScroll;}
   async function save(){if(busy)return;busy=true;draw();
     const j=S.jobs.find(x=>x.id===jid),st=j&&stepsOf(j).find(x=>x.id===sid);if(!st){close();return;}
-    const tid=MGR()?who:((myTech()||{}).id||""),doer=uidOf(tid)||myId||"",at=when===TODAY()?Date.now():parseD(when).getTime()+12*3600e3;
+    const tids=[...whoSet],tid=tids[0]||"",doer=uidOf(tid)||myId||"",at=when===TODAY()?Date.now():parseD(when).getTime()+12*3600e3;
     const cids=[...pick],upd={updatedAt:Date.now()},local={};
     try{
       cids.forEach(cid=>{const raw=rawMark(j,cid,sid)||{},had=raw.at&&raw.done!==false;
-        const part={by:myId||"",techId:tid,at,what:"Whole cable",from:"",to:"",note:note.trim(),bulk:true};
-        const val={parts:[...(raw.parts||[]),part],done:true,at:had?raw.at:at,by:had&&raw.by?raw.by:doer};
+        const parts=tids.map(t=>({by:myId||"",techId:t,at,what:"Whole cable",from:"",to:"",note:note.trim(),bulk:true}));
+        const val={parts:[...(raw.parts||[]),...parts],done:true,at:had?raw.at:at,by:had&&raw.by?raw.by:doer};
         upd["marks."+cid+"."+sid]=val;local[cid]={[sid]:val};});
       const flagLines=[];
       for(const p of probs.filter(()=>stage==="probs")){const c=cablesOf(j).find(x=>x.id===p.cid);
@@ -4038,8 +4042,8 @@ function bulkSignOff(jid,sid0){
         flagLines.push(c.name+": "+issueTxt(j,iss)+(ids.length?" · "+ids.length+" photo"+(ids.length>1?"s":""):""));}
       await db.collection("jobs").doc(j.id).update(upd);
       j.marks=Object.assign({},j.marks||{});Object.entries(local).forEach(([cid,v])=>{j.marks[cid]=Object.assign({},j.marks[cid]||{},v);});
-      const nm=tid?techName(tid):meName(),names5=cids.map(cid=>(cablesOf(j).find(c=>c.id===cid)||{}).name).filter(Boolean);
-      logEvent(nm+" signed off "+st.name.toLowerCase()+" on "+cids.length+" cable"+(cids.length>1?"s":"")+": "+(names5.length>8?names5.slice(0,8).join(", ")+" +"+(names5.length-8)+" more":names5.join(", "))+(tid&&uidOf(tid)!==myId?" (entered by "+meName()+")":"")+" · "+j.name,{ev:"cables",jobId:j.id});
+      const nm=tids.length?tids.map(techName).join(" + "):meName(),names5=cids.map(cid=>(cablesOf(j).find(c=>c.id===cid)||{}).name).filter(Boolean);
+      logEvent(nm+" signed off "+st.name.toLowerCase()+" on "+cids.length+" cable"+(cids.length>1?"s":"")+": "+(names5.length>8?names5.slice(0,8).join(", ")+" +"+(names5.length-8)+" more":names5.join(", "))+(tids.length&&!(tids.length===1&&uidOf(tid)===myId)?" (entered by "+meName()+")":"")+" · "+j.name,{ev:"cables",jobId:j.id});
       if(stepCount(j,sid)===cablesOf(j).length)logEvent("All "+cablesOf(j).length+" cables "+st.name.toLowerCase()+": "+j.name,{ev:"cables",jobId:j.id});
       if(flagLines.length){try{await db.collection("asks").add({type:"flag",reason:probs.some(p=>p.damaged)?"Damaged cable":"Cable problem",text:st.name+" by "+nm+"\n"+flagLines.join("\n"),jobId:j.id,taskId:"",urgent:probs.some(p=>p.damaged),to:"lead",status:"open",by:myId||"",at:Date.now(),reply:""});}catch(e){}
         logEvent(nm+" reported "+flagLines.length+" cable problem"+(flagLines.length>1?"s":"")+" on "+j.name+": "+flagLines.join(" | "),{ev:"flag",jobId:j.id});}
