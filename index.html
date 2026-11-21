@@ -3569,11 +3569,11 @@ function pingSheet(j){const u=String(j&&j.feedHook||"").trim();if(!HOOK_RE.test(
 function scheduleFeed(jid){feedPending[jid]=1;clearTimeout(feedTimers[jid]);feedTimers[jid]=setTimeout(()=>{writeFeed(S.jobs.find(x=>x.id===jid));},2500);}
 /* phone pocketed or app closed before the timer fired: send it now */
 function flushFeeds(){Object.keys(feedPending).forEach(jid=>{clearTimeout(feedTimers[jid]);writeFeed(S.jobs.find(x=>x.id===jid));});}
-document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="hidden")flushFeeds();});
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="hidden")flushFeeds();else if(Date.now()-healedAt>60000){feedsHealed=false;healFeeds();}});
 window.addEventListener("pagehide",flushFeeds);
 /* leads/super: when the app opens, refresh every live feed once, so anything a phone missed catches up */
-let feedsHealed=false;
-function healFeeds(){if(feedsHealed||!myId||!MGR())return;feedsHealed=true;S.jobs.filter(j=>j.feedId).forEach((j,i)=>setTimeout(()=>writeFeed(S.jobs.find(x=>x.id===j.id)),4000+i*1500));}
+let feedsHealed=false,healedAt=0;
+function healFeeds(){if(feedsHealed||!myId||!MGR()||!S.jobs.length)return;feedsHealed=true;healedAt=Date.now();S.jobs.filter(j=>j.feedId).forEach((j,i)=>setTimeout(()=>writeFeed(S.jobs.find(x=>x.id===j.id)),4000+i*1500));}
 function feedScript(j){return `// Crew Lookahead → live cable data for "${(j.name||"").replace(/[`$\\]/g,"")}"
 // Paste this in Extensions → Apps Script, save, then run "setup" once.
 // Makes a "Cables" list (click a cable to open its own tab), a tab per cable, "History" and "Summary".
@@ -5142,7 +5142,7 @@ tab="home";if(location.hash)history.replaceState(null,"",location.pathname+locat
 {let awayAt=0;document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="hidden"){awayAt=Date.now();return;}
   if(awayAt&&Date.now()-awayAt>15*60e3&&$("#scrim").hidden&&tab!=="home"){homeSeg="";taskJob="";tab="home";history.replaceState(null,"",location.pathname+location.search);window.scrollTo(0,0);render();}awayAt=0;});}
 let pendingRender=null;
-function schedule(){if(pendingRender)return;pendingRender=requestAnimationFrame(()=>{pendingRender=null;
+function schedule(){if(pendingRender)return;pendingRender=requestAnimationFrame(()=>{pendingRender=null;if(S.jobs&&S.jobs.length)setTimeout(healFeeds,0);
   const active=document.activeElement;const typing=active&&(active.tagName==="TEXTAREA"||(active.tagName==="INPUT"&&active.type!=="checkbox"))&&!$("#scrim").contains(active)&&!$("#login").contains(active);
   if(tab==="chat"&&chatEl&&$("#scrim").hidden&&document.getElementById("chatList")){memo={};renderTabs();renderNotifPill();markTabSeen("chat");drawChat();return;}
   if(!$("#scrim").hidden||typing){if(!$("#scrim").hidden&&liveSheet){memo={};liveSheet();}renderTabs();schedule.later=true;return;}render();});}
