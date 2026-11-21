@@ -4012,7 +4012,7 @@ function cableEditor(j){
       h("div",{class:"bulk",style:"margin-top:6px"},h("label",{for:"cbSlack",class:"status"},"Extra for slack/waste %"),sl,h("span",{class:"status"},"Set “Feet per unit” on material items (e.g. 1000 for a box) to compare.")));}
   const addStep=n=>{if(steps.some(x=>x.name.toLowerCase()===n.toLowerCase()))return;steps.push({id:nid("s"),name:n});drawSteps();};
   const addRecs=(recs,replace)=>{if(replace)cables=[];const byName=new Map(cables.map(c=>[c.name,c]));let add=0,upd=0;
-    recs.forEach(r=>{const name=(r.name||"").trim();if(!name)return;const ex=byName.get(name);if(r.tagOnly&&!ex)return;const data={};["rack","pull","len","type","from","to","note","sheet","tag"].forEach(k=>{if(r[k]!=null&&String(r[k]).trim()!=="")data[k]=String(r[k]).trim();});
+    recs.forEach(r=>{const name=(r.name||"").trim();if(!name)return;const ex=byName.get(name);if(r.tagOnly&&!ex)return;const data={};["rack","pull","len","type","from","to","note","sheet","tag"].forEach(k=>{if(r[k]!=null&&String(r[k]).trim()!=="")data[k]=String(r[k]).trim();});if(Array.isArray(r.label))data.label=r.label.slice();
       if(ex){Object.assign(ex,data);upd++;}else{const c=Object.assign({id:nid("c"),name},data);cables.push(c);byName.set(name,c);add++;}});
     drawCables();drawMat();toast((add?"Added "+add:"")+(add&&upd?", ":"")+(upd?"updated "+upd:"")+(add||upd?" cables":"Nothing new to add"));};
   const paste=h("textarea",{id:"cbPaste",placeholder:"One cable per line, in pull order\ne.g.\nKNC3A-C12-001\nKNC3A-C12-002",style:"min-height:80px"});
@@ -4081,60 +4081,68 @@ function pullShort(c){const p=String(c.pull||""),i=p.indexOf(" · ");return i>=0
    Every sheet is its own group (cabinet + system). For each sheet you say what it's for
    (cables / labels only / skip) and which column is the port number and which is the device name. */
 function mapWorkbook(wb,el){return new Promise(resolve=>{
+  /* two tabs: Cable IDs (sheets that make cables) and Print labels (sheets whose rows are what gets printed).
+     Every sheet can be ticked in either tab, or both. Each cable sheet is its own group. */
   const colL=i=>String.fromCharCode(65+(i%26));
   const cfg=wb.SheetNames.map(sn=>{
     const rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:false,defval:""}).map(r=>r.map(x=>String(x==null?"":x).trim())).filter(r=>r.some(Boolean));
     const ncol=Math.max(0,...rows.map(r=>r.length));
     const hits=[...Array(ncol)].map((_,i)=>rows.filter(r=>LABEL_RE.test(r[i]||"")).length),fill=[...Array(ncol)].map((_,i)=>rows.filter(r=>r[i]).length);
-    let port=hits.indexOf(Math.max(0,...hits));if(port<0||!hits[port])port=fill.indexOf(Math.max(0,...fill));
+    let port=hits.indexOf(Math.max(0,...hits));if(port<0||!hits[port])port=fill.indexOf(Math.max(0,...fill));port=Math.max(0,port);
     let other=-1;for(let i=0;i<ncol;i++)if(i!==port&&fill[i]>=Math.max(1,rows.length*.5)){other=i;break;}
-    const m=sn.trim().match(/^([\d.]+)\s+(.+)$/);
-    const role=!rows.length?"skip":/label/i.test(sn)?"labels":"cables";
-    const hdr=rows.length>1&&port>=0&&!LABEL_RE.test(rows[0][port]||"")&&hits[port]>0;
-    return {sn,rows,ncol,role,cab:m?m[1]:"",sys:m?sysName(m[2]):sn.trim(),port:Math.max(0,port),dev:other,hdr};});
+    const m=sn.trim().match(/^([\d.]+)\s+(.+)$/),isLab=/label/i.test(sn);
+    const hdr=rows.length>1&&!LABEL_RE.test(rows[0][port]||"")&&hits[port]>0;
+    return {sn,rows,ncol,hdr,cabIn:!!rows.length&&!isLab,labIn:!!rows.length&&isLab,
+      cab:m?m[1]:"",sys:m?sysName(m[2]):sn.trim(),port,dev:isLab?-1:other,
+      match:port,l1:other>=0?other:port,l2:other>=0?port:-1};});
+  let tab="cab";
   const box=h("div",{class:"stack",style:"gap:10px"});
-  function build(){const recs=new Map(),tags=new Map(),sum={},warn=[];
-    cfg.forEach(c=>{if(c.role==="skip")return;let wrong=0,dup=0;
+  function build(){const recs=new Map(),labs=new Map(),sum={},warn=[];
+    cfg.forEach(c=>{if(!c.cabIn)return;let wrong=0,dup=0;
       c.rows.slice(c.hdr?1:0).forEach(r=>{const port=(r[c.port]||"").trim();if(!port)return;
-        const other=c.dev>=0?(r[c.dev]||"").trim():"";
-        if(c.role==="labels"){if(other)tags.set(port,other);return;}
         if(c.cab&&LABEL_RE.test(port)&&port.split("-")[0]!==c.cab){wrong++;return;}
         if(recs.has(port)){dup++;return;}
-        const o={name:port,rack:c.cab,type:c.sys,sheet:c.sn.trim()};if(other)o.from=other;recs.set(port,o);
+        const o={name:port,rack:c.cab,type:c.sys,sheet:c.sn.trim()};const dv=c.dev>=0?(r[c.dev]||"").trim():"";if(dv)o.from=dv;recs.set(port,o);
         const k=c.cab||"—";sum[k]=sum[k]||{};sum[k][c.sys]=(sum[k][c.sys]||0)+1;});
-      if(wrong)warn.push("“"+c.sn+"”: "+wrong+" label"+(wrong===1?"":"s")+" belong to a different cabinet, so they were left out. It may be a copy of another sheet.");
-      if(dup)warn.push("“"+c.sn+"”: "+dup+" port number"+(dup===1?" was":"s were")+" already on another sheet, so "+(dup===1?"it was":"they were")+" left out.");});
-    let tagN=0;tags.forEach((t,p)=>{const r=recs.get(p);if(r){r.tag=t;tagN++;}else{recs.set(p,{name:p,tag:t,tagOnly:true});tagN++;}});
-    return {recs:[...recs.values()],sum,warn,tagN};}
-  function draw(){box.textContent="";const r=build(),n=r.recs.filter(x=>!x.tagOnly).length;
-    box.append(h("p",{class:"status",style:"margin:0"},"Each sheet is its own group. Check them below, then tap Use these at the bottom."));
-    cfg.forEach((c,ci)=>{const id="mw"+ci;
-      const colOpts=(sel,none)=>[none?h("option",{value:"-1",selected:sel<0},none):null,...[...Array(c.ncol)].map((_,i)=>{const smp=(c.rows[c.hdr?1:0]||[])[i]||"";
-        return h("option",{value:String(i),selected:sel===i},"Column "+colL(i)+(c.hdr&&c.rows[0][i]?" ("+c.rows[0][i]+")":"")+(smp?": "+smp:""));})].filter(Boolean);
-      const roleSel=h("select",{id:id+"r","aria-label":"What “"+c.sn+"” is for"},[["cables","Cables"],["labels","Labels only"],["skip","Skip"]].map(([v,l])=>h("option",{value:v,selected:c.role===v},l)));
-      roleSel.addEventListener("change",()=>{c.role=roleSel.value;draw();});
-      const card=h("div",{class:"panel stack",style:"gap:8px;padding:10px"+(c.role==="skip"?";opacity:.6":"")},
-        h("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"},h("strong",{},c.sn),
-          h("span",{class:"status"},c.rows.length?(c.rows.length-(c.hdr?1:0))+" rows":"empty"),roleSel));
-      if(c.role!=="skip"&&c.rows.length){
-        const portSel=h("select",{id:id+"p"},colOpts(c.port));portSel.addEventListener("change",()=>{c.port=+portSel.value;draw();});
-        const devSel=h("select",{id:id+"d"},colOpts(c.dev,c.role==="labels"?"— pick a column —":"None (port # is the device)"));devSel.addEventListener("change",()=>{c.dev=+devSel.value;draw();});
+      if(wrong)warn.push("“"+c.sn+"”: "+wrong+" ID"+(wrong===1?"":"s")+" belong to a different cabinet, so they were left out. It may be a copy of another sheet.");
+      if(dup)warn.push("“"+c.sn+"”: "+dup+" ID"+(dup===1?" was":"s were")+" already on another sheet, so left out.");});
+    cfg.forEach(c=>{if(!c.labIn)return;
+      c.rows.slice(c.hdr?1:0).forEach(r=>{const key=(r[c.match]||"").trim();if(!key)return;
+        const a=c.l1>=0?(r[c.l1]||"").trim():"",b=c.l2>=0?(r[c.l2]||"").trim():"";if(a||b)labs.set(key,[a,b]);});});
+    let matched=0,unmatched=0;labs.forEach((l,k)=>{const r=recs.get(k);if(r){r.label=l;matched++;}else{recs.set(k,{name:k,label:l,tagOnly:true});unmatched++;}});
+    return {recs:[...recs.values()],sum,warn,labN:labs.size,matched,unmatched};}
+  const sel=(id,cur,none,c,on)=>{const s_=h("select",{id},[none?h("option",{value:"-1",selected:cur<0},none):null,...[...Array(c.ncol)].map((_,i)=>{const smp=(c.rows[c.hdr?1:0]||[])[i]||"";
+      return h("option",{value:String(i),selected:cur===i},"Column "+colL(i)+(c.hdr&&c.rows[0][i]?" ("+c.rows[0][i]+")":"")+(smp?": "+smp:""));})].filter(Boolean));
+    s_.addEventListener("change",()=>{on(+s_.value);draw();});return s_;};
+  function draw(){box.textContent="";const r=build(),n=r.recs.filter(x=>!x.tagOnly).length,nc=cfg.filter(c=>c.cabIn).length,nl=cfg.filter(c=>c.labIn).length;
+    box.append(h("div",{class:"seg",role:"tablist",style:"display:flex;gap:6px"},
+      h("button",{type:"button",role:"tab",class:"chipbtn","aria-selected":String(tab==="cab"),"aria-pressed":String(tab==="cab"),onclick:()=>{tab="cab";draw();}},"Cable IDs · "+nc+" sheet"+(nc===1?"":"s")),
+      h("button",{type:"button",role:"tab",class:"chipbtn","aria-selected":String(tab==="lab"),"aria-pressed":String(tab==="lab"),onclick:()=>{tab="lab";draw();}},"Print labels · "+nl+" sheet"+(nl===1?"":"s"))),
+      h("p",{class:"status",style:"margin:0"},tab==="cab"?"Tick the sheets that list cable IDs. Each sheet becomes its own group.":"Tick the sheets with the text that gets printed on the labels. Each row is matched to a cable by its port #."));
+    cfg.forEach((c,ci)=>{const id="mw"+ci+tab,on=tab==="cab"?c.cabIn:c.labIn;
+      const cb=h("input",{type:"checkbox",id:id+"i",checked:on,disabled:!c.rows.length});cb.addEventListener("change",()=>{if(tab==="cab")c.cabIn=cb.checked;else c.labIn=cb.checked;draw();});
+      const card=h("div",{class:"panel stack",style:"gap:8px;padding:10px"+(on?"":";opacity:.65")},
+        h("label",{class:"check",for:id+"i",style:"text-transform:none;letter-spacing:0;justify-content:space-between;display:flex;gap:8px"},h("span",{style:"display:flex;gap:8px;align-items:center"},cb,h("strong",{},c.sn)),
+          h("span",{class:"status"},c.rows.length?(c.rows.length-(c.hdr?1:0))+" rows":"empty")));
+      if(on){const ex=c.rows[c.hdr?1:0]||[];
         const hb=h("input",{type:"checkbox",id:id+"h",checked:c.hdr});hb.addEventListener("change",()=>{c.hdr=hb.checked;draw();});
-        const grid=h("div",{class:"mapgrid"},
-          h("div",{class:"field"},h("label",{for:id+"p"},"Port # / cable ID"),portSel),
-          h("div",{class:"field"},h("label",{for:id+"d"},c.role==="labels"?"Label text":"Device name"),devSel));
-        if(c.role==="cables"){const cabIn=h("input",{id:id+"c",value:c.cab,placeholder:"e.g. 1.14"}),sysIn=h("input",{id:id+"s",value:c.sys,placeholder:"e.g. BMS"});
+        if(tab==="cab"){const cabIn=h("input",{id:id+"c",value:c.cab,placeholder:"e.g. 1.14"}),sysIn=h("input",{id:id+"s",value:c.sys,placeholder:"e.g. BMS"});
           cabIn.addEventListener("change",()=>{c.cab=cabIn.value.trim();draw();});sysIn.addEventListener("change",()=>{c.sys=sysName(sysIn.value)||sysIn.value.trim();draw();});
-          grid.prepend(h("div",{class:"field"},h("label",{for:id+"c"},"Cabinet"),cabIn),h("div",{class:"field"},h("label",{for:id+"s"},"System"),sysIn));}
-        const ex=c.rows[c.hdr?1:0]||[];
-        card.append(grid,h("label",{class:"check",for:id+"h",style:"text-transform:none;letter-spacing:0"},hb,"First row is column names"),
-          h("div",{class:"status mono",style:"margin:0"},"First row: "+(ex[c.port]||"–")+(c.dev>=0&&ex[c.dev]?"  →  "+ex[c.dev]:"")));}
+          card.append(h("div",{class:"mapgrid"},h("div",{class:"field"},h("label",{for:id+"c"},"Cabinet"),cabIn),h("div",{class:"field"},h("label",{for:id+"s"},"System"),sysIn),
+            h("div",{class:"field"},h("label",{for:id+"p"},"Cable ID / port #"),sel(id+"p",c.port,null,c,v=>c.port=v)),
+            h("div",{class:"field"},h("label",{for:id+"d"},"Device name"),sel(id+"d",c.dev,"None (the ID is the device)",c,v=>c.dev=v))),
+            h("div",{class:"status mono",style:"margin:0"},"First row: "+(ex[c.port]||"–")+(c.dev>=0&&ex[c.dev]?"  ·  device "+ex[c.dev]:"")));}
+        else{card.append(h("div",{class:"mapgrid"},
+            h("div",{class:"field"},h("label",{for:id+"m"},"Port # (to match the cable)"),sel(id+"m",c.match,null,c,v=>c.match=v)),
+            h("div",{class:"field"},h("label",{for:id+"1"},"Label line 1"),sel(id+"1",c.l1,"— blank —",c,v=>c.l1=v)),
+            h("div",{class:"field"},h("label",{for:id+"2"},"Label line 2"),sel(id+"2",c.l2,"— blank —",c,v=>c.l2=v))),
+            h("div",{class:"status mono",style:"margin:0;white-space:pre-line"},"Label preview:\n"+((c.l1>=0&&ex[c.l1])||" ")+"\n"+((c.l2>=0&&ex[c.l2])||" ")));}
+        card.append(h("label",{class:"check",for:id+"h",style:"text-transform:none;letter-spacing:0"},hb,"First row is column names"));}
       box.append(card);});
-    box.append(...r.warn.map(w=>h("p",{class:"status",style:"color:var(--over);margin:0"},"⚠ "+w)),
-      h("div",{style:"display:flex;gap:8px;flex-wrap:wrap;align-items:center"},
-        h("button",{type:"button",class:"btn",disabled:!r.recs.length,onclick:()=>{const out=build();el.textContent="";resolve(out);}},"Use these ("+n+" cables"+(r.tagN?", "+r.tagN+" labels":"")+")")));}
+    box.append(...[...r.warn.map(w=>h("p",{class:"status",style:"color:var(--over);margin:0"},"⚠ "+w)),
+      r.unmatched?h("p",{class:"status",style:"margin:0"},r.unmatched+" print label"+(r.unmatched===1?"":"s")+" didn't match a cable on these sheets. They'll be matched to cables already on the job, if any."):null,
+      h("button",{type:"button",class:"btn",disabled:!r.recs.length,onclick:()=>{const out=build();el.textContent="";resolve(out);}},"Use these ("+n+" cables"+(r.labN?", "+r.labN+" print labels":"")+")")].filter(Boolean));}
   el.textContent="";el.append(box);draw();});}
-
 function readLabelWorkbook(wb){const recs=new Map(),sum={},warn=[];
   wb.SheetNames.forEach(sn=>{const m=sn.trim().match(/^([\d.]+)\s+(.+)$/);if(!m){warn.push("Skipped sheet “"+sn+"” (name isn't like “1.14 BMS”).");return;}
     const idf=m[1],sys=sysName(m[2]);
@@ -4157,9 +4165,9 @@ function labelWorkbookBox(j,onRecs){
       out.append(h("div",{class:"preview"},h("table",{},h("tr",{style:"font-weight:600"},h("td",{},"Cabinet"),syss.map(s=>h("td",{},s))),
         Object.keys(r.sum).sort(natCmp).map(idf=>h("tr",{},h("td",{},idf),syss.map(s=>h("td",{},String(r.sum[idf][s]||"–"))))))),
         ...r.warn.map(w=>h("p",{class:"status",style:"color:var(--over);margin:0"},"⚠ "+w)),
-        h("button",{type:"button",class:"btn small",onclick:()=>{onRecs(r.recs,syss);out.textContent="";file.value="";}},"Add these "+r.recs.filter(x=>!x.tagOnly).length+" cables"));}
+        h("button",{type:"button",class:"btn small",onclick:()=>{onRecs(r.recs,syss);out.textContent="";file.value="";}},"Add these "+r.recs.filter(x=>!x.tagOnly).length+" cables"+(r.labN?" and "+r.labN+" print labels":"")));}
     catch(e){out.textContent="";toast("Couldn't read that file. Save it as .xlsx and try again.");}});
-  box.append(h("p",{class:"status",style:"margin:0"},"One sheet per cabinet and system, like “1.14 BMS”. Next you'll check each sheet's columns. Cables already on the job get updated, not doubled."),
+  box.append(h("p",{class:"status",style:"margin:0"},"One sheet per cabinet and system, like “1.14 BMS”. Next you'll pick the cable ID sheets and the print label sheets. Cables already on the job get updated, not doubled."),
     h("div",{class:"field"},h("label",{for:"lwbFile"},"Label workbook (.xlsx)"),file),out);
   return box;}
 
@@ -4226,7 +4234,7 @@ function pullBuilder(jid){
     bottom.append(h("div",{class:"pr"},h("span",{class:"n"},idf+" "+sys),h("span",{class:"bar"},h("i",{style:"width:"+(p.length?Math.round(done*100/p.length):0)+"%"})),h("span",{class:"c"},done+"/"+p.length+" in a pull"),h("span")));
     if(free.length){bottom.append(h("div",{class:"flabel"},"Not in a pull yet ("+free.length+") · tap to add"),
       h("div",{class:"chips",style:"gap:6px"},free.map(c=>h("button",{type:"button",class:"chipbtn","aria-pressed":String(pick.has(c.id)),title:c.name,onclick:()=>{pick.has(c.id)?pick.delete(c.id):pick.add(c.id);draw();}},
-        h("span",{class:"mono"},String(labelNum(c.name)).padStart(3,"0")),(c.from||c.tag)?h("small",{style:"opacity:.75;margin-left:4px"},c.from||c.tag):null))));}
+        h("span",{class:"mono"},String(labelNum(c.name)).padStart(3,"0")),(()=>{const x=c.from||c.tag||(Array.isArray(c.label)&&c.label[0]!==c.name?c.label[0]:"");return x?h("small",{style:"opacity:.75;margin-left:4px"},x):null;})()))));}
     else bottom.append(h("p",{class:"status",style:"color:var(--ok)"},"✓ Every "+sys+" label for "+idf+" is in a pull."));
     const ss=stepsOf(j);
     Object.keys(pulls).sort(natCmp).forEach(k=>{const gl=pulls[k],fin=ss.length?gl.filter(c=>ss.every(st=>markOf(j,c.id,st.id))).length:0;
@@ -4282,7 +4290,7 @@ function jobWizard(){
             if(!r.recs.length){W.recs=null;sm.textContent="";sm.append(h("p",{class:"err"},"No labels found. Name each sheet like “1.14 BMS” with one label per row."));return;}
             W.recs=r.recs;W.sum=r.sum;W.warn=r.warn;W.syss=[...new Set(r.recs.map(x=>x.type).filter(Boolean))].sort((a,b)=>sysRank({},a)-sysRank({},b)||natCmp(a,b));show();}
           catch(e){sm.textContent="";toast("Couldn't read that file. Save it as .xlsx and try again.");}});
-        body.append(...q("Load the label workbook","One sheet per cabinet and system, named like “1.14 BMS”. Next you'll check each sheet: what it's for and which column is the port # and device name."),
+        body.append(...q("Load the label workbook","One sheet per cabinet and system, named like “1.14 BMS”. Next you'll pick which sheets are cable IDs and which are print labels, and which column is which."),
           h("div",{class:"field"},h("label",{for:"wzFile"},"Label workbook (.xlsx)"),file),sm,nav("Next",null,h("button",{type:"button",class:"btn ghost",onclick:()=>{W.recs=null;next();}},"Skip for now")));show();}
       else{const sm=h("div",{class:"status"},W.fiber?"✓ "+W.fiber.length+" cables loaded":"");
         body.append(...q("Load the cable list","Excel, CSV, or copy and paste from a sheet. Scans and the cable checklist get turned on for fiber."),
@@ -4342,7 +4350,7 @@ function jobWizard(){
       W.cabs.forEach(cb=>{const s=W.recs?[...new Set(W.recs.filter(r=>r.rack===cb).map(r=>r.type))]:[];sy[cb]=(s.length?s:SYS_ORDER_DEFAULT.slice()).sort((a,b)=>sysRank({},a)-sysRank({},b)||natCmp(a,b));});
       const plan=cabSysPlan(W.cabs,sy);phases=plan.phases;tasks=plan.tasks;}
     let cables=[];
-    if(W.kind==="cat6"&&W.recs)cables=W.recs.filter(r=>!r.tagOnly).map(r=>{const o={id:nid("c"),name:r.name,rack:r.rack,type:r.type};["from","sheet","tag"].forEach(k=>{if(r[k])o[k]=r[k];});return o;});
+    if(W.kind==="cat6"&&W.recs)cables=W.recs.filter(r=>!r.tagOnly).map(r=>{const o={id:nid("c"),name:r.name,rack:r.rack,type:r.type};["from","sheet","tag","label"].forEach(k=>{if(r[k])o[k]=r[k];});return o;});
     if(W.kind==="fiber"&&W.fiber)cables=W.fiber.map(r=>{const o={id:nid("c"),name:String(r.name).trim()};["rack","pull","len","type","from","to","note"].forEach(k=>{if(r[k]&&String(r[k]).trim())o[k]=String(r[k]).trim();});return o;});
     const body_={name:W.name.trim(),start:W.start||TODAY(),days:0,weeks:W.weeks,phases,tasks,crew:[...W.crew],projectId:"",loc:null,site:"",techs:W.crew.size,scope:"",conf:"locked",pri:3,notes:"",
       scanCk:W.kind==="fiber",kind:W.kind,cabinets:W.cabs.slice(),cables,steps,createdAt:Date.now(),updatedAt:Date.now(),by:myId||"",addedBy:myId||"",addedAt:Date.now()};
@@ -4454,7 +4462,7 @@ function cableJobSetup(j){
   drawSteps();
   const fields=[];
   if(!j)fields.push(h("div",{class:"field full"},h("label",{for:"cjName"},"Job name"),nameIn),h("div",{class:"field full"},h("label",{for:"cjStart"},"Start"),startIn));
-  fields.push(h("div",{class:"field full"},h("label",{for:"cjFile"},"Label workbook"),file,h("p",{class:"status",style:"margin:0"},"One sheet per cabinet and system, like “1.14 BMS”. Next you'll check each sheet: what it's for and which column is the port # and device name."),sum),
+  fields.push(h("div",{class:"field full"},h("label",{for:"cjFile"},"Label workbook"),file,h("p",{class:"status",style:"margin:0"},"One sheet per cabinet and system, like “1.14 BMS”. Next you'll pick which sheets are cable IDs and which are print labels, and which column is which."),sum),
     h("div",{class:"field full"},h("span",{class:"flabel"},"Steps each pull goes through"),stepBox),
     j?null:h("p",{class:"status full",style:"margin:0"},"Add crew later from the job's Crew button."));
   openSheet(j?"Load labels · "+j.name:"New cable pull job",fields.filter(Boolean),async()=>{
@@ -4463,7 +4471,7 @@ function cableJobSetup(j){
     if(!recs){formErr("Pick the label workbook.");return false;}
     const nid=p=>p+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
     const old=j?cablesOf(j):[],byName=new Map(old.map(c=>[c.name,Object.assign({},c)]));
-    recs.forEach(r=>{const ex=byName.get(r.name);if(r.tagOnly){if(ex)ex.tag=r.tag;return;}const d={rack:r.rack,type:r.type};["from","sheet","tag"].forEach(k=>{if(r[k])d[k]=r[k];});if(ex)Object.assign(ex,d);else byName.set(r.name,Object.assign({id:nid("c"),name:r.name},d));});
+    recs.forEach(r=>{const ex=byName.get(r.name);if(r.tagOnly){if(ex){if(r.label)ex.label=r.label;if(r.tag)ex.tag=r.tag;}return;}const d={rack:r.rack,type:r.type};["from","sheet","tag","label"].forEach(k=>{if(r[k])d[k]=r[k];});if(ex)Object.assign(ex,d);else byName.set(r.name,Object.assign({id:nid("c"),name:r.name},d));});
     const cables=[...byName.values()],keepSteps=j&&stepsOf(j).length;
     const steps=keepSteps?stepsOf(j):stepsFor(stepPick).map(s=>({id:nid("s"),name:s.name,split:!!s.split}));
     const sysOrder=j?[...new Set([...sysOrderOf(j),...syss])]:syss;
