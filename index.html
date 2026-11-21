@@ -2604,7 +2604,7 @@ function field(spec){const {id,label,type="text",value="",full,options,placehold
   else if(type==="checkbox"){inp=h("input",{type:"checkbox",id,checked:!!value});return h("label",{class:"check "+(full?"full":""),for:id},inp,label);}
   else inp=h("input",{id,type,value:value??"",placeholder,min,max,inputmode:type==="number"?"numeric":null});
   return h("div",{class:"field"+(full?" full":"")},h("label",{for:id},label),inp);}
-function openSheet(title,nodes,onSave,onDelete,readOnly){nextAfterSave=null;
+function openSheet(title,nodes,onSave,onDelete,readOnly){nextAfterSave=null;sheetBack=null;
   const rw=canWrite&&!readOnly;
   $("#sheetTitle").textContent=title;const f=$("#form");f.textContent="";nodes.forEach(n=>f.append(n));
   if(!rw)f.querySelectorAll("input,select,textarea,button").forEach(e=>e.disabled=true);
@@ -2614,13 +2614,18 @@ function openSheet(title,nodes,onSave,onDelete,readOnly){nextAfterSave=null;
   sheetSave=rw?onSave:null;$("#scrim").hidden=false;setTimeout(()=>{const first=f.querySelector("input,textarea,select");if(first)first.focus();},30);}
 let liveSheet=null,nextAfterSave=null,lastNewJob=null;
 function closeSheet(){if(typeof ckOpen!=="undefined")ckOpen=null;if(typeof markQ!=="undefined"&&markQ)flushMarks();$("#scrim").hidden=true;sheetSave=null;liveSheet=null;$(".sheet").classList.remove("wide");}
-function openView(title,nodes){$("#sheetTitle").textContent=title;const f=$("#form");f.textContent="";nodes.forEach(n=>f.append(n));
-  f.append(h("div",{class:"actions"},h("span"),h("div",{class:"right"},h("button",{type:"button",class:"btn",onclick:closeSheet},"Close"))));sheetSave=null;$("#scrim").hidden=false;}
+function openView(title,nodes){sheetBack=null;$("#sheetTitle").textContent=title;const f=$("#form");f.textContent="";nodes.forEach(n=>f.append(n));
+  f.append(h("div",{class:"actions"},h("span"),h("div",{class:"right"},h("button",{type:"button",class:"btn",onclick:userClose},"Close"))));sheetSave=null;$("#scrim").hidden=false;}
 function formErr(t){const e=$("#formErr");e.textContent=t;e.hidden=false;}
 $("#form").addEventListener("submit",async e=>{e.preventDefault();if(!sheetSave||!db){if(!db&&sheetSave)formErr("Can't reach the shared board right now.");return;}const b=$("#saveBtn");b.disabled=true;try{const r=await sheetSave();if(r!==false){const nx=nextAfterSave;nextAfterSave=null;closeSheet();toast("Saved");if(nx)nx();}}catch(err){formErr(err&&err.code==="permission-denied"?"You don't have permission to change that.":"Couldn't save. Check your connection and try again.");}finally{b.disabled=false;}});
-$("#scrim").addEventListener("click",e=>{if(e.target.id==="scrim")closeSheet();});
-$("#sheetX").addEventListener("click",closeSheet);
-document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!$("#scrim").hidden)closeSheet();});
+/* closing a sheet by hand (✕, Close, tap outside, Esc, phone back) returns to the sheet it was opened from, if any */
+let sheetBack=null;
+function userClose(){const b=sheetBack;sheetBack=null;closeSheet();if(b)setTimeout(b,60);}
+$("#scrim").addEventListener("click",e=>{if(e.target.id==="scrim")userClose();});
+$("#sheetX").addEventListener("click",userClose);
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!$("#scrim").hidden)userClose();});
+/* phone back button closes the open sheet instead of leaving the screen */
+window.addEventListener("popstate",()=>{if(!$("#scrim").hidden&&sheetBack)userClose();});
 const val=id=>{const e=document.getElementById(id);return e?(e.type==="checkbox"?e.checked:e.value.trim()):"";};
 
 const TASK_PRESETS=["Pull","Dress","Terminate","Port","Label","VFL","Test","Certify"];
@@ -3305,7 +3310,8 @@ document.addEventListener("keydown",e=>{
   if(gap>80){wedgeBuf="";wedgeFast=0;}else wedgeFast++;
   wedgeBuf+=e.key;});
 /* one cable's checklist: four scans and five sign-offs */
-function ckSheet(jid,cid){const box=h("div",{class:"full stack"});ckOpen={jid,cid};
+let ckBack=null;
+function ckSheet(jid,cid,back){if(back)ckBack={cid,fn:back};else if(!ckBack||ckBack.cid!==cid)ckBack=null;const box=h("div",{class:"full stack"});ckOpen={jid,cid};
   const draw=()=>{const j=S.jobs.find(x=>x.id===jid),c=j&&cablesOf(j).find(x=>x.id===cid);if(!c){closeSheet();return;}
     const ck=JSON.parse(JSON.stringify(ckOf(j,cid))),can=CAN_POST(),me=myTech();box.textContent="";
     $("#sheetTitle").textContent=c.name+" · checklist";
@@ -3345,7 +3351,7 @@ function ckSheet(jid,cid){const box=h("div",{class:"full stack"});ckOpen={jid,ci
         h("button",{type:"button",class:"btn small",onclick:()=>copyText(CK_SCANS.map(([k])=>ckOf(S.jobs.find(x=>x.id===jid),cid)[k]||"").join("\n"),"Serials copied. Paste at B2.")},"Copy serials (B2)"),
         h("button",{type:"button",class:"btn small",onclick:()=>{const c2=ckOf(S.jobs.find(x=>x.id===jid),cid);copyText(CK_ITEMS.map((_,i)=>{const it=(c2.items||{})[i+1];return it&&it.at?[ckWho(it),"TRUE",ckDate(it.at),"NA","",it.remark||""].join("\t"):["","FALSE","","NA","",""].join("\t");}).join("\n"),"Check list copied. Paste at C7.");}},"Copy check list (C7)"))));};
   let confirmed5=false;
-  openView("Checklist",[box]);liveSheet=draw;draw();}
+  openView("Checklist",[box]);if(ckBack&&ckBack.cid===cid){sheetBack=ckBack.fn;try{history.pushState({sheet:1},"");}catch(e){}}liveSheet=draw;draw();}
 async function copyText(txt,msg){try{await navigator.clipboard.writeText(txt);}catch(e){const ta=h("textarea",{style:"position:fixed;opacity:0"});ta.value=txt;document.body.append(ta);ta.select();try{document.execCommand("copy");}catch(e2){}ta.remove();}toast(msg||"Copied");}
 /* every cable's checklist in one table */
 function ckTable(j){const head=["Cable","Cable Serial #","Cable QR code URL","Source Patch Panel Serial #","Dest Patch Panel Serial #",...CK_ITEMS.flatMap((_,i)=>["#"+(i+1)+" Owner","#"+(i+1)+" Date","#"+(i+1)+" Remarks"])];
@@ -3759,6 +3765,8 @@ function cableReport(jid){const j=S.jobs.find(x=>x.id===jid);if(!j)return;const 
 /* search words against everything we know about a cable (name, from/to, rack, row, type, notes, serial, label) */
 function cableHay(j,c){const ck=ckOf(j,c.id),lb=labelLines(j,c);return [c.name,c.from,c.to,c.rack,c.pull,rowOf(c),c.type,c.note,c.len,c.tag,c.sheet,ck.serial,ck.src,ck.dst,lb[0],lb[1]].filter(Boolean).join(" ").toLowerCase();}
 const cableMatch=(j,c,q)=>{const ws=String(q||"").toLowerCase().split(/\s+/).filter(Boolean);if(!ws.length)return true;const hs=cableHay(j,c),flat=hs.replace(/[^a-z0-9]/g,"");return ws.every(w=>hs.includes(w)||flat.includes(w.replace(/[^a-z0-9]/g,"")));};
+/* back from a cable's checklist: the cable list, same filters, that cable open and in view */
+const backToCable=(jid,cid)=>()=>{openCab.add(cid);cableTracker(jid);setTimeout(()=>{const el=document.querySelector('.sheet [data-cid="'+cid+'"]');if(el)el.scrollIntoView({block:"center"});},120);};
 function cableTracker(jid,q0,f0){
   let remainingOnly=false,trackQ=q0||"",fCab=null,fSys="";
   try{fCab=localStorage.getItem("ctCab:"+jid);fSys=localStorage.getItem("ctSys:"+jid)||"";}catch(e){}
@@ -3825,10 +3833,10 @@ function cableTracker(jid,q0,f0){
       if(open){const steps=h("div",{class:"csteps"},ss.map(st=>{const m=markOf(j,c.id,st.id),sp=isSplit(st),pp=sp?partsOf(j,c.id,st.id):[];
           const tip=(m?st.name+" "+fmtTime(m.at)+" "+fmt(new Date(m.at))+(m.by?" · "+(names[m.by]||""):""):"")+(pp.length?(m?" · ":"")+pp.map(p=>partWho(p)+(partTxt(p)?" ("+partTxt(p)+")":"")).join(", "):"");
           return h("button",{type:"button",class:"sbtn"+(!m&&pp.length?" part":""),"aria-pressed":String(!!m),"data-l":st.name,disabled:!can&&!sp,"aria-label":c.name+" "+st.name+(sp?" sign-off":""),title:tip,
-            onclick:e=>scanIds.has(st.id)?(closeSheet(),setTimeout(()=>ckSheet(j.id,c.id),60)):sp?signOff(j.id,c.id,st.id):queueMark(j,c.id,st.id,e.currentTarget,()=>recolor(el,j,c))},m?"✓ "+st.name:scanIds.has(st.id)?"📷 "+st.name:sp?(pp.length?"✎ "+st.name+" ("+pp.length+")":"✎ "+st.name):st.name);}));
+            onclick:e=>scanIds.has(st.id)?(closeSheet(),setTimeout(()=>ckSheet(j.id,c.id,backToCable(j.id,c.id)),60)):sp?signOff(j.id,c.id,st.id):queueMark(j,c.id,st.id,e.currentTarget,()=>recolor(el,j,c))},m?"✓ "+st.name:scanIds.has(st.id)?"📷 "+st.name:sp?(pp.length?"✎ "+st.name+" ("+pp.length+")":"✎ "+st.name):st.name);}));
         el.append(steps);
         {const ck=ckOf(j,c.id),sn=ckScanN(ck),inn=ckItemN(ck);
-          el.append(h("div",{class:"cdet"},h("button",{type:"button",class:"btn ghost small",onclick:()=>{closeSheet();setTimeout(()=>ckSheet(j.id,c.id),60);}},"📋 Checklist & scans · "+sn+"/4 scanned · "+inn+"/5 checked"),ckProblems(ck).length?h("span",{style:"color:var(--over);margin-left:6px"},"⚠"):null));}
+          el.append(h("div",{class:"cdet"},h("button",{type:"button",class:"btn ghost small",onclick:()=>{closeSheet();setTimeout(()=>ckSheet(j.id,c.id,backToCable(j.id,c.id)),60);}},"📋 Checklist & scans · "+sn+"/4 scanned · "+inn+"/5 checked"),ckProblems(ck).length?h("span",{style:"color:var(--over);margin-left:6px"},"⚠"):null));}
         const dated=ss.map(st=>{const m=markOf(j,c.id,st.id);return m&&m.at?st.name+" "+fmt(new Date(m.at),{month:"short",day:"numeric"})+(m.by?" ("+(realName(m.by).split(" ")[0])+")":""):"";}).filter(Boolean);
         if(dated.length)el.append(h("div",{class:"cdet"},"✓ "+dated.join(" · ")));
         issuesOf(j,c.id).forEach(i=>{const ph=(i.photos||[]).map(id=>S.files.find(f=>f.id===id)).filter(Boolean);
