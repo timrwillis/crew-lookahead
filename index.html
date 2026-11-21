@@ -3584,7 +3584,27 @@ function refreshCables() {
   // one refresh at a time (the app's instant ping and the timer can land together)
   const lock = LockService.getDocumentLock();
   if (!lock.tryLock(20000)) return;
-  try { refresh_(); } finally { lock.releaseLock(); }
+  try { refresh_(false); status_(""); }
+  catch (err) { status_("⚠ Last refresh failed: " + (err && err.message || err)); throw err; }
+  finally { lock.releaseLock(); }
+}
+
+// Crew Lookahead → Refresh now: always rebuild every tab, even if nothing changed
+function refreshAll() {
+  PropertiesService.getDocumentProperties().deleteProperty("feedAt");
+  PropertiesService.getDocumentProperties().deleteProperty("cableTabs");
+  refreshCables();
+}
+
+// shows the last check right on the Cables tab, so a stuck refresh is easy to spot
+function status_(msg) {
+  try {
+    const sh = SpreadsheetApp.getActive().getSheetByName("Cables");
+    if (!sh) return;
+    const t = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "M/d h:mm:ss a");
+    sh.getRange(1, 3, 1, 2).setValues([["Checked " + t, msg]]);
+    sh.getRange(1, 4).setFontColor(msg ? "#b42318" : "#000000").setFontWeight("bold");
+  } catch (e) {}
 }
 
 // the app calls this the moment something changes (needs the Web app deployment, see step 6 in the app)
@@ -3597,6 +3617,10 @@ function refresh_() {
   const res = UrlFetchApp.fetch(FEED, { muteHttpExceptions: true });
   if (res.getResponseCode() !== 200) throw new Error("Couldn't reach the app's feed (" + res.getResponseCode() + "). Ask your lead for a new link.");
   const f = JSON.parse(res.getContentText()).fields || {};
+  // nothing new since the last refresh: stop here (keeps the sheet under Google's daily script time)
+  const at = String((f.updatedAt && (f.updatedAt.integerValue || f.updatedAt.doubleValue)) || "");
+  const props0 = PropertiesService.getDocumentProperties();
+  if (at && props0.getProperty("feedAt") === at) return;
   let txt = k => (f[k] && f[k].stringValue) || "";
   if (txt("gz")) {
     const all = JSON.parse(Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(txt("gz")), "application/x-gzip")).getDataAsString());
@@ -3611,11 +3635,13 @@ function refresh_() {
   const master = tab_(ss, "Cables", 0);
   // one tab per cable, rewritten only when that cable changed
   const start = Date.now();
+  let partial = false;
   data.cables.forEach((c, i) => {
     const name = tabName_(c.name, seen);
     const hash = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, JSON.stringify(c)));
     let sh = ss.getSheetByName(name);
     // big jobs: stop making tabs after ~4 minutes; the next refresh picks up the rest
+    if ((!sh || known[name] !== hash) && Date.now() - start >= 240000) partial = true;
     if ((!sh || known[name] !== hash) && Date.now() - start < 240000) { sh = cableTab_(ss, sh, name, c, data); known[name] = hash; }
     c._gid = sh ? sh.getSheetId() : null;
   });
@@ -3644,6 +3670,7 @@ function refresh_() {
   csvTab_(ss, "History", txt("history"));
   csvTab_(ss, "Summary", txt("summary"));
   ["Cables (live)", "History (live)", "Summary (live)"].forEach(n => { const s = ss.getSheetByName(n); if (s) ss.deleteSheet(s); });
+  if (at && !partial) props.setProperty("feedAt", at);
 }
 
 function cableTab_(ss, sh, name, c, data) {
@@ -3723,7 +3750,7 @@ function setup() {
 }
 
 function onOpen() {
-  SpreadsheetApp.getUi().createMenu("Crew Lookahead").addItem("Refresh now", "refreshCables").addToUi();
+  SpreadsheetApp.getUi().createMenu("Crew Lookahead").addItem("Refresh now", "refreshAll").addToUi();
 }
 `;}
 function liveSheetPanel(jid){const box=h("div",{class:"full stack"});
