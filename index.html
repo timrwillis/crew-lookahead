@@ -1233,6 +1233,7 @@ function jobPanel(j){
       m&&j.doneOn?h("button",{type:"button",class:"btn ghost small",onclick:()=>setDone(j,false)},"Reopen job"):null)));
   const tk=tasksOf(j),ph=phasesOf(j);
   if(readyToClose(j))box.append(closePrompt(j));
+  if(MGR()&&isCat6Job(j)&&!dropScanBusy.has(j.id)&&(j.scanCk||j.scanSteps||stepsOf(j).some(st=>/^scan_/.test(st.id)))){dropScanBusy.add(j.id);setTimeout(()=>dropScanSteps(j.id),0);}
   if(needsScan(j)){box.prepend(scanBar(j));if(MGR()&&missingScanSteps(j))setTimeout(()=>ensureScanSteps(S.jobs.find(x=>x.id===j.id)),0);else setTimeout(()=>healScanSteps(S.jobs.find(x=>x.id===j.id)),0);}
   {const cst=ph.some(p=>p.cab)?null:cabinetStrip(j);if(cst)box.append(cst);}
   if(!tk.length){box.append(h("div",{class:"empty"},h("strong",{},"No tasks yet"),m?"Edit the job to add tasks, or tap “Standard cable run” in the job form.":"A lead hasn't broken this job into tasks yet."));}
@@ -3171,7 +3172,14 @@ function scanStepFor(j,kind){const ss=stepsOf(j);if(!ss.length)return"";const m=
 const missingScanSteps=j=>SCAN_STEP_DEFS.some(([kind,id])=>{const has=stepsOf(j).some(st=>st.id===id),lk=scanLike(j,kind);return lk?has||(j.scanSteps||{})[kind]!==lk.id:!has;});
 const scanStepsAdding=new Set();
 /* give each scan its own step (leads only), reusing a matching step the job already has, merging duplicates, and checking off cables already scanned */
-async function ensureScanSteps(j){if(!MGR()||!j||!cablesOf(j).length||scanStepsAdding.has(j.id)||!missingScanSteps(j))return;scanStepsAdding.add(j.id);
+const dropScanBusy=new Set();
+async function dropScanSteps(jid){const j=S.jobs.find(x=>x.id===jid);if(!j)return;
+  const scanIds=new Set([...stepsOf(j).filter(st=>/^scan_/.test(st.id)).map(st=>st.id),...Object.values(j.scanSteps||{})]);
+  const used=id=>cablesOf(j).some(c=>markOf(j,c.id,id));
+  const steps=stepsOf(j).filter(st=>!(scanIds.has(st.id)&&!used(st.id)));
+  try{const upd={scanCk:false,updatedAt:Date.now()};if(steps.length!==stepsOf(j).length)upd.steps=steps;if(j.scanSteps)upd.scanSteps=null;
+    await db.collection("jobs").doc(j.id).update(upd);if(upd.steps)toast("Took the scan steps off "+j.name+" (Cat6 doesn't scan)");}catch(e){}}
+async function ensureScanSteps(j){if(!MGR()||!j||isCat6Job(j)||!cablesOf(j).length||scanStepsAdding.has(j.id)||!missingScanSteps(j))return;scanStepsAdding.add(j.id);
   try{const have=stepsOf(j),map={},drop=[],add=[];
     SCAN_STEP_DEFS.forEach(([kind,id,name])=>{const lk=scanLike(j,kind),has=have.some(st=>st.id===id);
       if(lk){map[kind]=lk.id;if(has)drop.push([id,lk.id]);}else{map[kind]=id;if(!has)add.push({id,name,split:false});}});
@@ -3319,7 +3327,9 @@ async function copyText(txt,msg){try{await navigator.clipboard.writeText(txt);}c
 function ckTable(j){const head=["Cable","Cable Serial #","Cable QR code URL","Source Patch Panel Serial #","Dest Patch Panel Serial #",...CK_ITEMS.flatMap((_,i)=>["#"+(i+1)+" Owner","#"+(i+1)+" Date","#"+(i+1)+" Remarks"])];
   return [head,...cablesOf(j).map(c=>{const ck=ckOf(j,c.id);return [c.name,ck.serial||"",ck.qr||"",ck.src||"",ck.dst||"",...CK_ITEMS.flatMap((_,i)=>{const it=(ck.items||{})[i+1];return it&&it.at?[ckWho(it),ckDate(it.at),it.remark||""]:["","",""];})];})];}
 /* scan a cable's serial or label to jump straight to it */
-const needsScan=j=>!!j&&!isQuick(j)&&cablesOf(j).length>0&&(j.scanCk===true||!!j.scanSteps||stepsOf(j).some(st=>/^scan_/.test(st.id))||(j.scanCk!==false&&cablesOf(j).some(c=>ckScanN(ckOf(j,c.id))>0)));
+/* Cat6 / copper jobs never scan: no cable or enclosure scan steps */
+const isCat6Job=j=>!!j&&(j.kind==="cat6"||(cablesOf(j).length>0&&cablesOf(j).every(isPortCable)));
+const needsScan=j=>!!j&&!isQuick(j)&&!isCat6Job(j)&&cablesOf(j).length>0&&(j.scanCk===true||!!j.scanSteps||stepsOf(j).some(st=>/^scan_/.test(st.id))||(j.scanCk!==false&&cablesOf(j).some(c=>ckScanN(ckOf(j,c.id))>0)));
 /* open jobs with cables to scan; anyone on the crew can scan, assigned or not */
 const scanJobs=()=>S.jobs.filter(j=>!j.doneOn&&needsScan(j));
 function scanAny(){const js=scanJobs(),me=myTech(),mine=me?assignOn(me.id,TODAY()):null;
@@ -4121,7 +4131,7 @@ function cableEditor(j){
   openSheet("Cables & steps · "+j.name,[
     h("div",{class:"field full"},h("span",{class:"flabel"},"Job profile"),h("p",{class:"status",style:"margin:0"},"Start from a setup you saved before, or save this one (steps, system order, material) for the next job."),profBox),
     h("div",{class:"field full"},h("span",{class:"flabel"},"Systems, in the order you pull them into each cabinet"),sysBox),
-    h("div",{class:"field full"},h("span",{class:"flabel"},"Steps for every cable (in order)"),stepBox,
+    h("div",{class:"field full"},h("span",{class:"flabel"},"Steps for every cable (in order) · same for every cabinet on this job"),stepBox,
       h("div",{class:"presets"},h("button",{type:"button",class:"btn small",onclick:()=>STD_STEPS.forEach(addStep)},"+ Pulled → Dressed → Labeled → Ported → Tested"),STEP_PRESETS.map(n=>h("button",{type:"button",class:"btn ghost small",onclick:()=>addStep(n)},"+ "+n)),
         h("button",{type:"button",class:"btn ghost small",onclick:()=>{steps.push({id:nid("s"),name:"New step"});drawSteps();}},"+ Other"))),
     h("div",{class:"field full"},h("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"},h("span",{class:"flabel"},"Cables in pull order · ",cabCount),
