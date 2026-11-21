@@ -3834,7 +3834,7 @@ function cableTracker(jid,q0,f0){
       ss.map(st=>{const n=fl.filter(c=>markOf(j,c.id,st.id)).length,left=fl.length-n,inner=[h("span",{class:"n"},st.name),h("span",{class:"bar"},h("i",{style:"width:"+Math.round(n*100/fn)+"%"})),h("span",{class:"c"},n+"/"+fl.length),
           h("span",{class:"status",style:"white-space:nowrap"},!left?"Done ✓":can?(isScanSt(st.id)?"📷 Scan ›":isBulkSt(st.id)?"✍ Sign off ›":"Mark ›"):"")];
         /* tap a step to check it off on many cables from one list; scan steps only check off from real scans */
-        return can?h("button",{type:"button",class:"pr prbtn steprow",title:isScanSt(st.id)?st.name+" checks itself off when the scan is saved":"Check off "+st.name+" on several cables",onclick:()=>isScanSt(st.id)?scanFindCable(j.id):isBulkSt(st.id)?bulkSignOff(j.id,st.id,fCab||fSys?inF:null):stepMarkSheet(j.id,st.id,fCab||fSys?inF:null)},inner):h("div",{class:"pr"},inner);})),
+        return can?h("button",{type:"button",class:"pr prbtn steprow",title:isScanSt(st.id)?st.name+" checks itself off when the scan is saved":"Check off "+st.name+" on several cables",onclick:()=>isScanSt(st.id)?scanTodoSheet(j.id,st.id,fCab||fSys?inF:null):isBulkSt(st.id)?bulkSignOff(j.id,st.id,fCab||fSys?inF:null):stepMarkSheet(j.id,st.id,fCab||fSys?inF:null)},inner):h("div",{class:"pr"},inner);})),
       can?h("div",{class:"status",style:"margin:-2px 0 0"},"Tap a step to check it off on several cables at once."):null);
     if(!cabL.length){const cp=cabinetProgress(j);if(cp)box.append(cp);}
     const have=Object.keys(GROUPS).filter(k=>cs.some(c=>cabVal(c,k)));
@@ -3947,6 +3947,34 @@ const bulkSteps=j=>{const sc=needsScan(j)?scanIdsOf(j):new Set();return stepsOf(
 const issuesOf=(j,cid)=>(((j.marks||{})[cid]||{})._issues)||[];
 const ISSUE_WHERE={cable:"Cable",src:"Source enclosure",dst:"Dest enclosure"};
 const issueTxt=(j,i)=>{const st=stepsOf(j).find(x=>x.id===i.step);return [ISSUE_WHERE[i.where]||"Cable",i.port?"port "+i.port:"",i.damaged?"DAMAGED":"not damaged",i.note,st?"("+st.name+")":""].filter(Boolean).join(" · ");};
+/* a scan step: the cables still missing it first; tap one and the camera opens for exactly the scan it needs */
+function scanTodoSheet(jid,sid,filt){
+  const wrap=h("div",{class:"popwrap"}),pop=h("div",{class:"pop",role:"dialog","aria-modal":"true","aria-label":"Scans still needed",style:"max-height:92vh;display:flex;flex-direction:column;gap:8px"});wrap.append(pop);
+  let q="",showDone=false,busy=false;const prevLive=liveSheet;
+  const close=()=>{wrap.remove();if(liveSheet===redraw)liveSheet=prevLive;if(prevLive)prevLive();};
+  wrap.addEventListener("click",e=>{if(e.target===wrap)close();});
+  const qIn=h("input",{type:"search",class:"full-in",placeholder:"Search: BLK, rack, PP, from/to…","aria-label":"Search cables",autocomplete:"off"});qIn.addEventListener("input",()=>{q=qIn.value;draw();});
+  const body=h("div",{style:"overflow:auto;flex:1;min-height:0;display:flex;flex-direction:column;gap:6px"});
+  async function doScan(j,c,k){if(busy)return;busy=true;try{const lab=CK_SCANS.find(x=>x[0]===k)||[k,k,""];const r=await scanCode(c.name+" · "+lab[1],lab[2]);
+      if(r&&r.codes&&r.codes.length)await applyCodesToCk(jid,c.id,r.codes,r.photo,k);}finally{busy=false;draw();}}
+  function draw(){const j=S.jobs.find(x=>x.id===jid),st=j&&stepsOf(j).find(x=>x.id===sid);if(!st){close();return;}
+    const kinds=scanKindsFor(j,sid),cs=(filt?cablesOf(j).filter(filt):cablesOf(j)).filter(c=>cableMatch(j,c,q));
+    const todo=cs.filter(c=>!markOf(j,c.id,sid)),done=cs.filter(c=>markOf(j,c.id,sid));
+    pop.textContent="";
+    pop.append(h("div",{style:"display:flex;justify-content:space-between;align-items:flex-start;gap:8px"},h("div",{},h("strong",{style:"font-size:1.1rem"},st.name),h("div",{class:"status"},todo.length?todo.length+" still need a scan · tap one to open the camera":"Every cable is scanned ✓")),
+      h("button",{type:"button",class:"iconbtn","aria-label":"Close",onclick:close},"✕")),qIn,
+      h("div",{class:"seg-ctl"},[[false,"Still needed ("+todo.length+")"],[true,"Done ("+done.length+")"]].map(([k,l])=>h("button",{type:"button","aria-pressed":String(showDone===k),onclick:()=>{showDone=k;draw();}},l))),body);
+    body.textContent="";
+    (showDone?done:todo).forEach(c=>{const ck=ckOf(j,c.id),miss=kinds.filter(k=>!(ck[k]||"").trim()),probs=ckProblems(ck);
+      body.append(h("div",{class:"panel",style:"padding:8px 10px;display:grid;gap:6px"},
+        h("div",{style:"display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"},h("strong",{},c.name),h("span",{class:"status"},[rowOf(c),c.from&&c.to?c.from+" → "+c.to:""].filter(Boolean).join(" · "))),
+        probs.length?h("div",{class:"status",style:"color:var(--over);margin:0"},"⚠ "+probs.join(" ")):null,
+        h("div",{style:"display:flex;gap:6px;flex-wrap:wrap"},
+          (showDone?kinds:miss.length?miss:kinds).map(k=>{const lab=(CK_SCANS.find(x=>x[0]===k)||[k,k])[1],have=(ck[k]||"").trim();
+            return h("button",{type:"button",class:"btn small"+(have?" ghost":""),disabled:busy||!CAN_POST(),onclick:()=>doScan(j,c,k)},(have?"Rescan ":"📷 Scan ")+lab);}),
+          h("button",{type:"button",class:"btn ghost small",onclick:()=>{close();closeSheet();setTimeout(()=>ckSheet(jid,c.id,backToCable(jid,c.id),miss),60);}},"Checklist"))));});
+    if(!(showDone?done:todo).length)body.append(h("p",{class:"status"},q.trim()?"No cable matches.":showDone?"None yet.":"Nothing left to scan ✓"));}
+  const redraw=()=>draw();liveSheet=redraw;document.body.append(wrap);draw();}
 function bulkSignOff(jid,sid0,filt){
   const j0=S.jobs.find(x=>x.id===jid);if(!j0)return;const steps=bulkSteps(j0);
   if(!steps.length){toast("This job has no sign-off steps (porting, testing…).");return;}
