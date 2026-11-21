@@ -3818,15 +3818,16 @@ function cableTracker(jid,q0,f0){
       order.forEach(g=>{const gl=grp[g],shown=gl.filter(visible);if(!shown.length)return;const fin=gl.filter(c=>ss.every(st=>markOf(j,c.id,st.id))).length,gopen=openGrp.has(g);
         const gst=fin===gl.length?"done":gl.some(c=>cabState(j,c,ss)!=="none")?"part":"none";
         const gh=h("div",{class:"cgrp "+gst},h("button",{type:"button",class:"chd","aria-expanded":String(gopen),onclick:()=>{gopen?openGrp.delete(g):openGrp.add(g);draw();}},
-          h("span",{class:"car"},gopen?"▾":"▸"),h("span",{class:"nm"},(trackGroup==="row"?"":GROUPS[trackGroup]+" ")+g,h("span",{class:"sub"},"Mark the whole group")),h("span",{class:"ctag"},fin+"/"+gl.length+" done")));
+          h("span",{class:"car"},gopen?"▾":"▸"),h("span",{class:"nm"},(trackGroup==="row"?"":GROUPS[trackGroup]+" ")+g,h("span",{class:"sub"},gopen?"Mark the whole group, or tap a cable below":"Tap to see its "+gl.length+" cable"+(gl.length===1?"":"s"))),h("span",{class:"ctag"},fin+"/"+gl.length+" done")));
         if(gopen&&can)gh.append(h("div",{class:"csteps"},ss.map(st=>{const allOn=gl.every(c=>markOf(j,c.id,st.id));
           return h("button",{type:"button",class:"sbtn","aria-pressed":String(allOn),onclick:()=>setMarks(j,gl.filter(c=>!!markOf(j,c.id,st.id)===allOn).map(c=>[c.id,st.id]),!allOn)},(allOn?"✓ ":"")+"All "+(st.name===st.name.toUpperCase()?st.name:st.name.toLowerCase()));})));
-        body.push(gh);shown.forEach(c=>body.push(row(c)));});}
+        body.push(gh);if(gopen||trackQ.trim())shown.forEach(c=>body.push(row(c)));});}
     else list.filter(visible).forEach(c=>body.push(row(c)));
     const anyOpen=list.some(c=>openCab.has(c.id));
     const nShown=list.filter(visible).length;
-    const wrap=h("div",{class:"clist"},h("div",{class:"clhd"},h("span",{},trackQ.trim()?nShown+" of "+list.length+" cables match":"Cables ("+list.length+") · tap one to see its steps"),
-        h("button",{type:"button",class:"btn ghost small",onclick:()=>{if(anyOpen)openCab.clear();else list.filter(visible).forEach(c=>openCab.add(c.id));draw();}},anyOpen?"Close all":"Open all")),
+    const wrap=h("div",{class:"clist"},h("div",{class:"clhd"},h("span",{},trackQ.trim()?nShown+" of "+list.length+" cables match":trackGroup?"Cables ("+list.length+") · tap a "+(trackGroup==="pull"||trackGroup==="row"?"row":"group")+" to see its cables":"Cables ("+list.length+") · tap one to see its steps"),
+        (()=>{const gks=trackGroup?[...new Set(list.map(c=>cabVal(c,trackGroup)||"(none)"))]:[],gOpen=gks.some(g=>openGrp.has(g)),any=trackGroup?gOpen:anyOpen;
+          return h("button",{type:"button",class:"btn ghost small",onclick:()=>{if(trackGroup){if(gOpen)gks.forEach(g=>openGrp.delete(g));else gks.forEach(g=>openGrp.add(g));}else if(anyOpen)openCab.clear();else list.filter(visible).forEach(c=>openCab.add(c.id));draw();}},any?"Close all":"Open all");})()),
       body.length?body:h("div",{class:"status",style:"padding:12px"},trackQ.trim()?"No cable matches \""+trackQ.trim()+"\".":"Every cable is finished."));
     box.append(wrap);
     const mc=materialCheck(j);if(mc.some(b=>b.ft>0)){box.append(h("details",{},h("summary",{},"Material check"+(mc.some(b=>b.short)?" · short":"")),h("div",{style:"margin-top:6px"},materialTable(mc,false))));}
