@@ -3969,7 +3969,9 @@ const LABEL_DEF={top:"to",ru:false,sep:","};
 const labelFmt=j=>Object.assign({},LABEL_DEF,(j&&j.labelFmt)||{});
 function labelSide(txt,f){let t=String(txt||"").replace(/\([^)]*\)/g," ");if(!f.ru)t=t.replace(/\bRU\s*#?\d+\b/gi," ");
   const parts=t.split(/[\s,;]+/).filter(Boolean);return parts.join(f.sep===" "?" ":f.sep);}
-function labelAuto(j,c,fm){const f=fm||labelFmt(j),a=labelSide(c.from,f),b=labelSide(c.to,f);return f.top==="to"?[b,a]:[a,b];}
+/* Cat6 label-workbook cables: line 1 = cabinet + port (1.14-1.801), line 2 = device name when there is one (cameras) */
+const isPortCable=c=>!!(c&&c.rack&&c.type&&!c.to);
+function labelAuto(j,c,fm){if(isPortCable(c))return [c.name,c.from||""];const f=fm||labelFmt(j),a=labelSide(c.from,f),b=labelSide(c.to,f);return f.top==="to"?[b,a]:[a,b];}
 function labelLines(j,c){const auto=labelAuto(j,c),own=Array.isArray(c.label)?c.label:[];return [own[0]||auto[0]||"",own[1]||auto[1]||""];}
 let xlsxLib=null;
 function loadXlsx(){if(window.XLSX)return Promise.resolve(window.XLSX);if(xlsxLib)return xlsxLib;
@@ -3981,8 +3983,7 @@ async function labelsExcel(j,cabs){try{const X=await loadXlsx();
   X.writeFile(wb,(j.name||"cables").replace(/[^\w\- ]+/g,"").trim()+" labels.xlsx");toast("Label sheet downloaded");}
   catch(e){toast("Couldn't make the Excel file. Check your signal and try again.");}}
 /* print-ready label workbook: one sheet per cabinet + system, labels grouped by pull, pulls in order */
-function pullLabelLines(j,c){if(Array.isArray(c.label)&&c.label.some(Boolean))return [c.label[0]||"",c.label[1]||""];
-  if(c.rack&&c.type)return [c.name,c.from||""];return labelLines(j,c);}
+function pullLabelLines(j,c){return labelLines(j,c);}
 async function pullLabelWorkbook(j,o){o=o||{};try{const X=await loadXlsx();const cs=cablesOf(j);if(!cs.length){toast("No cables on this job yet");return;}
   const groups=new Map();
   cs.forEach(c=>{const k=c.rack&&c.type?c.rack+" "+c.type:(c.sheet||"Cables");if(!groups.has(k))groups.set(k,{rack:c.rack||"",type:c.type||"",list:[]});groups.get(k).list.push(c);});
@@ -4010,17 +4011,27 @@ function pullLabelSheet(jid){const j=S.jobs.find(x=>x.id===jid);if(!j)return;con
     h("label",{class:"check",for:"plLoose",style:"text-transform:none;letter-spacing:0"},loose,"Also add labels not in a pull yet (at the end of each sheet)"),
     h("p",{class:"status",style:"margin:0"},"Columns: Line 1, Line 2, Pull, Cable. Point the EZ-Mark at Line 1 and Line 2."),
     h("button",{type:"button",class:"btn",onclick:()=>pullLabelWorkbook(S.jobs.find(x=>x.id===jid)||j,{gap:gap.checked,loose:loose.checked})},"⬇ Download label workbook"))]);}
-function cableLabels(jid){const m=MGR();let q="",edits={},fmt=null;
+function cableLabels(jid){const m=MGR();let q="",edits={},fmt=null,fCab="",fSys="";
+  try{fCab=localStorage.getItem("ctCab:"+jid)||"";fSys=localStorage.getItem("ctSys:"+jid)||"";}catch(e){}
   const box=h("div",{class:"full stack"});
   const qIn=h("input",{type:"search",class:"full-in",placeholder:"Search cables","aria-label":"Search cables",autocomplete:"off"});qIn.addEventListener("input",()=>{q=qIn.value;drawList();});
   const opts=h("div",{style:"display:flex;gap:8px;flex-wrap:wrap;align-items:center"}),list=h("div",{class:"stack",style:"gap:6px"}),foot=h("div",{style:"display:flex;gap:8px;flex-wrap:wrap;position:sticky;bottom:0;background:var(--panel);padding:8px 0"});
   const job=()=>S.jobs.find(x=>x.id===jid);
   const sel=(lbl,key,choices)=>{const f=fmt||labelFmt(job());const s_=h("select",{"aria-label":lbl,disabled:!m,style:"font:inherit;font-size:.85rem;padding:5px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink)"},choices.map(([v,l])=>h("option",{value:v,selected:String(f[key])===String(v)},l)));
     s_.addEventListener("change",()=>{fmt=Object.assign({},fmt||labelFmt(job()),{[key]:key==="ru"?s_.value==="true":s_.value});drawList();drawFoot();});return s_;};
-  function drawOpts(){opts.textContent="";opts.append(h("span",{class:"status"},"Top line:"),sel("Top line","top",[["to","To (destination)"],["from","From (source)"]]),
+  function drawOpts(){opts.textContent="";const j=job(),cs=j?cablesOf(j):[];
+    const cabL=j?cabsOf(j).filter(cb=>cs.some(c=>c.rack===cb)):[];
+    if(cabL.length){if(fCab&&!cabL.includes(fCab))fCab="";const sysL=[...new Set(cs.filter(c=>!fCab||c.rack===fCab).map(c=>c.type).filter(Boolean))].sort((a,b)=>sysRank(j,a)-sysRank(j,b)||natCmp(a,b));if(fSys&&!sysL.includes(fSys))fSys="";
+      const st="font:inherit;font-size:.95rem;padding:7px 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);font-weight:600";
+      const cSel=h("select",{"aria-label":"Cabinet",style:st},h("option",{value:""},"All cabinets"),cabL.map(cb=>h("option",{value:cb,selected:fCab===cb},"Cabinet "+cb)));
+      const sSel=h("select",{"aria-label":"System",style:st},h("option",{value:""},"All systems"),sysL.map(sy=>h("option",{value:sy,selected:fSys===sy},sy)));
+      cSel.addEventListener("change",()=>{fCab=cSel.value;fSys="";drawOpts();drawList();});sSel.addEventListener("change",()=>{fSys=sSel.value;drawList();});
+      opts.append(cSel,sSel);}
+    if(cs.length&&cs.every(isPortCable)){opts.append(h("span",{class:"status",style:"flex-basis:100%"},"Line 1 is the cabinet and port (1.14-1.801). Cameras add the camera name on line 2. WAPs use the AP label lines if you loaded them."));return;}
+    opts.append(h("span",{class:"status"},"Top line:"),sel("Top line","top",[["to","To (destination)"],["from","From (source)"]]),
     sel("RU numbers","ru",[["false","Leave out RU"],["true","Keep RU"]]),sel("Separator","sep",[[",","comma ( , )"],[";","semicolon ( ; )"],[" ","space"]]));}
   function drawList(){const j=job();if(!j)return;const f=fmt||labelFmt(j);list.textContent="";
-    const cs=cablesOf(j).filter(c=>cableMatch(j,c,q));
+    const cs=cablesOf(j).filter(c=>(!fCab||c.rack===fCab)&&(!fSys||c.type===fSys)&&cableMatch(j,c,q));
     if(!cs.length)list.append(h("p",{class:"status"},"No cable matches."));
     cs.forEach(c=>{const auto=labelAuto(j,c,f),own=edits[c.id]||(Array.isArray(c.label)?c.label:["",""]);
       const inp=i=>{const el=h("input",{class:"full-in mono",value:own[i]||"",placeholder:auto[i]||"(empty)",disabled:!m,"aria-label":c.name+" label line "+(i+1),style:"font-size:.85rem;padding:6px 8px"});
@@ -4031,7 +4042,7 @@ function cableLabels(jid){const m=MGR();let q="",edits={},fmt=null;
       const upd={cables,updatedAt:Date.now()};if(fmt)upd.labelFmt=fmt;try{await db.collection("jobs").doc(j.id).update(upd);edits={};fmt=null;toast("Labels saved");drawFoot();drawList();}catch(err){writeErr(err);}}},"Save labels"));
     foot.append(h("button",{type:"button",class:"btn"+(m&&(nEd||fmtCh)?" ghost":""),onclick:()=>{if(Object.keys(edits).length||fmt){toast("Save first so the sheet matches");return;}const jj=job();if(jj)labelsExcel(jj,cablesOf(jj));}},"⬇ Excel for EZ-Mark"),
       h("button",{type:"button",class:"btn ghost",onclick:()=>{if(Object.keys(edits).length||fmt){toast("Save first so the sheet matches");return;}closeSheet();setTimeout(()=>pullLabelSheet(jid),60);}},"⬇ Sheets by pull"));}
-  box.append(h("p",{class:"status",style:"margin:0"},"Two lines per cable, built from each cable's From and To. "+(m?"Type over a line to change it; tap Save labels to keep it. ":"")+"The Excel file has one row per cable (Cable, Line 1, Line 2): in Easy-Mark, import it and match Line 1 / Line 2 to the label's text lines."),
+  box.append(h("p",{class:"status",style:"margin:0"},(cablesOf(job()||{}).every(isPortCable)?"Two lines per cable. ":"Two lines per cable, built from each cable's From and To. ")+(m?"Type over a line to change it; tap Save labels to keep it. ":"")+"The Excel file has one row per cable (Cable, Line 1, Line 2): in Easy-Mark, import it and match Line 1 / Line 2 to the label's text lines."),
     opts,qIn,list,foot);
   drawOpts();drawList();drawFoot();
   openView("Labels · "+(job()||{}).name,[box]);$(".sheet").classList.add("wide");liveSheet=()=>{if(!Object.keys(edits).length&&!fmt)drawList();};}
