@@ -17,6 +17,7 @@ Live at https://timrwillis.github.io/crew-lookahead (GitHub Pages from `main` of
 - Cables: `job.cables`, `job.steps`; scan steps `scan_cable/scan_src/scan_dst` (or the job's own matching steps via `scanLike`). Scanning: `scanCode` (phones: camera photo first, live scanner backup; laptops: handheld/upload only), `decodePhoto`, `applyCodesToCk(jid,cid,codes,photo,hint,{by,batch,keepRepeat})`, `uploadScans` for photos sent by others.
 - Time off: crew only load their own (`where uid==me`), entries carry `uid` (synced by managers' apps).
 - Live Google Sheet: `feeds/<random key>` doc with csv/history/summary + `data` JSON; Apps Script from `feedScript(j)` builds a Cables list + a tab per cable.
+- Check list items 2-5 are derived in `ckOf` from sign-offs (2+3 Ported, 4 VFL/Tested, 5 = lead/super who recorded them once 1-4 done), marked `fromSteps`, never saved (`saveCk` strips them); `ckRaw` = stored only.
 - Quick tasks: `kind:"quick"`, `quick.pri` (critical/high/normal/low), `quick.client`.
 
 ## Working on it

@@ -2992,7 +2992,26 @@ function signOff(jid,cid,sid){
 /* ===== SCANNING + CABLE CHECKLIST (Torpedo cable installation check list) ===== */
 const CK_SCANS=[["serial","Cable Serial #","the S/N barcode on the cable label (the label's QR code works too)"],["qr","Cable QR code URL","the QR code on the cable label"],["src","Source Patch Panel Serial #","the QR code on the source enclosure"],["dst","Dest Patch Panel Serial #","the QR code on the destination enclosure"]];
 const CK_ITEMS=["1. Validate Cable Serial Number, matching QR code SRC & Dest PP","2. Fan-out Pressed into the matching slot ( #1 -- #X)","3. Connectors Plug-in based on matching color and numbers","4. Light Test to ensure connectivity every #1 and #12","5. Visual Check Off above Four Items by 2nd person"];
-const ckOf=(j,cid)=>((j.marks||{})[cid]||{})._ck||{};
+const ckRaw=(j,cid)=>((j.marks||{})[cid]||{})._ck||{};
+/* check list items 2-5 fill themselves from the sign-off steps (only where nobody checked them by hand):
+   2 + 3 = whoever signed off Ported, 4 = whoever signed off VFL (or Tested),
+   5 = the lead/super who recorded those sign-offs, once 1-4 are all done. Never saved: undoing a step clears them. */
+const isMgrUid=u=>!!u&&(u===ownerUid||!!(roles[u]&&["boss","lead"].includes(roles[u].role)));
+const ckPortStep=j=>stepsOf(j).find(s=>/port/i.test(s.name||""));
+const ckVflStep=j=>stepsOf(j).find(s=>/vfl|light/i.test(s.name||""))||stepsOf(j).find(s=>/test/i.test(s.name||""));
+function ckStepItem(j,cid,st){if(!st)return null;const m=markOf(j,cid,st.id);if(!m||!m.at)return null;const pp=partsOf(j,cid,st.id);
+  const nm=[...new Set(pp.map(partWho).filter(x=>x&&x!=="Someone"))],tids=[...new Set(pp.map(p=>p.techId).filter(Boolean))];
+  return{at:m.at,by:m.by||"",techId:tids.length===1?tids[0]:"",name:nm.length?nm.join(", "):realName(m.by),fromSteps:st.name,signers:[...pp.map(p=>p.by),m.by].filter(Boolean)};}
+function ckOf(j,cid){const ck=ckRaw(j,cid);
+  try{const have=n=>ck.items&&ck.items[n]&&ck.items[n].at,items=Object.assign({},ck.items||{});let add=false;
+    const port=ckStepItem(j,cid,ckPortStep(j)),vfl=ckStepItem(j,cid,ckVflStep(j));
+    if(port){[2,3].forEach(n=>{if(!have(n)){items[n]=port;add=true;}});}
+    if(vfl&&!have(4)){items[4]=vfl;add=true;}
+    if(!have(5)&&[1,2,3,4].every(n=>items[n]&&items[n].at)){
+      const src=[items[4],items[3],items[2]].filter(x=>x&&x.fromSteps);let who="",at=0;
+      src.forEach(x=>{const u=[...(x.signers||[])].reverse().find(isMgrUid);if(u&&x.at>=at){who=u;at=x.at;}});
+      if(who){items[5]={at,by:who,name:realName(who),fromSteps:"sign-off",remark:""};add=true;}}
+    return add?Object.assign({},ck,{items}):ck;}catch(e){return ck;}}
 const ckScanN=ck=>CK_SCANS.filter(([k])=>(ck[k]||"").trim()).length;
 const ckItemN=ck=>CK_ITEMS.filter((_,i)=>ck.items&&ck.items[i+1]&&ck.items[i+1].at).length;
 const snFromUrl=u=>{const m=String(u||"").match(/[?&]sn=([^&#\s]+)/i);return m?decodeURIComponent(m[1]):"";};
@@ -3002,13 +3021,13 @@ function ckProblems(ck){const out=[],sn=snFromUrl(ck.qr);
   const i4=ck.items&&ck.items[4],i5=ck.items&&ck.items[5];
   if(i4&&i5&&i4.at&&i5.at&&(i4.techId||i4.by)===(i5.techId||i5.by))out.push("Item 5 should be checked by a 2nd person.");
   return out;}
-async function saveCk(j,cid,ck){const val=Object.assign({},ck,{updatedAt:Date.now()});
+async function saveCk(j,cid,ck){const val=Object.assign({},ck,{updatedAt:Date.now()});if(val.items){val.items=Object.assign({},val.items);Object.keys(val.items).forEach(k=>{if(val.items[k]&&val.items[k].fromSteps)delete val.items[k];});}
   j.marks=Object.assign({},j.marks||{});j.marks[cid]=Object.assign({},j.marks[cid]||{},{_ck:val});
   try{await db.collection("jobs").doc(j.id).update({["marks."+cid+"._ck"]:val,updatedAt:Date.now()});
     if(needsScan(j)){const r=scanStepsOn(j,val),upd={};r.ids.forEach(sid=>{if(!r.on.has(sid)&&markOf(j,cid,sid))upd["marks."+cid+"."+sid]=null;});
       if(Object.keys(upd).length){upd.updatedAt=Date.now();await db.collection("jobs").doc(j.id).update(upd);}}}catch(err){writeErr(err);}}
 const ckDate=at=>{const x=new Date(at);return (x.getMonth()+1)+"/"+x.getDate()+"/"+x.getFullYear();};
-const ckWho=it=>it?(it.techId&&techById(it.techId)?techName(it.techId):realName(it.by)):"";
+const ckWho=it=>it?(it.name&&it.fromSteps?it.name:it.techId&&techById(it.techId)?techName(it.techId):realName(it.by)):"";
 
 /* camera scanner (barcodes + QR). Loads the scanner library the first time it's needed. */
 let scanLib=null;
@@ -3339,8 +3358,8 @@ function ckSheet(jid,cid,back,focus){if(back)ckBack={cid,fn:back};else if(!ckBac
       const rIn=h("input",{type:"text",class:"full-in",placeholder:"Remarks (if any)",value:(it&&it.remark)||""});
       const mine=it&&(it.by===myId);
       box.append(h("div",{class:"ckrow"+(it&&it.at?" ok":"")},h("div",{class:"ckl"},h("div",{},txt),
-          it&&it.at?h("div",{class:"status",style:"color:var(--ok)"},"✓ "+ckWho(it)+" · "+ckDate(it.at)+(it.remark?" · "+it.remark:"")+(it.auto?" (from scans)":"")):(can?rIn:null)),
-        can?h("div",{class:"ckb"},it&&it.at?((mine||MGR())?h("button",{type:"button",class:"linkbtn",onclick:async()=>{const j2=S.jobs.find(x=>x.id===jid),cur=JSON.parse(JSON.stringify(ckOf(j2,cid)));cur.items=cur.items||{};delete cur.items[n];await saveCk(j2,cid,cur);draw();}},"Undo"):null)
+          it&&it.at?h("div",{class:"status",style:"color:var(--ok)"},"✓ "+ckWho(it)+" · "+ckDate(it.at)+(it.remark?" · "+it.remark:"")+(it.auto?" (from scans)":"")+(it.fromSteps?" (from "+it.fromSteps+")":"")):(can?rIn:null)),
+        can?h("div",{class:"ckb"},it&&it.at?((mine||MGR())&&!it.fromSteps?h("button",{type:"button",class:"linkbtn",onclick:async()=>{const j2=S.jobs.find(x=>x.id===jid),cur=JSON.parse(JSON.stringify(ckOf(j2,cid)));cur.items=cur.items||{};delete cur.items[n];await saveCk(j2,cid,cur);draw();}},"Undo"):null)
           :h("button",{type:"button",class:"btn small",onclick:async()=>{const j2=S.jobs.find(x=>x.id===jid),cur=JSON.parse(JSON.stringify(ckOf(j2,cid)));cur.items=cur.items||{};
             const tid=techSel?techSel.value:(me?me.id:"");
             if(n===5){const i4=cur.items[4];if(i4&&i4.techId&&i4.techId===tid&&!confirmed5){confirmed5=true;toast("Item 5 should be a 2nd person. Tap again to sign it anyway.");return;}}
@@ -3496,7 +3515,7 @@ function cableTable(j,asText){const cs=cablesOf(j),ss=stepsOf(j),who=u=>u?realNa
     ss.forEach(st=>{const m=markOf(j,c.id,st.id);if(m&&m.at)log.push([m.at,c.name,rowOf(c),st.name,who(m.by),""]);
       partsOf(j,c.id,st.id).forEach(p=>log.push([p.at,c.name,rowOf(c),st.name+" (part)",partWho(p),partTxt(p)]));});
     CK_SCANS.forEach(([k,l])=>{if(ck[k]&&ck[k+"At"])log.push([ck[k+"At"],c.name,rowOf(c),"Scanned "+l,who(ck[k+"By"]),ck[k]]);});
-    CK_ITEMS.forEach((t,i)=>{const it=(ck.items||{})[i+1];if(it&&it.at)log.push([it.at,c.name,rowOf(c),"Check "+(i+1),ckWho(it),(it.remark||"")+(it.auto?" (from scans)":"")]);});});
+    CK_ITEMS.forEach((t,i)=>{const it=(ck.items||{})[i+1];if(it&&it.at&&!it.fromSteps)log.push([it.at,c.name,rowOf(c),"Check "+(i+1),ckWho(it),(it.remark||"")+(it.auto?" (from scans)":"")]);});});
   log.sort((a,b)=>a[0]-b[0]);
   return{head,rows,logHead:["Date","Cable ID","Row","What","By","Details"],log:log.map(r=>[D(r[0]),...r.slice(1)])};}
 const toCsv=aoa=>aoa.map(r=>r.map(v=>{v=v==null?"":String(v);return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(",")).join("\n");
@@ -3509,7 +3528,7 @@ function cableData(j){const cs=cablesOf(j),ss=stepsOf(j),who=u=>u?realName(u):""
     const hist=[];
     ss.forEach(x=>{const m=markOf(j,c.id,x.id);if(m&&m.at)hist.push([m.at,x.name,who(m.by),""]);partsOf(j,c.id,x.id).forEach(p=>hist.push([p.at,x.name+" (part)",partWho(p),partTxt(p)]));});
     CK_SCANS.forEach(([k,l])=>{if(ck[k]&&ck[k+"At"])hist.push([ck[k+"At"],"Scanned "+l,who(ck[k+"By"]),ck[k]]);});
-    CK_ITEMS.forEach((t,i)=>{const it=(ck.items||{})[i+1];if(it&&it.at)hist.push([it.at,"Check "+(i+1),ckWho(it),(it.remark||"")+(it.auto?" (from scans)":"")]);});
+    CK_ITEMS.forEach((t,i)=>{const it=(ck.items||{})[i+1];if(it&&it.at&&!it.fromSteps)hist.push([it.at,"Check "+(i+1),ckWho(it),(it.remark||"")+(it.auto?" (from scans)":"")]);});
     issuesOf(j,c.id).forEach(i=>hist.push([i.at,"Problem reported",i.techId&&techById(i.techId)?techName(i.techId):who(i.by),issueTxt(j,i)+((i.photos||[]).length?" · "+i.photos.length+" photo(s) in the app":"")]));
     hist.sort((a,b)=>a[0]-b[0]);const last=hist[hist.length-1];
     return{name:c.name,status:st==="done"?"Complete":st==="part"?"In progress":"Not started",done,total:ss.length,
