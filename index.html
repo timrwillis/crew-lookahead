@@ -2997,9 +2997,10 @@ const ckRaw=(j,cid)=>((j.marks||{})[cid]||{})._ck||{};
    2 + 3 = whoever signed off Ported, 4 = whoever signed off VFL (or Tested),
    5 = the lead/super who recorded those sign-offs, once 1-4 are all done. Never saved: undoing a step clears them. */
 const isMgrUid=u=>!!u&&(u===ownerUid||!!(roles[u]&&["boss","lead"].includes(roles[u].role)));
-const ckPortStep=j=>stepsOf(j).find(s=>/port/i.test(s.name||""));
-const ckVflStep=j=>stepsOf(j).find(s=>/vfl|light/i.test(s.name||""))||stepsOf(j).find(s=>/test/i.test(s.name||""));
-function ckStepItem(j,cid,st){if(!st)return null;const m=markOf(j,cid,st.id);if(!m||!m.at)return null;const pp=partsOf(j,cid,st.id);
+const ckPortStep=j=>stepsOf(j).find(s=>/port|fan.?out|plug/i.test(s.name||""));
+const ckVflStep=j=>stepsOf(j).find(s=>/vfl|light/i.test(s.name||""))||stepsOf(j).find(s=>/test/i.test(s.name||"")&&!/scan/i.test(s.name||""));
+function ckStepItem(j,cid,st){if(!st)return null;const pp=partsOf(j,cid,st.id);let m=markOf(j,cid,st.id);
+  if((!m||!m.at)&&pp.length){const l=pp.reduce((a,b)=>(b.at||0)>(a.at||0)?b:a);m={at:l.at,by:l.by};}if(!m||!m.at)return null;
   const nm=[...new Set(pp.map(partWho).filter(x=>x&&x!=="Someone"))],tids=[...new Set(pp.map(p=>p.techId).filter(Boolean))];
   return{at:m.at,by:m.by||"",techId:tids.length===1?tids[0]:"",name:nm.length?nm.join(", "):realName(m.by),fromSteps:st.name,signers:[...pp.map(p=>p.by),m.by].filter(Boolean)};}
 function ckOf(j,cid){const ck=ckRaw(j,cid);
