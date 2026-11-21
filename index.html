@@ -3560,7 +3560,7 @@ async function writeFeed(j,loud){if(!j||!j.feedId||!db)return false;
   catch(e){if(loud){if(e&&e.message==="too big")toast("This job has too much cable data for the live sheet ("+cablesOf(j).length+" cables). Tell Claude so it can split the feed.");else writeErr(e);}return false;}}
 const feedTimers={},feedPending={};
 /* instant sheet refresh: call the Google Sheet's own web app (at most every 15 s per job, the last change always goes through) */
-const HOOK_RE=/^https:\/\/script\.google\.com\/(a\/[^/]+\/)?macros\/s\/[\w-]+\/exec$/;
+const HOOK_RE=/^https:\/\/script\.google\.com\/(a\/macros\/[^/]+\/s|a\/[^/]+\/macros\/s|macros\/s)\/[\w-]+\/exec$/;
 const pingLast={},pingTimer={};
 function pingSheet(j){const u=String(j&&j.feedHook||"").trim();if(!HOOK_RE.test(u))return;
   const go=()=>{pingLast[j.id]=Date.now();try{fetch(u+"?t="+Date.now(),{mode:"no-cors",cache:"no-store",keepalive:true}).catch(()=>{});}catch(e){}};
@@ -3744,8 +3744,12 @@ function liveSheetPanel(jid){const box=h("div",{class:"full stack"});
       (()=>{const hk=h("input",{id:"feedHook",value:j.feedHook||"",placeholder:"https://script.google.com/macros/s/…/exec",class:"full-in",autocomplete:"off",disabled:!m});
         const ok=HOOK_RE.test(String(j.feedHook||"").trim());
         return h("div",{class:"field"},h("label",{for:"feedHook"},"Sheet web app URL (instant updates)"),hk,
-          h("div",{style:"display:flex;gap:8px;flex-wrap:wrap;align-items:center"},m?h("button",{type:"button",class:"btn small",onclick:async()=>{const v=hk.value.trim();
-              if(v&&!HOOK_RE.test(v)){toast("That isn't a Web app URL. It starts with https://script.google.com/ and ends with /exec");return;}
+          h("div",{style:"display:flex;gap:8px;flex-wrap:wrap;align-items:center"},m?h("button",{type:"button",class:"btn small",onclick:async()=>{let v=hk.value.trim().replace(/[?#].*$/,"");
+              if(/^AKfy[\w-]{20,}$/.test(v))v="https://script.google.com/macros/s/"+v+"/exec";
+              else if(/\/macros\/s\/[\w-]+\/dev$/.test(v))v=v.replace(/\/dev$/,"/exec");
+              if(v&&!HOOK_RE.test(v)){toast(/docs\.google\.com\/spreadsheets/.test(v)?"That's the Google Sheet's own link. You need the Web app URL from Apps Script: Deploy → Manage deployments → copy the Web app URL (ends in /exec).":
+                /script\.google\.com\/(u\/\d+\/)?home|\/edit$/.test(v)?"That's the Apps Script editor link. Click Deploy → Manage deployments (or New deployment → Web app) and copy the Web app URL (ends in /exec).":
+                "That isn't a Web app URL. In Apps Script: Deploy → Manage deployments → copy the Web app URL. It starts with https://script.google.com/macros/ and ends with /exec");return;}hk.value=v;
               try{await db.collection("jobs").doc(j.id).update({feedHook:v,updatedAt:Date.now()});j.feedHook=v;toast(v?"Saved. The sheet now updates within seconds of a change.":"Instant updates off");if(v){pingLast[j.id]=0;pingSheet(j);}draw();}catch(err){writeErr(err);}}},"Save"):null,
             h("span",{class:"status"},ok?"✓ Instant updates on":"Off: the sheet updates every minute")));})(),
       h("div",{style:"display:flex;gap:8px;flex-wrap:wrap"},h("button",{type:"button",class:"btn",onclick:()=>copyText(code,"Script copied. Paste it into Apps Script.")},"Copy script"),
