@@ -18,6 +18,7 @@ Live at https://timrwillis.github.io/crew-lookahead (GitHub Pages from `main` of
 - Time off: crew only load their own (`where uid==me`), entries carry `uid` (synced by managers' apps).
 - Live Google Sheet: `feeds/<random key>` doc with csv/history/summary + `data` JSON; Apps Script from `feedScript(j)` builds a Cables list + a tab per cable.
 - Check list items 2-5 are derived in `ckOf` from sign-offs (2+3 Ported, 4 VFL/Tested, 5 = lead/super who recorded them once 1-4 done), marked `fromSteps`, never saved (`saveCk` strips them); `ckRaw` = stored only.
+- Roll call: `attendance/<date>` {marks:{techId:{s:"here"|"out",at,by}}}, managers only (own listener `startAtt`, not in `S`, so missing rules don't break the board). `outOn`/`awayOn` feed `dayInfo` (marked-out people count as off). UI: `rollBar`/`attBtns` on Home → Manpower, `attHistory` view.
 - Quick tasks: `kind:"quick"`, `quick.pri` (critical/high/normal/low), `quick.client`.
 
 ## Working on it

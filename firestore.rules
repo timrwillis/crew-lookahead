@@ -79,6 +79,10 @@ service cloud.firestore {
       allow read: if isMember();
       allow write: if isMgr();
     }
+    // daily roll call (one doc per day, id = the date): only leads and the super see or mark it
+    match /attendance/{day} {
+      allow read, write: if isMgr();
+    }
     match /projects/{id} {
       allow read: if isMember();
       allow write: if isMgr();

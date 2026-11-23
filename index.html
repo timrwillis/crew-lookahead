@@ -315,6 +315,12 @@ details summary{cursor:pointer;color:var(--muted);font-size:.9rem}
 .pchip[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .pchip:disabled{opacity:1;cursor:default}
 .pchip.off{opacity:.6}
+.pchip.gone{border-color:var(--over);color:var(--over)}
+.attbtns{display:flex;gap:4px}
+.attb{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;padding:6px 10px;font-size:.85rem;font-weight:600;min-height:36px}
+.attb.here[aria-pressed="true"]{background:var(--ok);border-color:var(--ok);color:#fff}
+.attb.out[aria-pressed="true"]{background:var(--over);border-color:var(--over);color:#fff}
+.rollbar{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;justify-content:space-between;padding:8px 10px;border-radius:8px;background:var(--bg);margin-top:4px}
 .movehere{border:1px dashed var(--accent);background:transparent;color:var(--accent);border-radius:8px;padding:7px;font-weight:600;font-size:.85rem;width:100%}
 .hint{position:sticky;top:calc(env(safe-area-inset-top,0px) + 54px);z-index:4;background:var(--ink);color:var(--bg);border-radius:10px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}
 .hint .btn{background:var(--bg);color:var(--ink)}
@@ -816,6 +822,22 @@ const techName=id=>(techById(id)||{}).name||"Removed tech";
 const isPart=o=>+o.hours>0; // a few hours, not the whole day
 const offRec=(tid,d)=>S.timeoff.find(o=>o.techId===tid&&!isPart(o)&&o.start<=d&&d<=(o.end||o.start));
 const offOn=d=>S.timeoff.filter(o=>o.start<=d&&d<=(o.end||o.start));
+/* daily roll call: attendance/<date> {date, marks:{techId:{s:"here"|"out",at,by}}}. Leads and the super only. */
+let ATT={},attErr=false;
+const attOf=(tid,d)=>((ATT[d]||{}).marks||{})[tid]||null;
+const outOn=(tid,d)=>{const m=attOf(tid,d);return !!m&&m.s==="out"&&!offRec(tid,d);};
+const awayOn=(tid,d)=>!!offRec(tid,d)||outOn(tid,d);
+function rollCall(d){const r={here:[],out:[],off:[],unk:[]};activeTechs().forEach(t=>{const a=attOf(t.id,d);if(offRec(t.id,d))r.off.push(t);else if(a&&a.s==="here")r.here.push(t);else if(a&&a.s==="out")r.out.push(t);else r.unk.push(t);});return r;}
+async function setAttMany(d,ids,s){if(!ids.length)return;const prev=ATT[d],marks=Object.assign({},(prev||{}).marks||{}),patch={},now=Date.now();
+  ids.forEach(tid=>{if(s){marks[tid]={s,at:now,by:myId||""};patch[tid]=marks[tid];}else{delete marks[tid];patch[tid]=firebase.firestore.FieldValue.delete();}});
+  ATT[d]=Object.assign({},prev||{},{date:d,marks});memo={};schedule();
+  try{await db.collection("attendance").doc(d).set({date:d,marks:patch,updatedAt:now},{merge:true});
+    if(s==="out")ids.forEach(tid=>logEvent(techName(tid)+" marked not here"+(d===TODAY()?" today":" "+fmtS(d)),{ev:"attend",techId:tid}));}
+  catch(err){if(prev)ATT[d]=prev;else delete ATT[d];memo={};schedule();writeErr(err);}}
+const setAtt=(tid,d,s)=>setAttMany(d,[tid],s);
+function startAtt(){if(!MGR())return;const sid=myId;const go=()=>{if(myId!==sid)return;
+  unsubs.push(db.collection("attendance").onSnapshot(snap=>{attErr=false;const o={};snap.docs.forEach(x=>{o[x.id]=x.data();});ATT=o;memo={};schedule();},
+    err=>{attErr=true;schedule();if(err&&err.code==="permission-denied")setTimeout(go,30000);}));};go();}
 const rechargeCap=()=>+(crewDoc.rechargeHrs||2);
 const rechargeUsed=(tid,ym)=>S.timeoff.filter(o=>o.techId===tid&&o.type==="Recharge"&&(o.start||"").slice(0,7)===ym).reduce((n,o)=>n+(+o.hours>0?+o.hours:rechargeCap()),0);
 const mgrUids=()=>[...new Set([ownerUid,...Object.keys(roles).filter(u=>roles[u]&&["boss","lead"].includes(roles[u].role))])].filter(u=>u&&u!==myId);
@@ -893,11 +915,11 @@ async function setCrew(j,d,ids,just,taskId){
 const sameSet=(a,b)=>a.length===b.length&&a.every(x=>b.includes(x));
 function dayInfo(d){
   const jobs=jobsOn(d),techs=activeTechs();
-  const off=techs.filter(t=>offRec(t.id,d));
+  const off=techs.filter(t=>awayOn(t.id,d));
   const avail=techs.length-off.length;
   const need=jobs.reduce((a,j)=>a+(+j.techs||0),0);
   const firm=jobs.filter(j=>j.conf!=="idea").reduce((a,j)=>a+(+j.techs||0),0);
-  const idle=techs.filter(t=>!offRec(t.id,d)&&!assignOn(t.id,d));
+  const idle=techs.filter(t=>!awayOn(t.id,d)&&!assignOn(t.id,d));
   const short=techs.length>0&&isWeekday(d)&&firm>avail;
   return {jobs,off,avail,need,firm,idle,short,working:avail-idle.length,hasRoster:techs.length>0};
 }
@@ -1084,11 +1106,11 @@ function jobLine(j,s){
     h("span",{class:"jc"},who));
 }
 function dayRow(s){
-  const d=parseD(s),jobs=jobsOn(s),off=activeTechs().filter(t=>offRec(t.id,s));
+  const d=parseD(s),jobs=jobsOn(s),off=activeTechs().filter(t=>MGR()?awayOn(t.id,s):offRec(t.id,s));
   const body=h("div",{class:"dbody"});
   if(!jobs.length)body.append(h("div",{class:"status",style:"padding:6px 2px"},isWeekday(s)?"Nothing scheduled":dayOffLabel(s)));
   jobs.forEach(j=>body.append(jobLine(j,s)));
-  if(off.length)body.append(h("div",{class:"offline"},"Off: "+off.map(t=>t.name+" ("+(offRec(t.id,s).type||"off")+")").join(", ")));
+  if(off.length)body.append(h("div",{class:"offline"},"Off: "+off.map(t=>t.name+" ("+(offRec(t.id,s)?offRec(t.id,s).type||"off":"not here")+")").join(", ")));
   const hd=holidayOn(s);if(hd&&hd.type!=="off")body.append(h("div",{class:"offline",style:"color:var(--accent)"},(hd.name||"Special day")+" · "+hoursTxt(s)));
   const rems=S.messages.filter(m=>isNote(m)&&m.remindOn===s&&!m.done);
   if(rems.length)body.append(h("div",{class:"offline"},"Reminder: "+rems.map(r=>r.text.split("\n")[0]).join(" · ")));
@@ -1368,9 +1390,9 @@ function cableLine(j,task){const cs=cablesOf(j);if(!cs.length||!stepsOf(j).lengt
   const n=st?stepCount(j,st.id):pr.done,tot=st?cs.length:pr.total,lbl=st?st.name+" "+n+"/"+tot:"Cables "+pr.pct+"%";
   return h("button",{type:"button",class:"linkbtn",style:"text-decoration:none;color:var(--ink);display:grid;gap:4px;text-align:left",onclick:()=>cableTracker(j.id)},
     h("span",{class:"status"},lbl+" · tap to mark off"),h("span",{class:"minibar"},h("i",{style:"width:"+Math.round(n*100/Math.max(1,tot))+"%"})));}
-function pchip(tid,ctx){const meId=(myTech()||{}).id,can=MGR()&&!ctx.off;
-  const b=h("button",{type:"button",class:"pchip"+(tid===meId?" me":"")+(ctx.off?" off":""),"aria-pressed":String(picked===tid),disabled:!can,draggable:can?"true":null,
-    onclick:()=>{picked=picked===tid?null:tid;render();}},techName(tid)+(ctx.off?" · "+ctx.off:""));
+function pchip(tid,ctx){const meId=(myTech()||{}).id,can=MGR()&&!ctx.off,gone=!ctx.off&&MGR()&&outOn(tid,TODAY());
+  const b=h("button",{type:"button",class:"pchip"+(tid===meId?" me":"")+(ctx.off?" off":"")+(gone?" gone":""),"aria-pressed":String(picked===tid),disabled:!can,draggable:can?"true":null,
+    onclick:()=>{picked=picked===tid?null:tid;render();}},techName(tid)+(ctx.off?" · "+ctx.off:gone?" · not here":""));
   if(can)b.addEventListener("dragstart",e=>{try{e.dataTransfer.setData("text/plain",tid);}catch(x){}picked=tid;});
   return b;}
 function dropZone(el,target){if(!MGR())return el;
@@ -1412,7 +1434,7 @@ function renderLive(v){
     h("div",{class:"tt"},h("div",{class:"tn"},"Not assigned",h("small",{},info.idle.length+" available"))),
     h("div",{class:"pchips"},info.idle.length?info.idle.map(t=>pchip(t.id,{})):h("span",{class:"status"},"Everyone in today has a job.")),
     picked&&MGR()&&assignOn(picked,d)?h("button",{class:"movehere",type:"button",onclick:()=>{const t=picked;picked=null;moveTech(t,null);}},"Take off assignment"):null,
-    info.off.length?h("div",{class:"pchips"},info.off.map(t=>pchip(t.id,{off:offRec(t.id,d).type||"off"}))):null);
+    info.off.length?h("div",{class:"pchips"},info.off.map(t=>pchip(t.id,{off:offRec(t.id,d)?(offRec(t.id,d).type||"off"):"not here"}))):null);
   grid.append(dropZone(bench,null));
   v.append(grid);
   const wait=waitingItems(d);
@@ -1980,17 +2002,41 @@ function dayHead(v){const t=today();v.append(h("div",{class:"dayline"},h("strong
 function flagPanel(v){const mine=myAlertFlags();if(mine.length)v.append(panel((isOwner?"lead":myRole())==="boss"?"Escalated to you":"Flags",null,h("div",{class:"stack"},mine.map(flagCard)),{full:true,badge:mine.length,cls:"alertp"}));}
 function techToday(tc,d){const o=offOn(d).filter(x=>x.techId===tc.id),full=o.find(x=>!isPart(x)),part=o.find(isPart);
   if(full)return{cls:"out",txt:full.type+(full.note?" · "+full.note:"")};
+  const a=attOf(tc.id,d);if(a&&a.s==="out")return{cls:"out",att:true,txt:"Not here · marked "+fmtTime(a.at)+(a.by&&a.by!==myId&&names[a.by]?" by "+names[a.by].split(" ")[0]:"")};
   const j=assignOn(tc.id,d),tk=j?taskFor(j,tc.id,d):null;
   if(j)return{cls:"",txt:(tk?tk.name+" · ":"")+j.name+(part?" · "+offLabel(part):"")};
   return{cls:"free",txt:"Free · not assigned"+(part?" · "+offLabel(part):"")};}
+function attBtns(tc,d){const a=attOf(tc.id,d),st=a?a.s:"";
+  return h("span",{class:"attbtns"},
+    h("button",{type:"button",class:"attb here","aria-pressed":String(st==="here"),"aria-label":tc.name+" is here",onclick:()=>setAtt(tc.id,d,st==="here"?null:"here")},"✓ Here"),
+    h("button",{type:"button",class:"attb out","aria-pressed":String(st==="out"),"aria-label":tc.name+" is not here",onclick:()=>setAtt(tc.id,d,st==="out"?null:"out")},"✗ Out"));}
+function rollBar(d){if(attErr)return h("div",{class:"rollbar"},h("span",{class:"status",style:"color:var(--over)"},isOwner?"Roll call needs the new database rules: paste firestore.rules into Firebase → Firestore → Rules and tap Publish.":"Roll call isn't turned on yet. Ask Tim to update the database rules."));
+  const r=rollCall(d),n=r.here.length+r.out.length+r.unk.length;
+  return h("div",{class:"rollbar"},h("span",{},h("b",{},"Roll call: "),r.here.length+" here"+(r.out.length?" · "+r.out.length+" not here":"")+(r.unk.length?" · "+r.unk.length+" not checked":n?" · all checked":"")),
+    h("span",{style:"display:flex;gap:6px;flex-wrap:wrap"},r.unk.length?h("button",{type:"button",class:"btn small",onclick:()=>setAttMany(d,r.unk.map(t=>t.id),"here")},r.unk.length===n?"Everyone's here":"Rest are here"):null,
+      h("button",{type:"button",class:"btn ghost small",onclick:()=>attHistory()},"History")));}
+function attHistory(){let ym=TODAY().slice(0,7);const box=h("div",{class:"full stack"});
+  const draw=()=>{box.textContent="";const [y,m]=ym.split("-").map(Number),days=[];
+    for(let x=new Date(y,m-1,1);x.getMonth()===m-1;x=addDays(x,1)){const s=iso(x);if(s<=TODAY()&&isWeekday(s))days.push(s);}
+    const checked=days.filter(s=>ATT[s]&&Object.keys(ATT[s].marks||{}).length);
+    const move=k=>{const nd=new Date(y,m-1+k,1);ym=iso(nd).slice(0,7);draw();};
+    box.append(h("div",{class:"nav"},h("button",{class:"iconbtn",type:"button","aria-label":"Previous month",onclick:()=>move(-1)},"‹"),h("span",{class:"lbl"},fmt(new Date(y,m-1,1),{month:"long",year:"numeric"})),
+      h("button",{class:"iconbtn",type:"button","aria-label":"Next month",disabled:ym>=TODAY().slice(0,7),onclick:()=>move(1)},"›")));
+    box.append(h("p",{class:"status",style:"margin:0"},checked.length?"Roll call taken on "+checked.length+" of "+days.length+" work day"+(days.length===1?"":"s")+".":"No roll call taken this month."));
+    const ts=activeTechs();ts.forEach(t=>{let here=0,off=0,unk=0;const out=[];
+      days.forEach(s=>{const a=attOf(t.id,s),o=offRec(t.id,s);if(o)off++;else if(a&&a.s==="here")here++;else if(a&&a.s==="out")out.push(s);else if(checked.includes(s))unk++;});
+      box.append(h("div",{class:"mprow"+(out.length?" out":"")},h("span",{class:"nm"},t.name,h("small",{},[here+" here",out.length?out.length+" not here ("+out.map(s=>fmtS(s)).join(", ")+")":"",off?off+" off":"",unk?unk+" not checked":""].filter(Boolean).join(" · ")))));});
+    if(!ts.length)box.append(h("p",{class:"status"},"No techs yet."));};
+  draw();openView("Attendance",[box]);}
 function renderLeadDay(v){const d=TODAY();dayHead(v);hoursSuggest(v);flagPanel(v);
   const grid=h("div",{class:"dash"});v.append(grid);
   const techs=activeTechs(),rows=techs.map(tc=>Object.assign({tc},techToday(tc,d))).sort((a,b)=>({out:0,free:1,"":2}[a.cls]-{out:0,free:1,"":2}[b.cls])||natCmp(a.tc.name,b.tc.name));
   const nOut=rows.filter(r=>r.cls==="out").length,nFree=rows.filter(r=>r.cls==="free").length,info=dayInfo(d);
   grid.append(panel("Manpower today",null,[
     isWeekday(d)?h("div",{class:"mini"},h("div",{},h("b",{},techs.length-nOut),h("span",{},"In")),h("div",{class:nOut?"bad":""},h("b",{},nOut),h("span",{},"Out")),h("div",{class:nFree?"bad":""},h("b",{},nFree),h("span",{},"Free")),h("div",{},h("b",{},info.need),h("span",{},"Needed"))):h("div",{class:"status"},"No work scheduled today."),
-    h("div",{},rows.map(r=>h("div",{class:"mprow "+r.cls},h("span",{class:"nm"},r.tc.name,h("small",{},r.txt)),
-      r.cls==="out"?h("span",{class:"pill bad"},"Out"):h("button",{type:"button",class:"btn ghost small",title:"Log a call-in or absence for "+r.tc.name,onclick:()=>callInForm(r.tc.id)},"Mark out")))),
+    isWeekday(d)?rollBar(d):null,
+    h("div",{},rows.map(r=>h("div",{class:"mprow "+r.cls},h("span",{class:"nm"},r.tc.name,h("small",{},r.txt,r.att?[" · ",h("button",{type:"button",class:"linkbtn",onclick:()=>callInForm(r.tc.id)},"Log call-in")]:null)),
+      r.cls==="out"&&!r.att?h("span",{class:"pill bad"},"Out"):isWeekday(d)?attBtns(r.tc,d):h("button",{type:"button",class:"btn ghost small",title:"Log a call-in or absence for "+r.tc.name,onclick:()=>callInForm(r.tc.id)},"Mark out")))),
     h("div",{style:"display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"},h("button",{type:"button",class:"btn small",onclick:()=>{mode="live";setTab("board",true);}},"Move people on the board"))],{full:true,badge:nOut,calm:!nOut}));
   // work that needs people (new tasks from the super first)
   const need=[];const soon=iso(addDays(today(),7)),bossU=new Set(Object.keys(roles).filter(u=>roles[u]&&roles[u].role==="boss"));
@@ -5197,7 +5243,7 @@ document.addEventListener("focusout",()=>{if(schedule.later){schedule.later=fals
 new MutationObserver(()=>{if($("#scrim").hidden&&schedule.later){schedule.later=false;render();}}).observe($("#scrim"),{attributes:true,attributeFilter:["hidden"]});
 
 function stopAll(){unsubs.forEach(u=>{try{u()}catch(e){}});unsubs=[];seenAlerts=null;asksLoaded=false;msgsLoaded=false;dataOn=false;teamLoaded=false;
-  Object.keys(S).forEach(k=>S[k]=[]);roles={};crewDoc={members:{},declined:{}};names={};me_={};isOwner=false;myId=null;}
+  Object.keys(S).forEach(k=>S[k]=[]);ATT={};attErr=false;roles={};crewDoc={members:{},declined:{}};names={};me_={};isOwner=false;myId=null;}
 /* every time-off entry carries the person's login id so the database can show it to them and nobody else on the crew */
 const offSyncing=new Set();
 function syncOffUids(){if(!MGR()||!S.techs.length)return;S.timeoff.forEach(o=>{const u=uidOf(o.techId);if((o.uid||"")===u||offSyncing.has(o.id))return;offSyncing.add(o.id);
@@ -5210,6 +5256,7 @@ function startData(){if(dataOn||!teamLoaded)return;if(!isOwner&&myRole()==="pend
       if(!snap.metadata.fromCache){clearTimeout(timer);$("#status").textContent="Live";}
       if(col==="people")resolveNames();if(col==="asks")asksLoaded=true;if(col==="messages")msgsLoaded=true;if(col==="asks"||col==="jobs"||col==="people"||col==="messages")checkAlerts();schedule();},
     err=>{clearTimeout(timer);if(err&&err.code==="permission-denied"){dataOn=false;schedule();return;}$("#status").textContent="Lost connection. Reload to try again.";}));});
+  startAtt();
 }
 async function startSession(u){
   myId=u.uid;canWrite=true;
