@@ -4660,10 +4660,180 @@ function pullBuilder(jid){
           h("button",{type:"button",class:"btn ghost small",onclick:()=>{const all=gl.every(c=>pSel.has(c.id));gl.forEach(c=>all?pSel.delete(c.id):pSel.add(c.id));draw();}},gl.every(c=>pSel.has(c.id))?"Unpick all":"Pick all"),
           h("button",{type:"button",class:"btn ghost small",onclick:()=>confirmBox("Empty "+pullShort({pull:k})+"?","All "+gl.length+" cables go back to the pool. Checked-off steps stay on the cables.","Empty pull",async()=>{if(await assign(gl,null)){gl.forEach(c=>pSel.delete(c.id));openPulls.delete(k);}})},"Empty this pull")));}
       bottom.append(card);});}
-  box.append(h("div",{style:"display:flex;justify-content:flex-end"},h("button",{type:"button",class:"btn ghost small",onclick:()=>pullLabelSheet(jid,idf&&sys?[idf+" "+sys]:[])},"🏷 EZ-Mark labels by pull")));
-  box.append(h("p",{class:"status",style:"margin:0"},"Pick the cabinet and system, tap where you're pulling (Row, Tray, Wall), then type the label numbers off the prints (801-806, 811) or tap them. Each label can only be in one pull."),top,mid,bottom);
+  box.append(h("div",{style:"display:flex;justify-content:flex-end;gap:6px;flex-wrap:wrap"},h("button",{type:"button",class:"btn ghost small",onclick:()=>{closeSheet();setTimeout(()=>printPulls(jid),60);}},"📄 Pulls from prints"),h("button",{type:"button",class:"btn ghost small",onclick:()=>pullLabelSheet(jid,idf&&sys?[idf+" "+sys]:[])},"🏷 EZ-Mark labels by pull")));
+  box.append(h("p",{class:"status",style:"margin:0"},"Pick the cabinet and system, tap where you're pulling (Row, Tray, Wall), then type the label numbers off the prints (801-806, 811) or tap them. Or mark the pulls in Bluebeam and use 📄 Pulls from prints. Each label can only be in one pull."),top,mid,bottom);
   openView("Build pulls · "+j0.name,[box]);$(".sheet").classList.add("wide");liveSheet=()=>{if(!busy&&document.activeElement!==numIn&&document.activeElement!==whereIn)draw();};draw();}
 
+/* ===== PULLS FROM PRINTS (Bluebeam markups) =====
+   In Bluebeam, draw one Polygon / Cloud / Rectangle / Ellipse / Pen shape around the devices fed by one pull,
+   and put the cabinet + pull in its Comment (or Subject), like "1.14 BMS Row 12". A Polyline counts every
+   device tag close to the line. The PDF is read here in the browser (pdf.js = text + picture, pdf-lib = markups).
+   It is never uploaded or saved anywhere; only the pulls are saved on the job. */
+const PDFJS_BASE="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/",PDFLIB_SRC="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js";
+let pdfLibsLoading=null;
+function loadScriptOnce(src){return new Promise((res,rej)=>{const sc=document.createElement("script");sc.src=src;sc.onload=res;sc.onerror=()=>{sc.remove();rej(new Error("load"));};document.head.append(sc);});}
+function loadPdfLibs(){if(window.pdfjsLib&&window.PDFLib)return Promise.resolve();
+  const PDFJS_ALT="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/";let base=PDFJS_BASE;
+  const pdfjs=()=>window.pdfjsLib?0:loadScriptOnce(base+"pdf.min.js").catch(()=>{base=PDFJS_ALT;return loadScriptOnce(base+"pdf.min.js");});
+  const plib=()=>window.PDFLib?0:loadScriptOnce(PDFLIB_SRC).catch(()=>loadScriptOnce("https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"));
+  return pdfLibsLoading||(pdfLibsLoading=Promise.all([pdfjs(),plib()])
+    .then(()=>{window.pdfjsLib.GlobalWorkerOptions.workerSrc=base+"pdf.worker.min.js";}).catch(e=>{pdfLibsLoading=null;throw e;}));}
+const PP_TOOLNAMES=/^(polygon|cloud|cloud\+?|rectangle|square|ellipse|circle|polyline|pen|ink|highlight|highlighter|line|area|shape|markup)$/i;
+const ppNorm=s=>String(s||"").toUpperCase().replace(/\s+/g,"");
+/* markups from every page: [{type,closed,pts:[[x,y]...] (PDF points), color:[r,g,b] 0-255, text, subj, contents}] */
+async function ppReadMarkups(bytes){const L=window.PDFLib,{PDFDocument,PDFName,PDFArray,PDFDict,PDFNumber,PDFString,PDFHexString}=L;
+  const doc=await PDFDocument.load(bytes,{ignoreEncryption:true,updateMetadata:false});
+  const nm=v=>v instanceof PDFName?String(v).replace(/^\//,""):"";
+  const st=v=>v instanceof PDFString||v instanceof PDFHexString?v.decodeText():"";
+  const nums=(d,k)=>{const a=d.lookup(PDFName.of(k));if(!(a instanceof PDFArray))return null;const o=[];for(let i=0;i<a.size();i++){const x=a.lookup(i);if(x instanceof PDFNumber)o.push(x.asNumber());else if(x instanceof PDFArray){for(let q=0;q<x.size();q++){const y=x.lookup(q);if(y instanceof PDFNumber)o.push(y.asNumber());}}}return o;};
+  const pairs=a=>{const o=[];for(let i=0;i+1<a.length;i+=2)o.push([a[i],a[i+1]]);return o;};
+  return doc.getPages().map(pg=>{const out=[];let ann;try{ann=pg.node.lookup(PDFName.of("Annots"),PDFArray);}catch(e){ann=null;}if(!ann)return out;
+    for(let i=0;i<ann.size();i++){let a;try{a=ann.lookup(i,PDFDict);}catch(e){continue;}if(!a)continue;
+      const type=nm(a.lookup(PDFName.of("Subtype")));const rect=nums(a,"Rect")||[];
+      let pts=null,closed=true;
+      if(type==="Polygon"){pts=pairs(nums(a,"Vertices")||[]);}
+      else if(type==="PolyLine"){pts=pairs(nums(a,"Vertices")||[]);closed=false;}
+      else if(type==="Line"){pts=pairs(nums(a,"L")||[]);closed=false;}
+      else if(type==="Square"||type==="Highlight"&&!nums(a,"QuadPoints")){if(rect.length===4){const [x1,y1,x2,y2]=rect;pts=[[x1,y1],[x2,y1],[x2,y2],[x1,y2]];}}
+      else if(type==="Highlight"){const q=pairs(nums(a,"QuadPoints")||[]);if(q.length>=4){const xs=q.map(p=>p[0]),ys=q.map(p=>p[1]);pts=[[Math.min(...xs),Math.min(...ys)],[Math.max(...xs),Math.min(...ys)],[Math.max(...xs),Math.max(...ys)],[Math.min(...xs),Math.max(...ys)]];}}
+      else if(type==="Circle"){if(rect.length===4){const cx=(rect[0]+rect[2])/2,cy=(rect[1]+rect[3])/2,rx=Math.abs(rect[2]-rect[0])/2,ry=Math.abs(rect[3]-rect[1])/2;pts=[...Array(36)].map((_,k)=>[cx+rx*Math.cos(k*Math.PI/18),cy+ry*Math.sin(k*Math.PI/18)]);}}
+      else if(type==="Ink"){const il=a.lookup(PDFName.of("InkList"));if(il instanceof PDFArray){pts=[];for(let q=0;q<il.size();q++){const s=il.lookup(q);if(s instanceof PDFArray){const n=[];for(let z=0;z<s.size();z++){const y=s.lookup(z);if(y instanceof PDFNumber)n.push(y.asNumber());}pts.push(...pairs(n));}}
+        /* a pen stroke that ends near where it started is a loop around devices; otherwise treat it like a line */
+        if(pts.length>2){const a0=pts[0],z=pts[pts.length-1],xs=pts.map(p=>p[0]),ys=pts.map(p=>p[1]),span=Math.max(Math.max(...xs)-Math.min(...xs),Math.max(...ys)-Math.min(...ys));closed=Math.hypot(a0[0]-z[0],a0[1]-z[1])<span*.25;}}}
+      if(!pts||pts.length<2)continue;
+      const c=nums(a,"C")||[],color=c.length>=3?c.slice(0,3).map(v=>Math.round(v*255)):[230,80,0];
+      const subj=st(a.lookup(PDFName.of("Subj"))).trim(),contents=st(a.lookup(PDFName.of("Contents"))).trim();
+      out.push({type,closed:closed&&pts.length>2,pts,color,subj,contents});}
+    return out;});}
+/* every bit of text on a page with its middle point in PDF points */
+async function ppReadText(page){const tc=await page.getTextContent(),it=tc.items.filter(t=>t.str&&t.str.trim());
+  const pos=t=>{const [a,b,c,d,e,f]=t.transform,len=Math.hypot(a,b)||1,ux=a/len,uy=b/len,ht=Math.hypot(c,d)||t.height||6,w=t.width||0;
+    return {x:e+ux*w/2-uy*ht*.4,y:f+uy*w/2+ux*ht*.4,ux,uy,w,ht,e,f};};
+  const out=[];it.forEach((t,i)=>{const p=pos(t);out.push(Object.assign({s:t.str},p));
+    const n=it[i+1];if(n){const q=pos(n);if(Math.hypot(q.e-(p.e+p.ux*p.w),q.f-(p.f+p.uy*p.w))<p.ht*1.2)out.push(Object.assign({s:t.str+n.str,joined:true},p,{x:(p.x+q.x)/2,y:(p.y+q.y)/2,w:p.w+q.w}));}});
+  return out;}
+function ppInside(pt,poly){let c=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const [xi,yi]=poly[i],[xj,yj]=poly[j];if(((yi>pt[1])!==(yj>pt[1]))&&(pt[0]<(xj-xi)*(pt[1]-yi)/((yj-yi)||1e-9)+xi))c=!c;}return c;}
+function ppNear(pt,line,r){for(let i=0;i+1<line.length;i++){const [x1,y1]=line[i],[x2,y2]=line[i+1],dx=x2-x1,dy=y2-y1,L=dx*dx+dy*dy;let t=L?((pt[0]-x1)*dx+(pt[1]-y1)*dy)/L:0;t=Math.max(0,Math.min(1,t));if(Math.hypot(pt[0]-(x1+t*dx),pt[1]-(y1+t*dy))<=r)return true;}return false;}
+/* tag → cables. Keys: the cable ID, its port part (1.801), the device name, and the print label lines. Plain numbers are skipped (too many on a print). */
+function ppTagIndex(cs){const m=new Map(),add=(k,c)=>{k=ppNorm(k);if(k.length<3||/^\d+$/.test(k))return;if(!m.has(k))m.set(k,new Set());m.get(k).add(c);};
+  cs.forEach(c=>{add(c.name,c);const i=String(c.name||"").indexOf("-");if(i>0)add(c.name.slice(i+1),c);add(c.from,c);add(c.tag,c);(Array.isArray(c.label)?c.label:[]).forEach(l=>add(l,c));});return m;}
+function ppTokens(s){const t=String(s||"").trim(),o=new Set([t]);t.split(/[\s,;()]+/).forEach(x=>{if(x)o.add(x);});return [...o];}
+function ppHue([r,g,b]){const mx=Math.max(r,g,b),mn=Math.min(r,g,b);if(mx-mn<40)return null;let hh;if(mx===r)hh=((g-b)/(mx-mn))%6;else if(mx===g)hh=(b-r)/(mx-mn)+2;else hh=(r-g)/(mx-mn)+4;hh*=60;if(hh<0)hh+=360;return hh;}
+function ppColorSys(col){const hh=ppHue(col);if(hh==null)return "";if(hh<20||hh>=330)return "Cameras";if(hh>=80&&hh<170)return "WAPs";if(hh>=180&&hh<260)return "BMS";return "";}
+function ppPullName(raw,cab,n,sheet){let t=String(raw||"").replace(/\r/g," ").trim();
+  if(cab)t=t.split(cab).join(" ");
+  t=t.replace(/\bcabinet\b|\bcab\b|\bidf\b|\bbms\b|\bcameras?\b|\bcams?\b|\bwaps?\b|\baps?\b|\baccess points?\b/gi," ").replace(/^[\s\-–—·:,|/]+|[\s\-–—·:,|/]+$/g,"").replace(/\s{2,}/g," ").trim();
+  const m=t.match(/^(row|tray|wall)s?\s*#?\s*(.*)$/i);if(m)t=m[1].toLowerCase()+(m[2]?" "+m[2]:"");
+  return t||(sheet?sheet+" ":"")+"area "+n;}
+/* turn markups + text into proposed pulls */
+function ppBuild(j,pages,reach){const cs=cablesOf(j).filter(c=>c.rack&&c.type),idx=ppTagIndex(cs),cabs=[...new Set(cs.map(c=>c.rack))].sort((a,b)=>b.length-a.length);
+  const seen=new Map(),props=[],loose=[];let shapeNo=0;
+  pages.forEach((pg,pi)=>{const onPage=new Map();
+    const pageSets=[];pg.text.forEach(t=>{ppTokens(t.s).forEach(tok=>{const hit=idx.get(ppNorm(tok));if(hit)pageSets.push([...hit]);});});
+    pg.shapes.forEach(sh=>{shapeNo++;sh.no=shapeNo;const txt=(sh.contents||"")+" "+(PP_TOOLNAMES.test(sh.subj)?"":sh.subj||"");
+      const cab=cabs.find(x=>new RegExp("(^|[^\\d.])"+x.replace(/\./g,"\\.")+"($|[^\\d])").test(txt))||"";
+      let sys=/bms/i.test(txt)?"BMS":/\bcam/i.test(txt)?"Cameras":/\bwaps?\b|\baps?\b|access point/i.test(txt)?"WAPs":"";const sysFrom=sys?"comment":"";
+      const name=ppPullName(sh.contents||(PP_TOOLNAMES.test(sh.subj)?"":sh.subj),cab,shapeNo,pg.label);
+      const hits=new Map(),amb=[];
+      pg.text.forEach(t=>{const pt=[t.x,t.y];if(!(sh.closed?ppInside(pt,sh.pts):ppNear(pt,sh.pts,reach*pg.size)))return;
+        ppTokens(t.s).forEach(tok=>{const set=idx.get(ppNorm(tok));if(!set)return;let list=[...set].filter(c=>(!cab||c.rack===cab)&&(!sys||sysName(c.type)===sys||c.type===sys));
+          if(!list.length)return;const byRack=new Set(list.map(c=>c.rack+"|"+c.type));
+          if(list.length>1&&byRack.size>1){if(!amb.includes(tok))amb.push(tok);return;}
+          list.forEach(c=>{if(!hits.has(c.id))hits.set(c.id,{c,t});});});});
+      /* no system in the comment: use the shape color if it matches a system that's in the shape */
+      if(!sys){const cs2=ppColorSys(sh.color),inSh=new Set([...hits.values()].map(x=>sysName(x.c.type)));if(cs2&&inSh.has(cs2)&&inSh.size>1){sys=cs2;[...hits.keys()].forEach(k=>{if(sysName(hits.get(k).c.type)!==sys)hits.delete(k);});}}
+      sh.hits=[...hits.values()];sh.amb=amb;sh.cab=cab;sh.sys=sys;
+      const groups=new Map();
+      sh.hits.forEach(x=>{const c=x.c;if(seen.has(c.id)){x.dup=seen.get(c.id);return;}seen.set(c.id,shapeNo);const g=c.rack+"|"+c.type;if(!groups.has(g))groups.set(g,[]);groups.get(g).push(c);});
+      if(!groups.size)props.push({shape:sh,page:pi,name,rack:cab,type:sys,cables:[],empty:true,amb,dups:sh.hits.filter(x=>x.dup).map(x=>x.c)});
+      [...groups.entries()].forEach(([g,list])=>{const [rack,type]=g.split("|");list.sort((a,b)=>natCmp(a.name,b.name));
+        props.push({shape:sh,page:pi,name,rack,type,cables:list,amb,dups:sh.hits.filter(x=>x.dup).map(x=>x.c),on:true});});});
+    /* a tag that fits cables in two cabinets only counts as missed if none of them got picked up */
+    pageSets.forEach(list=>{if(list.some(c=>seen.has(c.id)))return;if(new Set(list.map(c=>c.rack)).size>1)return;list.forEach(c=>onPage.set(c.id,c));});
+    pg.loose=[...onPage.values()];});
+  /* cables seen on a sheet that no shape picked up */
+  const looseAll=new Map();pages.forEach(pg=>(pg.loose||[]).forEach(c=>{if(!seen.has(c.id))looseAll.set(c.id,c);}));
+  return {props,loose:[...looseAll.values()].sort((a,b)=>natCmp(a.rack,b.rack)||natCmp(a.name,b.name)),shapes:shapeNo};}
+function printPulls(jid){
+  const job=()=>S.jobs.find(x=>x.id===jid);const j0=job();if(!j0)return;
+  let pages=[],files=[],res=null,ovName={},ovOff=new Set(),reach=.012,moveOld=false,busy=false,showPg=-1;
+  const box=h("div",{class:"full stack"}),file=h("input",{type:"file",id:"ppFile",accept:"application/pdf,.pdf",multiple:true}),out=h("div",{class:"stack"});
+  const back=()=>{closeSheet();setTimeout(()=>pullBuilder(jid),60);};
+  file.addEventListener("change",async()=>{const fl=[...file.files];if(!fl.length)return;out.textContent="";out.append(h("p",{class:"status"},"Reading the prints on this device…"));
+    try{await loadPdfLibs();}catch(e){out.textContent="";out.append(h("p",{class:"err"},"Couldn't load the print reader. Check your connection and try again."));return;}
+    pages=[];ovName={};ovOff=new Set();showPg=-1;files=fl.map(f=>f.name);
+    for(const f of fl){try{const bytes=new Uint8Array(await f.arrayBuffer());const marks=await ppReadMarkups(bytes.slice());
+        const pdf=await window.pdfjsLib.getDocument({data:bytes.slice(),isEvalSupported:false}).promise;
+        for(let p=1;p<=pdf.numPages;p++){const page=await pdf.getPage(p),vp=page.getViewport({scale:1}),[x0,y0,x1,y1]=page.view;
+          const text=await ppReadText(page),base=f.name.replace(/\.pdf$/i,"");
+          pages.push({file:f.name,num:p,label:pdf.numPages>1?base+" p"+p:base,page,text,shapes:marks[p-1]||[],size:Math.max(x1-x0,y1-y0),w:vp.width});}}
+      catch(e){out.append(h("p",{class:"err"},"Couldn't read "+f.name+". Save it again from Bluebeam as a PDF and try once more."));}}
+    draw();});
+  function canvasFor(pi){const pg=pages[pi],wrap=h("div",{style:"position:relative;overflow:auto;max-height:70vh;border:1px solid var(--line);border-radius:8px;background:#fff"});
+    const cw=Math.min(2200,Math.max(900,(box.clientWidth||600)*(window.devicePixelRatio||1)*1.6)),vp=pg.page.getViewport({scale:cw/pg.w});
+    const cv=h("canvas",{width:Math.round(vp.width),height:Math.round(vp.height),style:"width:"+Math.round(vp.width/(window.devicePixelRatio||1))+"px;max-width:none;display:block"});
+    wrap.append(cv);const ctx=cv.getContext("2d");
+    pg.page.render({canvasContext:ctx,viewport:vp}).promise.then(()=>{const P=(x,y)=>vp.convertToViewportPoint(x,y),lw=Math.max(2,cv.width/600);
+      pg.shapes.forEach(sh=>{ctx.save();ctx.lineWidth=lw*1.5;ctx.strokeStyle="rgb("+sh.color.join(",")+")";ctx.fillStyle="rgba("+sh.color.join(",")+",.12)";ctx.beginPath();
+        sh.pts.forEach(([x,y],i)=>{const [a,b]=P(x,y);i?ctx.lineTo(a,b):ctx.moveTo(a,b);});if(sh.closed){ctx.closePath();ctx.fill();}ctx.stroke();
+        const [lx,ly]=P(Math.min(...sh.pts.map(q=>q[0])),Math.max(...sh.pts.map(q=>q[1])));ctx.fillStyle="rgb("+sh.color.join(",")+")";ctx.font="bold "+Math.round(lw*9)+"px sans-serif";ctx.fillText("#"+sh.no,lx+lw*2,ly-lw*2);
+        (sh.hits||[]).forEach(x=>{const [a,b]=P(x.t.x,x.t.y),hh=Math.max(lw*4,x.t.ht*vp.scale*.8),hw=Math.max(hh,x.t.w*vp.scale/2+lw*2);
+          ctx.save();ctx.translate(a,b);ctx.rotate(-Math.atan2(x.t.uy,x.t.ux)+(vp.rotation||0)*Math.PI/180);ctx.lineWidth=lw;ctx.strokeStyle=x.dup?"#e07b00":"#12a150";ctx.strokeRect(-hw,-hh,2*hw,2*hh);ctx.restore();});ctx.restore();});}).catch(()=>{});
+    return wrap;}
+  function draw(){const j=job();if(!j){closeSheet();return;}box.textContent="";
+    box.append(h("div",{style:"display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"},h("button",{type:"button",class:"btn ghost small",onclick:back},"‹ Build pulls")),
+      h("details",{class:"panel"},h("summary",{style:"cursor:pointer;font-weight:600"},"How to mark the prints in Bluebeam"),
+        h("ol",{style:"margin:8px 0 0;padding-left:20px;display:grid;gap:4px"},
+          h("li",{},"Draw one Polygon, Cloud or Rectangle around every device fed by one pull."),
+          h("li",{},"Open the markup's Properties and type the cabinet and pull in Comments, like “1.14 BMS Row 12”. Add the system (BMS, Cameras, APs) if the shape covers more than one."),
+          h("li",{},"Or color by system: blue = BMS, red = Cameras, green = APs."),
+          h("li",{},"A Polyline along a row counts the devices next to the line."),
+          h("li",{},"Don't flatten. Save, then pick the PDF below. It's read on this device only and not uploaded."))),
+      h("div",{class:"field"},h("label",{for:"ppFile"},"Marked-up prints (PDF)"),file),out);
+    out.textContent="";if(!pages.length)return;
+    res=ppBuild(j,pages,reach);
+    res.props.forEach(p=>{if(ovName[p.shape.no])p.name=ovName[p.shape.no];if(ovOff.has(p.shape.no+"|"+p.rack+"|"+p.type))p.on=false;});
+    const noText=pages.filter(p=>p.text.length<5),noShapes=pages.filter(p=>!p.shapes.length);
+    if(noText.length)out.append(h("p",{class:"status",style:"color:var(--over);margin:0"},"⚠ No readable text on "+noText.map(p=>p.label).join(", ")+". That sheet is probably a scan, so device tags can't be found on it."));
+    if(!res.shapes){out.append(h("div",{class:"empty"},h("strong",{},"No markups found"),"Draw a shape around each pull in Bluebeam, save without flattening, and pick the file again."));return;}
+    if(noShapes.length&&noShapes.length<pages.length)out.append(h("p",{class:"status",style:"margin:0"},noShapes.length+" page"+(noShapes.length>1?"s have":" has")+" no markups and were skipped."));
+    if(pages.some(p=>p.shapes.some(s=>!s.closed))){const rs=h("select",{"aria-label":"How close to a line counts",style:"font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink)"},
+        [[.006,"Close"],[.012,"Medium"],[.025,"Wide"]].map(([v,l])=>h("option",{value:String(v),selected:v===reach},l)));rs.addEventListener("change",()=>{reach=+rs.value;draw();});
+      out.append(h("div",{style:"display:flex;gap:8px;align-items:center;flex-wrap:wrap"},h("span",{class:"status"},"Lines pick up devices this close:"),rs));}
+    const props=res.props,good=props.filter(p=>!p.empty);
+    out.append(h("div",{class:"flabel"},"What each shape becomes · "+good.length+" pull"+(good.length===1?"":"s")+" from "+res.shapes+" shape"+(res.shapes===1?"":"s")));
+    props.forEach((p,i)=>{const id="pp"+i,key=p.empty?"":pullKey(p.rack,p.type,p.name);
+      const already=p.cables.filter(c=>c.pull&&c.pull!==key),same=p.cables.filter(c=>c.pull===key).length;
+      const card=h("div",{class:"panel stack",style:"gap:6px;padding:10px;border-left:6px solid rgb("+p.shape.color.join(",")+")"+(p.empty||!p.on?";opacity:.7":"")});
+      if(p.empty){card.append(h("strong",{},"#"+p.shape.no+" · "+pages[p.page].label),h("p",{class:"status",style:"margin:0;color:var(--over)"},
+          p.dups.length?"Every device in it is already in shape #"+[...new Set(p.dups.map(c=>res.props.find(q=>q.cables.includes(c))?.shape.no))].join(", #")+".":"No cables from this job found inside it"+(p.shape.cab||p.shape.sys?" for "+[p.shape.cab,p.shape.sys].filter(Boolean).join(" "):"")+"."));}
+      else{const cb=h("input",{type:"checkbox",id:id+"c",checked:p.on});cb.addEventListener("change",()=>{const k=p.shape.no+"|"+p.rack+"|"+p.type;cb.checked?ovOff.delete(k):ovOff.add(k);draw();});
+        const nameIn=h("input",{id:id+"n",class:"full-in",value:p.name,style:"width:160px","aria-label":"Pull name"});nameIn.addEventListener("change",()=>{const nv=nameIn.value.trim();if(nv)ovName[p.shape.no]=nv;else delete ovName[p.shape.no];draw();});
+        card.append(h("div",{style:"display:flex;gap:8px;align-items:center;flex-wrap:wrap"},cb,h("label",{for:id+"c",style:"font-weight:600"},"#"+p.shape.no+" · "+p.rack+" "+p.type),nameIn,h("span",{class:"status"},p.cables.length+" cable"+(p.cables.length===1?"":"s")+" · "+pages[p.page].label)),
+          h("div",{class:"chips",style:"gap:4px"},p.cables.map(c=>h("span",{class:"chipbtn",style:"cursor:default",title:c.name},h("span",{class:"mono"},String(labelNum(c.name)).padStart(3,"0")),c.from?h("small",{style:"opacity:.75;margin-left:4px"},c.from):null))));
+        if(same)card.append(h("p",{class:"status",style:"margin:0"},same+" already in this pull."));
+        if(already.length)card.append(h("p",{class:"status",style:"margin:0;color:var(--over)"},"⚠ "+already.length+" already in another pull: "+already.slice(0,6).map(c=>labelNum(c.name)+" ("+pullShort(c)+")").join(", ")+(already.length>6?"…":"")+(moveOld?" They'll be moved here.":" They'll stay where they are.")));}
+      if(p.dups.length&&!p.empty)card.append(h("p",{class:"status",style:"margin:0;color:var(--over)"},"⚠ "+p.dups.length+" also inside an earlier shape, so they stay in that one: "+p.dups.slice(0,6).map(c=>labelNum(c.name)).join(", ")));
+      if(p.amb.length)card.append(h("p",{class:"status",style:"margin:0;color:var(--over)"},"⚠ "+p.amb.slice(0,5).join(", ")+" match"+(p.amb.length===1?"es":"")+" more than one cabinet. Put the cabinet in the comment to count "+(p.amb.length===1?"it":"them")+"."));
+      out.append(card);});
+    if(res.loose.length)out.append(h("details",{class:"panel"},h("summary",{style:"cursor:pointer;color:var(--over)"},"⚠ "+res.loose.length+" device"+(res.loose.length===1?"":"s")+" on these sheets aren't inside any shape"),
+      h("div",{class:"chips",style:"gap:4px;margin-top:8px"},res.loose.map(c=>h("span",{class:"chipbtn",style:"cursor:default"},c.rack+" "+c.type+" "+String(labelNum(c.name)).padStart(3,"0")+(c.from?" · "+c.from:""))))));
+    /* the print with shapes and the tags they picked up */
+    const pgShown=pages.map((p,i)=>i).filter(i=>pages[i].shapes.length);
+    out.append(h("div",{class:"chips",style:"gap:6px;align-items:center"},h("span",{class:"status"},"Show on the print:"),pgShown.map(i=>h("button",{type:"button",class:"chipbtn","aria-pressed":String(showPg===i),onclick:()=>{showPg=showPg===i?-1:i;draw();}},pages[i].label))));
+    if(showPg>=0&&pages[showPg]){out.append(h("p",{class:"status",style:"margin:0"},"Green boxes = devices counted. Orange = already counted in another shape."),canvasFor(showPg));}
+    const sel=props.filter(p=>p.on&&!p.empty),nC=sel.reduce((a,p)=>a+p.cables.filter(c=>moveOld||!c.pull||c.pull===pullKey(p.rack,p.type,p.name)).length,0);
+    const mv=h("input",{type:"checkbox",id:"ppMove",checked:moveOld});mv.addEventListener("change",()=>{moveOld=mv.checked;draw();});
+    if(props.some(p=>p.cables.some(c=>c.pull&&c.pull!==pullKey(p.rack,p.type,p.name))))out.append(h("label",{class:"check",for:"ppMove",style:"text-transform:none;letter-spacing:0"},mv,"Move cables that are already in another pull"));
+    out.append(h("div",{style:"display:flex;gap:8px;flex-wrap:wrap;align-items:center"},h("button",{type:"button",class:"btn",disabled:!nC||busy,onclick:()=>apply(sel)},"Make "+sel.length+" pull"+(sel.length===1?"":"s")+" ("+nC+" cables)")));}
+  async function apply(sel){const j=job();if(!j||busy)return;busy=true;const to=new Map();
+    sel.forEach(p=>{const key=pullKey(p.rack,p.type,p.name);p.cables.forEach(c=>{if(!moveOld&&c.pull&&c.pull!==key)return;to.set(c.id,key);});});
+    let n=0;const cables=cablesOf(j).map(c=>{const k=to.get(c.id);if(!k||c.pull===k)return c;n++;return Object.assign({},c,{pull:k});});
+    try{if(n){await saveVersion(j,"Before pulls from prints");await db.collection("jobs").doc(j.id).update({cables,updatedAt:Date.now()});
+        logEvent("Pulls from prints: "+sel.length+" pulls ("+n+" cables) on "+j.name,{ev:"cables",jobId:j.id});}
+      toast(n?n+" cables put in "+sel.length+" pull"+(sel.length===1?"":"s"):"Nothing changed. Those cables were already in these pulls.");back();}
+    catch(e){writeErr(e);}finally{busy=false;}}
+  openView("Pulls from prints · "+j0.name,[box]);$(".sheet").classList.add("wide");liveSheet=null;draw();}
 /* ===== NEW JOB, ONE QUESTION AT A TIME =====
    What kind → name/dates → cables (Cat6 label workbook / fiber cable list) → phase 1 → its tasks → next phase… → crew → review.
    On cable jobs every phase checked "per cable" is also a cable step with the SAME id, so checking cables off moves the phase. */

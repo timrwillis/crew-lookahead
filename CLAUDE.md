@@ -21,6 +21,7 @@ Live at https://timrwillis.github.io/crew-lookahead (GitHub Pages from `main` of
 - Roll call: `attendance/<date>` {marks:{techId:{s:"here"|"out",at,by}}}, managers only (own listener `startAtt`, not in `S`, so missing rules don't break the board). `outOn`/`awayOn` feed `dayInfo` (marked-out people count as off). UI: `rollBar`/`attBtns` on Home → Manpower, `attHistory` view.
 - Job notes: `marks._note_<id>` {text,sev(urgent/fyi/suggest/other),cab,sys,pull,cable,photos,fix:{status open/fixing/fixed,to,…},doneAt}; `notesSheet(jid,pre)`; photos + .txt records go to Documents folder "Notes" (files carry `noteId`).
 - Crew home (`renderMyWork`): main card = current task; `myWorkList` (via `workFooter`) lists every open task they're on in any job (`myOpenWork`), each opens `myTaskSheet` to check off cables / mark done / scan.
+- Pulls from prints (`printPulls`, button in `pullBuilder`): Tim marks pulls in Bluebeam (Polygon/Cloud/Rect/Ellipse/Pen loop = devices inside; Polyline/Line = devices near it), Comment like "1.14 BMS Row 12"; color blue/red/green = BMS/Cameras/WAPs as a fallback. PDF read in-browser only (pdf.js 3.11.174 for text+render, pdf-lib for /Annots incl. Subj/Contents), never uploaded. Tags matched via `ppTagIndex` (cable ID, port part, `from`, label lines; plain numbers skipped). Sets `c.pull=pullKey(rack,type,name)`.
 - Quick tasks: `kind:"quick"`, `quick.pri` (critical/high/normal/low), `quick.client`.
 
 ## Working on it
