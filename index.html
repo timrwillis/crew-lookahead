@@ -2695,12 +2695,12 @@ function techChips(set,days,excludeJobId,ro,pool){
       const list=h("div",{class:"tchips",style:"flex-basis:100%;border:1px solid var(--line);border-radius:10px;padding:8px;margin-top:2px"});
       if(mine.length){list.append(h("div",{class:"status",style:"flex-basis:100%"},"On this job"));mine.forEach(t=>list.append(chip(t,false)));}
       if(others.length){if(mine.length)list.append(h("div",{class:"status",style:"flex-basis:100%"},"Everyone else"));others.forEach(t=>list.append(chip(t,false)));}
-      const past=MGR()?S.techs.filter(t=>t.helper&&helperDone(t)&&t.active!==false&&!set.has(t.id)).sort((a,b)=>(a.name||"").localeCompare(b.name||"")):[];
-      if(past.length){list.append(h("div",{class:"status",style:"flex-basis:100%"},"Helpers whose last day has passed · tap to bring them back"));
+      const past=MGR()?S.techs.filter(t=>t.helper&&(helperDone(t)||t.active===false)&&!t.pending&&!set.has(t.id)).sort((a,b)=>(a.name||"").localeCompare(b.name||"")):[];
+      if(past.length){list.append(h("div",{class:"status",style:"flex-basis:100%"},"Helpers not on the active list (last day passed or set inactive) · tap to bring them back"));
         past.forEach(t=>list.append(h("button",{type:"button",class:"tchip",title:"Last day was "+fmtS(t.until),onclick:async()=>{
           const last=[...days].sort().pop()||TODAY(),until=last>TODAY()?last:iso(addDays(parseD(TODAY()),13));
-          try{await db.collection("techs").doc(t.id).update({until,updatedAt:Date.now()});t.until=until;set.add(t.id);toast(t.name+" is back. Last day now "+fmtS(until)+".");draw();}catch(e){writeErr(e);}}},
-          t.name,h("span",{class:"w"},"• last day "+fmtS(t.until)))));}
+          try{await db.collection("techs").doc(t.id).update({until,active:true,updatedAt:Date.now()});t.until=until;t.active=true;set.add(t.id);toast(t.name+" is back. Last day now "+fmtS(until)+".");draw();}catch(e){writeErr(e);}}},
+          t.name,h("span",{class:"w"},t.active===false?"• set inactive":"• last day "+fmtS(t.until)))));}
       if(!rest.length)list.append(h("span",{class:"status"},"Everyone's already on it."));
       wrap.append(list);}}
   draw();return wrap;
