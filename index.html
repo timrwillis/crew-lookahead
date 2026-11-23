@@ -4507,7 +4507,7 @@ function pullBuilder(jid){
   const j0=job();if(!j0)return;
   const idfs=()=>[...new Set(cablesOf(job()).map(c=>c.rack).filter(Boolean))].sort(natCmp);
   const syssIn=idf=>[...new Set(cablesOf(job()).filter(c=>c.rack===idf).map(c=>c.type).filter(Boolean))].sort((a,b)=>sysRank(job(),a)-sysRank(job(),b)||natCmp(a,b));
-  let idf=null,sys=null,pick=new Set(),busy=false;
+  let idf=null,sys=null,pick=new Set(),busy=false;const openPulls=new Set(),pSel=new Set();
   try{idf=localStorage.getItem("pbIdf:"+jid);sys=localStorage.getItem("pbSys:"+jid);}catch(e){}
   const box=h("div",{class:"full stack"}),top=h("div",{class:"stack",style:"gap:6px"}),mid=h("div",{class:"stack"}),bottom=h("div",{class:"stack"});
   const nameIn=h("input",{id:"pbName",class:"full-in",placeholder:"Pull name",autocomplete:"off"});
@@ -4527,7 +4527,7 @@ function pullBuilder(jid){
     const cables=cablesOf(j).map(c=>{if(!ids.has(c.id))return c;if(key&&c.pull&&c.pull!==key)moved++;const o=Object.assign({},c);if(key)o.pull=key;else delete o.pull;return o;});
     try{await db.collection("jobs").doc(j.id).update({cables,updatedAt:Date.now()});
       if(key)logEvent("Pull set up: "+key+" ("+cabs.length+" cables) on "+j.name,{ev:"cables",jobId:j.id});
-      toast(key?cabs.length+" added to "+pullShort({pull:key})+(moved?" ("+moved+" moved from another pull)":""):cabs.length+" taken out of the pull");return true;}
+      toast(key?cabs.length+" added to "+pullShort({pull:key})+(moved?" ("+moved+" moved from another pull)":""):cabs.length+" put back in the pool");return true;}
     catch(e){writeErr(e);return false;}finally{busy=false;}}
   function draw(){const j=job();if(!j){closeSheet();return;}
     const list=idfs();if(!list.includes(idf))idf=list[0]||null;const sl=idf?syssIn(idf):[];if(!sl.includes(sys))sys=sl[0]||null;remember();
@@ -4565,7 +4565,7 @@ function pullBuilder(jid){
             wKind==="row"&&next!=null?h("button",{type:"button",class:"btn ghost small",onclick:()=>setRow(next)},(isNaN(cur)?"":"Next: ")+"Row "+next+" ›"):null),
           wKind==="row"&&fromOther.length?h("div",{class:"chips",style:"gap:4px;align-items:center"},h("span",{class:"status"},"Rows from other systems here:"),fromOther.map(n=>h("button",{type:"button",class:"chipbtn",onclick:()=>setRow(n)},String(n)))):null,
           (compose(),pv));})(),
-      Object.keys(pulls).length?h("div",{class:"chips",style:"gap:6px"},Object.keys(pulls).sort(natCmp).map(k=>h("button",{type:"button",class:"chipbtn","aria-pressed":String(pullKey(idf,sys,nameIn.value)===k),onclick:()=>{parseName(pullShort({pull:k}));draw();}},"↺ "+pullShort({pull:k})))):null,
+      Object.keys(pulls).length?h("div",{class:"chips",style:"gap:6px"},Object.keys(pulls).sort(natCmp).map(k=>h("button",{type:"button",class:"chipbtn","aria-pressed":String(pullKey(idf,sys,nameIn.value)===k),onclick:()=>{parseName(pullShort({pull:k}));openPulls.add(k);draw();}},"↺ "+pullShort({pull:k})))):null,
       h("div",{class:"field"},h("label",{for:"pbNums"},"Labels from the prints"),numIn),
       h("div",{style:"display:flex;gap:8px;align-items:center;flex-wrap:wrap"},addBtn,h("span",{class:"status"},pick.size?pick.size+" tapped":"Ranges, single numbers, or a device ID start"))));
     const done=p.length-free.length;
@@ -4574,11 +4574,27 @@ function pullBuilder(jid){
       h("div",{class:"chips",style:"gap:6px"},free.map(c=>h("button",{type:"button",class:"chipbtn","aria-pressed":String(pick.has(c.id)),title:c.name,onclick:()=>{pick.has(c.id)?pick.delete(c.id):pick.add(c.id);draw();}},
         h("span",{class:"mono"},String(labelNum(c.name)).padStart(3,"0")),(()=>{const x=c.from||c.tag||(Array.isArray(c.label)&&c.label[0]!==c.name?c.label[0]:"");return x?h("small",{style:"opacity:.75;margin-left:4px"},x):null;})()))));}
     else bottom.append(h("p",{class:"status",style:"color:var(--ok)"},"✓ Every "+sys+" label for "+idf+" is in a pull."));
-    const ss=stepsOf(j);
-    Object.keys(pulls).sort(natCmp).forEach(k=>{const gl=pulls[k],fin=ss.length?gl.filter(c=>ss.every(st=>markOf(j,c.id,st.id))).length:0;
-      bottom.append(h("div",{class:"panel stack",style:"gap:6px;padding:10px"},
-        h("div",{style:"display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"},h("strong",{},pullShort({pull:k}),urgentNotes(j,{pull:k}).length?h("span",{style:"color:#fff;background:var(--over);border-radius:999px;padding:1px 8px;font-size:.72rem;font-weight:700;margin-left:6px"},"⚠ urgent"):null),h("span",{class:"status"},gl.length+" cables"+(ss.length?" · "+fin+" done":""))),
-        h("div",{class:"chips",style:"gap:4px"},gl.map(c=>h("button",{type:"button",class:"chip",title:"Take "+c.name+" out of this pull","aria-label":"Take "+c.name+" out of this pull",onclick:()=>assign([c],null)},String(labelNum(c.name)).padStart(3,"0")," ✕")))));});}
+    const ss=stepsOf(j),keys=Object.keys(pulls).sort(natCmp);
+    if(keys.length)bottom.append(h("div",{class:"flabel"},"Pulls ("+keys.length+") · tap one to see or fix its cables"));
+    keys.forEach(k=>{const gl=pulls[k].slice().sort((a,b)=>labelNum(a.name)-labelNum(b.name)),fin=ss.length?gl.filter(c=>ss.every(st=>markOf(j,c.id,st.id))).length:0,isOpen=openPulls.has(k);
+      const sel=gl.filter(c=>pSel.has(c.id)),cur=pullKey(idf,sys,nameIn.value)===k;
+      const card=h("div",{class:"panel stack",style:"gap:6px;padding:10px"+(cur?";border-color:var(--accent)":"")});
+      card.append(h("button",{type:"button",class:"linkbtn","aria-expanded":String(isOpen),style:"display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;text-decoration:none;color:var(--ink);text-align:left;padding:0",onclick:()=>{isOpen?openPulls.delete(k):openPulls.add(k);draw();}},
+        h("strong",{},(isOpen?"▾ ":"▸ ")+pullShort({pull:k}),urgentNotes(j,{pull:k}).length?h("span",{style:"color:#fff;background:var(--over);border-radius:999px;padding:1px 8px;font-size:.72rem;font-weight:700;margin-left:6px"},"⚠ urgent"):null),
+        h("span",{class:"status"},gl.length+" cables"+(ss.length?" · "+fin+" done":""))));
+      if(isOpen){
+        card.append(h("div",{class:"status",style:"margin:0"},"Tap cables to pick them, then put them back in the pool or move them to another pull."),
+          h("div",{class:"chips",style:"gap:6px"},gl.map(c=>{const started=ss.some(st=>markOf(j,c.id,st.id)),x=c.from||c.tag||"";
+            return h("button",{type:"button",class:"chipbtn","aria-pressed":String(pSel.has(c.id)),title:c.name+(started?" · has steps checked":""),onclick:()=>{pSel.has(c.id)?pSel.delete(c.id):pSel.add(c.id);draw();}},
+              h("span",{class:"mono"},String(labelNum(c.name)).padStart(3,"0")),x?h("small",{style:"opacity:.75;margin-left:4px"},x):null,started?h("small",{style:"margin-left:4px"},"✓"):null);})));
+        const others=keys.filter(x=>x!==k),mv=h("select",{"aria-label":"Move picked cables to","style":"font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink)"},h("option",{value:""},"Move to…"),others.map(x=>h("option",{value:x},pullShort({pull:x}))));
+        mv.addEventListener("change",async()=>{const to=mv.value;if(!to||!sel.length)return;if(await assign(sel,to)){sel.forEach(c=>pSel.delete(c.id));}});
+        card.append(h("div",{style:"display:flex;gap:6px;flex-wrap:wrap;align-items:center"},
+          h("button",{type:"button",class:"btn small",disabled:!sel.length,onclick:async()=>{if(await assign(sel,null))sel.forEach(c=>pSel.delete(c.id));}},sel.length?"↩ Put "+sel.length+" back in the pool":"↩ Put back in the pool"),
+          others.length?mv:null,
+          h("button",{type:"button",class:"btn ghost small",onclick:()=>{const all=gl.every(c=>pSel.has(c.id));gl.forEach(c=>all?pSel.delete(c.id):pSel.add(c.id));draw();}},gl.every(c=>pSel.has(c.id))?"Unpick all":"Pick all"),
+          h("button",{type:"button",class:"btn ghost small",onclick:()=>confirmBox("Empty "+pullShort({pull:k})+"?","All "+gl.length+" cables go back to the pool. Checked-off steps stay on the cables.","Empty pull",async()=>{if(await assign(gl,null)){gl.forEach(c=>pSel.delete(c.id));openPulls.delete(k);}})},"Empty this pull")));}
+      bottom.append(card);});}
   box.append(h("div",{style:"display:flex;justify-content:flex-end"},h("button",{type:"button",class:"btn ghost small",onclick:()=>pullLabelSheet(jid)},"🏷 Label sheets by pull")));
   box.append(h("p",{class:"status",style:"margin:0"},"Pick the cabinet and system, tap where you're pulling (Row, Tray, Wall), then type the label numbers off the prints (801-806, 811) or tap them. Each label can only be in one pull."),top,mid,bottom);
   openView("Build pulls · "+j0.name,[box]);$(".sheet").classList.add("wide");liveSheet=()=>{if(!busy&&document.activeElement!==numIn&&document.activeElement!==whereIn)draw();};draw();}
