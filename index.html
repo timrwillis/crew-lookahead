@@ -2681,8 +2681,10 @@ const SCOPES=["Cabling / rough-in","Trim & terminate","Certify / test","Fiber","
 function techChips(set,days,excludeJobId,ro,pool){
   /* only the people picked show; "+ Tech" opens the crew list (this job's crew first) */
   const wrap=h("div",{class:"tchips"});let open=false;const poolSet=pool instanceof Set?pool:new Set(pool||[]);
-  const warnOf=t=>{const off=days.filter(d=>offRec(t.id,d)).length;
-    const other=S.jobs.find(x=>x.id!==excludeJobId&&days.some(d=>jobOn(x,d)&&membersOn(x,d).includes(t.id)));
+  /* only today and later matter; past days already happened. Finished jobs (closed, crew-marked done, or every task done) don't count */
+  const ahead=days.filter(d=>d>=TODAY()),finished=x=>!!doneDate(x)||readyToClose(x);
+  const warnOf=t=>{const off=ahead.filter(d=>offRec(t.id,d)).length;
+    const other=S.jobs.find(x=>x.id!==excludeJobId&&!finished(x)&&ahead.some(d=>jobOn(x,d)&&membersOn(x,d).includes(t.id)));
     return [off?off+"d off":"",other?other.name:""].filter(Boolean).join(", ");};
   const chip=(t,on)=>{const w=warnOf(t);return h("button",{type:"button",class:"tchip","aria-pressed":String(on),disabled:ro,title:w||null,"aria-label":(on?"Take "+t.name+" off":"Add "+t.name),
     onclick:()=>{on?set.delete(t.id):set.add(t.id);draw();}},t.name,on&&!ro?" ✕":"",w?h("span",{class:"w"},"• "+w):null);};
