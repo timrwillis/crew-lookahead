@@ -856,8 +856,9 @@ const phasesOf=j=>Array.isArray(j.phases)?j.phases:[];
 const phaseIdx=(j,t)=>phasesOf(j).findIndex(p=>p.id===t.phase);
 const phaseName=(j,t)=>{const i=phaseIdx(j,t);return i>=0?phasesOf(j)[i].name:"";};
 // A task waits for the tasks it names, plus every task in earlier phases when its phase waits for the one before.
+const isCabPhase=(j,p)=>!!p&&(!!p.cab||cabsOf(j).includes(String(p.name||"").trim()));
 const waitsOn=(j,t,d)=>{const ids=new Set(Array.isArray(t.after)?t.after:[]);const pi=phaseIdx(j,t);
-  if(pi>0&&phasesOf(j)[pi].afterPrev!==false)tasksOf(j).forEach(x=>{const xi=phaseIdx(j,x);if(xi>=0&&xi<pi)ids.add(x.id);});
+  if(pi>0&&phasesOf(j)[pi].afterPrev!==false&&!isCabPhase(j,phasesOf(j)[pi]))tasksOf(j).forEach(x=>{const xi=phaseIdx(j,x);if(xi>=0&&xi<pi)ids.add(x.id);});
   return [...ids].map(id=>tasksOf(j).find(x=>x.id===id)).filter(p=>p&&p.id!==t.id&&!(p.doneOn&&p.doneOn<=d));};
 function curPhase(j){const ph=phasesOf(j);for(const p of ph){const tk=tasksOf(j).filter(t=>t.phase===p.id);if(tk.some(t=>!t.doneOn))return {p,done:tk.filter(t=>t.doneOn).length,total:tk.length,n:ph.indexOf(p)+1,of:ph.length};}return null;}
 const blockedOn=(j,t,d)=>!(t.startedOn&&d>=t.startedOn)&&waitsOn(j,t,d).length>0;
@@ -865,7 +866,8 @@ const blockedOn=(j,t,d)=>!(t.startedOn&&d>=t.startedOn)&&waitsOn(j,t,d).length>0
 const taskOpen=(t,d)=>!t.doneOn||d<t.doneOn||(d===t.doneOn&&d<TODAY());
 function membersOn(j,d){const set=new Set(crewOn(j,d));tasksOf(j).forEach(t=>{if(taskOpen(t,d)&&!heldOn(t,d)&&!blockedOn(j,t,d))crewOn(t,d).forEach(x=>set.add(x));});return [...set];}
 // Within a job, a tech works the first unfinished task they're on.
-const taskFor=(j,tid,d)=>tasksOf(j).find(t=>taskOpen(t,d)&&!heldOn(t,d)&&!blockedOn(j,t,d)&&crewOn(t,d).includes(tid))||null;
+const taskFor=(j,tid,d)=>{const c=tasksOf(j).filter(t=>taskOpen(t,d)&&!heldOn(t,d)&&!blockedOn(j,t,d)&&crewOn(t,d).includes(tid));
+  return c.length>1?c.reduce((b,t)=>(+((t.crewAt||{})[tid])||0)>(+((b.crewAt||{})[tid])||0)?t:b,c[0]):c[0]||null;};
 function assignOn(tid,d){const k="a"+tid+d;if(k in memo)return memo[k];let r=null;
   if(!offRec(tid,d)){const c=jobsOn(d).filter(j=>!heldOn(j,d)&&membersOn(j,d).includes(tid));
     if(c.length>1){const at=j=>{let a=+((j.crewAt||{})[tid])||0;if(crewOn(j,d).includes(tid)===false)a=0;tasksOf(j).forEach(t=>{if(taskOpen(t,d)&&!heldOn(t,d)&&crewOn(t,d).includes(tid))a=Math.max(a,+((t.crewAt||{})[tid])||0);});
@@ -1222,7 +1224,7 @@ function moreBtn(title,items){items=items.filter(Boolean);if(!items.length)retur
 function taskRow(j,t,d){
   const [st,lbl]=taskStatus(j,t,d);
   const crew=st==="active"?workingOn(j,d).filter(x=>(taskFor(j,x,d)||{}).id===t.id):crewOn(t,d);
-  const elsewhere=st==="active"?crewOn(t,d).filter(x=>!crew.includes(x)&&!offRec(x,d)).map(x=>{const a=assignOn(x,d);return a&&a!==j?(techById(x)||{}).name+" (on "+a.name+")":"";}).filter(Boolean):[];
+  const elsewhere=st==="active"?crewOn(t,d).filter(x=>!crew.includes(x)&&!offRec(x,d)).map(x=>{const a=assignOn(x,d);if(!a)return "";if(a!==j)return (techById(x)||{}).name+" (on "+a.name+")";const o=taskFor(j,x,d);return o&&o.id!==t.id?(techById(x)||{}).name+" (on "+o.name+")":"";}).filter(Boolean):[];
   const step=stepForTask(j,t),sp=step?stepCount(j,step.id)+"/"+cablesOf(j).length+" "+step.name.toLowerCase():"";
   const cs=tstate(j,t),csTxt=cs&&st!=="done"?(cs.state==="working"?"Working since "+fmtTime(cs.at):cs.state==="hold"?"Crew says on hold: "+(cs.reason||""):""):"";
   const sub=[csTxt,st==="wait"?waitTxt({job:j,task:t,waits:waitsOn(j,t,d)}):"",st==="hold"?(t.hold||j.hold||{}).reason||"":"",st==="done"&&t.doneOn?"Done "+fmtS(t.doneOn)+(t.crewDone&&t.doneBy?" by "+(names[t.doneBy]||"crew"):""):"",
@@ -1378,7 +1380,7 @@ async function moveTech(tid,target){
     if(crewOn(j,d).includes(tid)){get(j).gen=crewOn(j,d).filter(x=>x!==tid);}
     tasksOf(j).forEach(t=>{if(taskOpen(t,d)&&!heldOn(t,d)&&!blockedOn(j,t,d)&&crewOn(t,d).includes(tid)){const tt=get(j).tasks.find(x=>x.id===t.id);Object.assign(tt,logChange(t,j.start,endOf(j),d,crewOn(t,d).filter(x=>x!==tid),false));}});});
   if(target){const j=target.job,u=get(j);
-    if(target.task){const tt=u.tasks.find(x=>x.id===target.task.id);Object.assign(tt,logChange(tt,j.start,endOf(j),d,[...new Set([...crewOn(tt,d),tid])],false));}
+    if(target.task){const tt=u.tasks.find(x=>x.id===target.task.id);if(!tt.startedOn&&blockedOn(j,target.task,d))tt.startedOn=d;Object.assign(tt,logChange(tt,j.start,endOf(j),d,[...new Set([...crewOn(tt,d),tid])],false));}
     else u.gen=[...new Set([...(u.gen||crewOn(j,d)),tid])];}
   try{for(const u of Object.values(touched)){const body={tasks:u.tasks,updatedAt:Date.now()};if(u.gen)Object.assign(body,logChange(u.j,u.j.start,endOf(u.j),d,u.gen,false));await db.collection("jobs").doc(u.j.id).update(body);}
     const to=target?targetLabel(target.job,target.task):"Not assigned";
@@ -2693,6 +2695,12 @@ function techChips(set,days,excludeJobId,ro,pool){
       const list=h("div",{class:"tchips",style:"flex-basis:100%;border:1px solid var(--line);border-radius:10px;padding:8px;margin-top:2px"});
       if(mine.length){list.append(h("div",{class:"status",style:"flex-basis:100%"},"On this job"));mine.forEach(t=>list.append(chip(t,false)));}
       if(others.length){if(mine.length)list.append(h("div",{class:"status",style:"flex-basis:100%"},"Everyone else"));others.forEach(t=>list.append(chip(t,false)));}
+      const past=MGR()?S.techs.filter(t=>t.helper&&helperDone(t)&&t.active!==false&&!set.has(t.id)).sort((a,b)=>(a.name||"").localeCompare(b.name||"")):[];
+      if(past.length){list.append(h("div",{class:"status",style:"flex-basis:100%"},"Helpers whose last day has passed · tap to bring them back"));
+        past.forEach(t=>list.append(h("button",{type:"button",class:"tchip",title:"Last day was "+fmtS(t.until),onclick:async()=>{
+          const last=[...days].sort().pop()||TODAY(),until=last>TODAY()?last:iso(addDays(parseD(TODAY()),13));
+          try{await db.collection("techs").doc(t.id).update({until,updatedAt:Date.now()});t.until=until;set.add(t.id);toast(t.name+" is back. Last day now "+fmtS(until)+".");draw();}catch(e){writeErr(e);}}},
+          t.name,h("span",{class:"w"},"• last day "+fmtS(t.until)))));}
       if(!rest.length)list.append(h("span",{class:"status"},"Everyone's already on it."));
       wrap.append(list);}}
   draw();return wrap;
@@ -2825,6 +2833,8 @@ function jobForm(j,sec){
     body.tasks=tasks.filter(t=>(t.name||"").trim()).map(t=>{const tid=[...t.set].filter(techById);const base={id:t.id,name:t.name.trim(),phase:phases.some(p=>p.id===t.phase)?t.phase:"",doneOn:t.doneOn||"",after:t.after.filter(x=>keep.has(x)&&x!==t.id),startedOn:t.startedOn||"",addedBy:t.orig?(t.orig.addedBy||""):(myId||""),addedAt:t.orig?(t.orig.addedAt||0):Date.now()};
       if(!t.orig){base.crew=tid;base.crewAt=stampAt([],tid);base.crewLog=started?{[start]:[],[eff]:tid}:{};return base;}
       const tHasLog=Object.keys(t.orig.crewLog||{}).length>0;
+      const added=tid.filter(x=>!crewOn(t.orig,TODAY()).includes(x));
+      if(j&&added.length&&!base.startedOn&&!t.doneOn&&blockedOn(j,t.orig,TODAY()))base.startedOn=TODAY();
       if(!started&&!tHasLog){base.crewAt=stampAt(t.orig.crew,tid,t.orig.crewAt);base.crew=tid;base.crewLog={};return base;}
       if(sameSet(tid,crewOn(t.orig,eff))){base.crew=t.orig.crew||[];base.crewLog=t.orig.crewLog||{};if(t.orig.crewAt)base.crewAt=t.orig.crewAt;return base;}
       return Object.assign(base,logChange(t.orig,start,endD,eff,tid,false));});
@@ -5019,7 +5029,7 @@ function techForm(t,preset){preset=preset||{};
     field({id:"tNotes",label:"Notes",type:"textarea",value:t?.notes||"",full:true,placeholder:"e.g. Traveler, has own truck, prefers nights"}),
     MGR()?field({id:"tActive",label:"Active on the crew",type:"checkbox",value:t?t.active!==false:true,full:true}):null,
     MGR()?field({id:"tHelper",label:"Temporary helper (app access and alerts stop after their last day)",type:"checkbox",value:t?!!t.helper:!!preset.helper,full:true}):null,
-    MGR()?field({id:"tUntil",label:"Last day with us",type:"date",value:t?.until||(preset.helper?TODAY():"")}):null,
+    MGR()?field({id:"tUntil",label:"Last day with us",type:"date",value:t?.until||(preset.helper?iso(addDays(parseD(TODAY()),13)):"")}):null,
     MGR()?field({id:"tFrom",label:"Company / agency",value:t?.agency||"",placeholder:"e.g. Aerotek, borrowed from Crew B"}):null,
     t&&(MGR()||t.uid===myId)?techAccount(t):null,
     t&&MGR()?h("div",{class:"field full"},h("span",{class:"flabel"},"Recharge this month"),h("div",{},rechargeChip(t.id)," ",h("span",{class:"status"},S.timeoff.filter(o=>o.techId===t.id&&o.type==="Recharge"&&(o.start||"").slice(0,7)===TODAY().slice(0,7)).map(o=>fmtS(o.start)+" "+(o.hours||rechargeCap())+"h").join(" · ")||"none used yet"))):null,
