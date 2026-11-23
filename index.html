@@ -3975,7 +3975,11 @@ function cableTracker(jid,q0,f0){
       const el=h("div",{class:"cab "+stt,"data-cid":c.id});
       const hd=h("button",{type:"button",class:"chd","aria-expanded":String(open),onclick:()=>{open?openCab.delete(c.id):openCab.add(c.id);draw();}},
         h("span",{class:"car"},open?"▾":"▸"),h("span",{class:"nm"},c.name,sub(c)?h("span",{class:"sub"},sub(c)):null),h("span",{class:"ctag"},cabTag(stt,n,ss.length)));
-      el.append(hd);
+      {const cn=openNotesOf(j).filter(x=>x.cable===c.id),urg=cn.some(x=>x.sev==="urgent");
+        const nb=h("button",{type:"button",class:"iconbtn",title:cn.length?cn.length+" note"+(cn.length>1?"s":"")+" on this cable · add another":"Add a note for "+c.name,"aria-label":(cn.length?cn.length+" notes · ":"")+"Add a note for "+c.name,
+          style:"flex:none;min-width:44px;margin-right:6px"+(urg?";background:var(--over);color:#fff;border-color:var(--over)":cn.length?";border-color:var(--locked);color:var(--locked)":""),
+          onclick:e=>{e.stopPropagation();closeSheet();setTimeout(()=>{notesSheet(j.id,{cab:c.rack||"",sys:c.type||"",pull:c.pull||"",cable:c.id});sheetBack=backToCable(j.id,c.id);},60);}},(urg?"⚠":"📝")+(cn.length?" "+cn.length:""));
+        hd.style.flex="1";hd.style.minWidth="0";el.append(h("div",{style:"display:flex;align-items:center"},hd,nb));}
       if(open){const steps=h("div",{class:"csteps"},ss.map(st=>{const m=markOf(j,c.id,st.id),sp=isSplit(st),pp=sp?partsOf(j,c.id,st.id):[];
           const tip=(m?st.name+" "+fmtTime(m.at)+" "+fmt(new Date(m.at))+(m.by?" · "+(names[m.by]||""):""):"")+(pp.length?(m?" · ":"")+pp.map(p=>partWho(p)+(partTxt(p)?" ("+partTxt(p)+")":"")).join(", "):"");
           return h("button",{type:"button",class:"sbtn"+(!m&&pp.length?" part":""),"aria-pressed":String(!!m),"data-l":st.name,disabled:!can&&!sp,"aria-label":c.name+" "+st.name+(sp?" sign-off":""),title:tip,
@@ -4762,15 +4766,15 @@ const sevRank=k=>{const i=NOTE_SEV.findIndex(x=>x[0]===k);return i<0?9:i;};
 function notesOf(j){const mk=(j&&j.marks)||{};return Object.keys(mk).filter(k=>k.startsWith("_note_")&&mk[k]&&mk[k].text).map(k=>Object.assign({id:k.slice(6)},mk[k]));}
 const openNotesOf=j=>notesOf(j).filter(n=>!n.doneAt);
 /* urgent notes that touch a cabinet / system / pull */
-function urgentNotes(j,w){w=w||{};return openNotesOf(j).filter(n=>n.sev==="urgent"&&(!w.cab||n.cab===w.cab)&&(!w.sys||!n.sys||n.sys===w.sys)&&(!w.pull||n.pull===w.pull)&&(!w.sysOnly||n.sys===w.sys));}
+function urgentNotes(j,w){w=w||{};return openNotesOf(j).filter(n=>n.sev==="urgent"&&(!w.cab||n.cab===w.cab)&&(!w.sys||!n.sys||n.sys===w.sys)&&(!w.pull||n.pull===w.pull)&&(!w.cable||n.cable===w.cable)&&(!w.sysOnly||n.sys===w.sys));}
 function urgentPill(j,w,label){const u=urgentNotes(j,w);if(!u.length)return null;
   return h("button",{type:"button",class:"tpill",style:"background:var(--over);color:#fff",title:u.map(n=>n.text).join("\n"),onclick:e=>{e.stopPropagation();notesSheet(j.id,w);}},"⚠ "+(label||u.length+" urgent"));}
 async function saveNote(j,id,val){const upd={updatedAt:Date.now()};upd["marks._note_"+id]=val;
   try{await db.collection("jobs").doc(j.id).update(upd);return true;}catch(e){writeErr(e);return false;}}
-function noteWhere(n){return [n.cab?"Cabinet "+n.cab:"",n.sys||"",n.pull?pullShort({pull:n.pull}):""].filter(Boolean).join(" · ");}
+function noteWhere(n){return [n.cab?"Cabinet "+n.cab:"",n.sys||"",n.pull?pullShort({pull:n.pull}):"",n.cableName?"Cable "+n.cableName:""].filter(Boolean).join(" · ");}
 function notesSheet(jid,pre){pre=pre||{};
   const job=()=>S.jobs.find(x=>x.id===jid);if(!job())return;
-  let sev="fyi",cab=pre.cab||"",sys=pre.sys||"",pull=pre.pull||"",order="sev",showDone=false,busy=false;
+  let sev="fyi",cab=pre.cab||"",sys=pre.sys||"",pull=pre.pull||"",cable=pre.cable||"",order="sev",showDone=false,busy=false;
   const box=h("div",{class:"full stack",style:"gap:10px"}),form=h("div",{class:"panel stack",style:"gap:8px;padding:10px"}),list=h("div",{class:"stack",style:"gap:8px"});
   const txt=h("textarea",{id:"ntText",placeholder:"What does everyone need to know?",style:"min-height:70px"});
   const can=CAN_POST(),m=MGR();
@@ -4778,7 +4782,10 @@ function notesSheet(jid,pre){pre=pre||{};
     const cabs=cabsOf(j),syss=[...new Set(cs.filter(c=>!cab||c.rack===cab).map(c=>c.type).filter(Boolean))].sort((a,b)=>sysRank(j,a)-sysRank(j,b)),
       pulls=[...new Set(cs.filter(c=>c.pull&&(!cab||c.rack===cab)&&(!sys||c.type===sys)).map(c=>c.pull))].sort(natCmp);
     const sel=(lbl,val,opts,on)=>{const s_=h("select",{"aria-label":lbl},h("option",{value:""},lbl+": any"),opts.map(([v,l])=>h("option",{value:v,selected:val===v},l)));s_.addEventListener("change",()=>on(s_.value));return s_;};
-    form.append(h("strong",{},"Add a note"),
+    const cObj=cable?cs.find(c=>c.id===cable):null;
+    form.append(h("strong",{},cObj?"Add a note for "+cObj.name:"Add a note"),
+      cObj?h("div",{class:"chips",style:"gap:6px;align-items:center"},h("span",{class:"chip"},"🔌 "+cObj.name+(cObj.from&&cObj.to?" · "+cObj.from+" → "+cObj.to:""),
+        h("button",{type:"button",class:"iconbtn","aria-label":"Not for this cable",onclick:()=>{cable="";drawForm();}},"✕"))):null,
       h("div",{class:"chips",style:"gap:6px"},NOTE_SEV.map(([k,l,col])=>h("button",{type:"button",class:"chipbtn","aria-pressed":String(sev===k),style:sev===k?"background:"+col+";border-color:"+col+";color:#fff":"border-color:"+col+";color:"+col,onclick:()=>{sev=k;drawForm();}},l))),
       txt,
       (cabs.length||pulls.length)?h("div",{style:"display:flex;gap:6px;flex-wrap:wrap"},
@@ -4788,7 +4795,8 @@ function notesSheet(jid,pre){pre=pre||{};
       h("div",{style:"display:flex;gap:8px;align-items:center"},h("button",{type:"button",class:"btn",onclick:post},"Post note"),h("span",{class:"status"},"Everyone on the job can see it.")));}
   async function post(){const t=txt.value.trim();if(!t){toast("Type the note first");txt.focus();return;}if(busy)return;busy=true;
     const id=Date.now().toString(36)+Math.random().toString(36).slice(2,5);
-    const n={text:t,sev,at:Date.now(),by:myId||"",cab:cab||"",sys:sys||"",pull:pull||""};
+    const cObj=cable?cablesOf(job()).find(c=>c.id===cable):null;
+    const n={text:t,sev,at:Date.now(),by:myId||"",cab:cab||"",sys:sys||"",pull:pull||"",cable:cObj?cObj.id:"",cableName:cObj?cObj.name:""};
     if(await saveNote(job(),id,n)){txt.value="";logEvent(meName()+" posted a"+(sev==="urgent"?"n URGENT":"")+" note on "+job().name+": "+t.slice(0,80),{ev:"note",jobId:jid});toast(sev==="urgent"?"Urgent note posted":"Note posted");}
     busy=false;drawList();}
   function card(n){const [k,l,col]=sevInfo(n.sev),done=!!n.doneAt,where=noteWhere(n);
@@ -4802,7 +4810,7 @@ function notesSheet(jid,pre){pre=pre||{};
       m?h("div",{style:"display:flex;gap:6px;justify-content:flex-end"},done?h("button",{type:"button",class:"btn ghost small",onclick:async()=>{const v=Object.assign({},n,{doneAt:0,doneBy:""});delete v.id;await saveNote(job(),n.id,v);drawList();}},"Reopen")
           :h("button",{type:"button",class:"btn small",onclick:async()=>{const v=Object.assign({},n,{doneAt:Date.now(),doneBy:myId||""});delete v.id;if(await saveNote(job(),n.id,v)){toast("Marked done and archived");logEvent(meName()+" closed a note on "+job().name,{ev:"note",jobId:jid});}drawList();}},"✓ Done")):null);}
   function drawList(){list.textContent="";const j=job();if(!j)return;const all=notesOf(j),open=all.filter(n=>!n.doneAt),done=all.filter(n=>n.doneAt);
-    const srt=a=>a.slice().sort((x,y)=>order==="sev"?(sevRank(x.sev)-sevRank(y.sev)||y.at-x.at):(y.at-x.at));
+    const srt=a=>a.slice().sort((x,y)=>((pre.cable&&y.cable===pre.cable)-(pre.cable&&x.cable===pre.cable))||(order==="sev"?(sevRank(x.sev)-sevRank(y.sev)||y.at-x.at):(y.at-x.at)));
     list.append(h("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"},h("strong",{},"Open notes ("+open.length+")"),
       h("div",{class:"seg-ctl"},[["sev","By severity"],["time","Newest first"]].map(([k,l])=>h("button",{type:"button","aria-pressed":String(order===k),onclick:()=>{order=k;drawList();}},l)))));
     if(!open.length)list.append(h("p",{class:"status",style:"margin:0"},"No open notes."));
