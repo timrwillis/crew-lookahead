@@ -4229,35 +4229,47 @@ async function labelsExcel(j,cabs){try{const X=await loadXlsx();
   const ws=X.utils.aoa_to_sheet(rows);ws["!cols"]=[{wch:22},{wch:34},{wch:34}];const wb=X.utils.book_new();X.utils.book_append_sheet(wb,ws,"Labels");
   X.writeFile(wb,(j.name||"cables").replace(/[^\w\- ]+/g,"").trim()+" labels.xlsx");toast("Label sheet downloaded");}
   catch(e){toast("Couldn't make the Excel file. Check your signal and try again.");}}
-/* print-ready label workbook: one sheet per cabinet + system, labels grouped by pull, pulls in order */
-function pullLabelLines(j,c){return labelLines(j,c);}
-async function pullLabelWorkbook(j,o){o=o||{};try{const X=await loadXlsx();const cs=cablesOf(j);if(!cs.length){toast("No cables on this job yet");return;}
-  const groups=new Map();
-  cs.forEach(c=>{const k=c.rack&&c.type?c.rack+" "+c.type:(c.sheet||"Cables");if(!groups.has(k))groups.set(k,{rack:c.rack||"",type:c.type||"",list:[]});groups.get(k).list.push(c);});
-  const keys=[...groups.keys()].sort((a,b)=>{const A=groups.get(a),B=groups.get(b);return natCmp(A.rack,B.rack)||sysRank(j,A.type)-sysRank(j,B.type)||natCmp(a,b);});
-  const wb=X.utils.book_new();let nSheets=0,nLab=0;const usedNames=new Set();
-  keys.forEach(k=>{const g=groups.get(k),byPull=new Map();
-    g.list.forEach(c=>{const pk=c.pull?pullShort(c):"";if(!pk&&!o.loose)return;if(!byPull.has(pk))byPull.set(pk,[]);byPull.get(pk).push(c);});
-    const pks=[...byPull.keys()].sort((a,b)=>(!a)-(!b)||natCmp(a,b));if(!pks.length)return;
-    const rows=[["Line 1","Line 2","Pull","Cable"]];
-    pks.forEach((pk,i)=>{if(i&&o.gap)rows.push([]);
-      byPull.get(pk).sort((a,b)=>(labelNum(a.name)-labelNum(b.name))||natCmp(a.name,b.name)).forEach(c=>{const l=pullLabelLines(j,c);rows.push([l[0],l[1],pk||"Not in a pull yet",c.name]);nLab++;});});
-    const ws=X.utils.aoa_to_sheet(rows);ws["!cols"]=[{wch:28},{wch:28},{wch:18},{wch:16}];
-    let nm=k.replace(/[\[\]:*?\/\\]/g," ").slice(0,31).trim()||"Sheet";let n2=nm,i2=2;while(usedNames.has(n2))n2=(nm.slice(0,28)+" "+i2++);usedNames.add(n2);
-    X.utils.book_append_sheet(wb,ws,n2);nSheets++;});
-  if(!nSheets){toast(o.loose?"No labels to put on the sheet":"No pulls yet. Build pulls first, or include labels not in a pull.");return;}
-  X.writeFile(wb,(j.name||"job").replace(/[^\w\- ]+/g,"").trim()+" labels by pull.xlsx");toast(nLab+" labels on "+nSheets+" sheet"+(nSheets>1?"s":"")+" downloaded");}
+/* print-ready label workbook for the EZ-Mark, laid out like the label workbook that came in:
+   one sheet per cabinet + system ("1.14 BMS"), labels in pull order (row 39, row 41…, number order inside a pull), no header, no extra columns.
+   One column (cabinet + port) unless the system carries a second line: Cameras get the camera name, WAPs with AP label lines get a separate "AP Labels" sheet. */
+function pullLabelGroups(j){const groups=new Map();
+  cablesOf(j).forEach(c=>{const k=c.rack&&c.type?c.rack+" "+c.type:(c.sheet||"Cables");if(!groups.has(k))groups.set(k,{key:k,rack:c.rack||"",type:c.type||"",list:[]});groups.get(k).list.push(c);});
+  return [...groups.values()].sort((A,B)=>natCmp(A.rack,B.rack)||sysRank(j,A.type)-sysRank(j,B.type)||natCmp(A.key,B.key));}
+const hasOwnLines=c=>Array.isArray(c.label)&&c.label.some(Boolean);
+function pullOrder(list,loose){const byPull=new Map();list.forEach(c=>{const pk=c.pull?pullShort(c):"";if(!pk&&!loose)return;if(!byPull.has(pk))byPull.set(pk,[]);byPull.get(pk).push(c);});
+  return [...byPull.keys()].sort((a,b)=>(!a)-(!b)||natCmp(a,b)).flatMap(pk=>byPull.get(pk).sort((a,b)=>(labelNum(a.name)-labelNum(b.name))||natCmp(a.name,b.name)));}
+async function pullLabelWorkbook(j,o){o=o||{};try{const X=await loadXlsx();if(!cablesOf(j).length){toast("No cables on this job yet");return;}
+  const pick=o.keys?new Set(o.keys):null,wb=X.utils.book_new(),used=new Set();let nSheets=0,nLab=0;
+  const add=(name,rows,two)=>{if(!rows.length)return;const ws=X.utils.aoa_to_sheet(rows);ws["!cols"]=two?[{wch:26},{wch:26}]:[{wch:26}];
+    let nm=name.replace(/[\[\]:*?\/\\]/g," ").slice(0,31).trim()||"Sheet",n2=nm,i=2;while(used.has(n2))n2=nm.slice(0,28)+" "+i++;used.add(n2);X.utils.book_append_sheet(wb,ws,n2);nSheets++;nLab+=rows.length;};
+  pullLabelGroups(j).forEach(g=>{if(pick&&!pick.has(g.key))return;const ord=pullOrder(g.list,o.loose);if(!ord.length)return;
+    const portStyle=g.list.every(isPortCable);
+    if(!portStyle){add(g.key,ord.map(c=>labelLines(j,c)),true);return;}
+    const withDev=ord.some(c=>c.from),withOwn=ord.some(hasOwnLines);
+    if(withDev&&!withOwn){add(g.key,ord.map(c=>{const l=labelLines(j,c);return [l[0],l[1]];}),true);return;}
+    /* one column: just the cabinet + port */
+    add(g.key,ord.map(c=>[c.name]),false);
+    /* the extra label lines (AP names) go on their own sheet, like the AP Labels sheets that came in */
+    if(withOwn){const f=labelFmt(j),sw=swapOf(f,{type:g.type});
+      add(g.rack+" AP Labels",ord.filter(hasOwnLines).map(c=>{const l=[c.label[0]||"",c.label[1]||""];return sw?[l[1],l[0]]:l;}),true);}});
+  if(!nSheets){toast(o.loose?"Nothing to put on the sheets":"No pulls yet in what you picked. Build pulls first, or include labels not in a pull.");return;}
+  X.writeFile(wb,(j.name||"job").replace(/[^\w\- ]+/g,"").trim()+" EZ-Mark labels by pull.xlsx");toast(nLab+" labels on "+nSheets+" sheet"+(nSheets>1?"s":"")+" downloaded");}
   catch(e){toast("Couldn't make the Excel file. Check your signal and try again.");}}
-function pullLabelSheet(jid){const j=S.jobs.find(x=>x.id===jid);if(!j)return;const cs=cablesOf(j),inPull=cs.filter(c=>c.pull).length;
-  const gap=h("input",{type:"checkbox",id:"plGap",checked:true}),loose=h("input",{type:"checkbox",id:"plLoose",checked:inPull<cs.length&&inPull===0});
-  const syss=[...new Set(cs.map(c=>c.rack&&c.type?c.rack+" "+c.type:"").filter(Boolean))];
-  openView("Label sheets by pull",[h("div",{class:"full stack",style:"gap:10px"},
-    h("p",{style:"margin:0"},"One Excel workbook for the job. Each cabinet + system gets its own sheet"+(syss.length?" ("+syss.length+")":"")+", with the labels for each pull kept together and the pulls in order (row 39, row 41…)."),
-    h("p",{class:"status",style:"margin:0"},inPull+" of "+cs.length+" labels are in a pull."),
-    h("label",{class:"check",for:"plGap",style:"text-transform:none;letter-spacing:0"},gap,"Blank row between pulls"),
-    h("label",{class:"check",for:"plLoose",style:"text-transform:none;letter-spacing:0"},loose,"Also add labels not in a pull yet (at the end of each sheet)"),
-    h("p",{class:"status",style:"margin:0"},"Columns: Line 1, Line 2, Pull, Cable. Point the EZ-Mark at Line 1 and Line 2."),
-    h("button",{type:"button",class:"btn",onclick:()=>pullLabelWorkbook(S.jobs.find(x=>x.id===jid)||j,{gap:gap.checked,loose:loose.checked})},"⬇ Download label workbook"))]);}
+function pullLabelSheet(jid,pre){const j=S.jobs.find(x=>x.id===jid);if(!j)return;
+  const gs=pullLabelGroups(j),sel=new Set(pre&&pre.length?pre:[]);let loose=false;
+  const box=h("div",{class:"full stack",style:"gap:10px"});
+  function draw(){box.textContent="";const cabs=[...new Set(gs.map(g=>g.rack))],syss=[...new Set(gs.map(g=>g.type))].sort((a,b)=>sysRank(j,a)-sysRank(j,b));
+    const cnt=g=>pullOrder(g.list,loose).length;
+    box.append(h("p",{style:"margin:0"},"Pick the systems to print. Each one becomes its own sheet, laid out like your label workbook, with the labels in pull order so the EZ-Mark prints them pull by pull."),
+      syss.length>1?h("div",{class:"chips",style:"gap:6px;align-items:center"},h("span",{class:"status"},"Quick pick:"),syss.map(sy=>{const ks=gs.filter(g=>g.type===sy).map(g=>g.key),all=ks.every(k=>sel.has(k));
+        return h("button",{type:"button",class:"chipbtn","aria-pressed":String(all),onclick:()=>{ks.forEach(k=>all?sel.delete(k):sel.add(k));draw();}},"All "+(sy||"cables"));})):null,
+      ...cabs.map(cb=>h("div",{class:"chips",style:"gap:6px;align-items:center"},cb?h("strong",{style:"min-width:70px"},cb):null,gs.filter(g=>g.rack===cb).map(g=>{const n=cnt(g),two=!g.list.every(isPortCable)||(g.list.some(c=>c.from)&&!g.list.some(hasOwnLines));
+        return h("button",{type:"button",class:"chipbtn","aria-pressed":String(sel.has(g.key)),disabled:!n,title:two?"2 columns":"1 column"+(g.list.some(hasOwnLines)?" + AP Labels sheet":""),onclick:()=>{sel.has(g.key)?sel.delete(g.key):sel.add(g.key);draw();}},
+          (g.type||g.key)+" · "+n+(g.list.some(hasOwnLines)?" + AP labels":""));}))),
+      h("label",{class:"check",for:"plLoose",style:"text-transform:none;letter-spacing:0"},(()=>{const c=h("input",{type:"checkbox",id:"plLoose",checked:loose});c.addEventListener("change",()=>{loose=c.checked;draw();});return c;})(),"Also add labels not in a pull yet (after the pulls)"),
+      h("p",{class:"status",style:"margin:0"},"BMS and WAPs: one column (1.14-1.801). Cameras: two columns (port and camera name, flipped if you swapped them on the Labels screen). AP names: their own “AP Labels” sheet with two columns. No header row and no blank rows, so every row is a label."),
+      h("button",{type:"button",class:"btn",disabled:!sel.size,onclick:()=>pullLabelWorkbook(S.jobs.find(x=>x.id===jid)||j,{keys:[...sel],loose})},sel.size?"⬇ Download "+sel.size+" sheet"+(sel.size>1?"s":""):"Pick at least one system"));}
+  draw();openView("EZ-Mark labels by pull",[box]);}
 function cableLabels(jid){const m=MGR();let q="",edits={},fmt=null,fCab="",fSys="";
   try{fCab=localStorage.getItem("ctCab:"+jid)||"";fSys=localStorage.getItem("ctSys:"+jid)||"";}catch(e){}
   const box=h("div",{class:"full stack"});
@@ -4606,7 +4618,7 @@ function pullBuilder(jid){
           h("button",{type:"button",class:"btn ghost small",onclick:()=>{const all=gl.every(c=>pSel.has(c.id));gl.forEach(c=>all?pSel.delete(c.id):pSel.add(c.id));draw();}},gl.every(c=>pSel.has(c.id))?"Unpick all":"Pick all"),
           h("button",{type:"button",class:"btn ghost small",onclick:()=>confirmBox("Empty "+pullShort({pull:k})+"?","All "+gl.length+" cables go back to the pool. Checked-off steps stay on the cables.","Empty pull",async()=>{if(await assign(gl,null)){gl.forEach(c=>pSel.delete(c.id));openPulls.delete(k);}})},"Empty this pull")));}
       bottom.append(card);});}
-  box.append(h("div",{style:"display:flex;justify-content:flex-end"},h("button",{type:"button",class:"btn ghost small",onclick:()=>pullLabelSheet(jid)},"🏷 Label sheets by pull")));
+  box.append(h("div",{style:"display:flex;justify-content:flex-end"},h("button",{type:"button",class:"btn ghost small",onclick:()=>pullLabelSheet(jid,idf&&sys?[idf+" "+sys]:[])},"🏷 EZ-Mark labels by pull")));
   box.append(h("p",{class:"status",style:"margin:0"},"Pick the cabinet and system, tap where you're pulling (Row, Tray, Wall), then type the label numbers off the prints (801-806, 811) or tap them. Each label can only be in one pull."),top,mid,bottom);
   openView("Build pulls · "+j0.name,[box]);$(".sheet").classList.add("wide");liveSheet=()=>{if(!busy&&document.activeElement!==numIn&&document.activeElement!==whereIn)draw();};draw();}
 
