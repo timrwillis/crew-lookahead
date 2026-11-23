@@ -4015,6 +4015,8 @@ function cableTracker(jid,q0,f0){
           h("span",{class:"car"},gopen?"▾":"▸"),h("span",{class:"nm"},(trackGroup==="row"?"":GROUPS[trackGroup]+" ")+(trackGroup==="pull"?pullShort({pull:g}):g),trackGroup==="pull"&&urgentNotes(j,{pull:g}).length?h("span",{style:"color:#fff;background:var(--over);border-radius:999px;padding:1px 8px;font-size:.72rem;font-weight:700;margin-left:6px"},"⚠ urgent"):null,h("span",{class:"sub"},gopen?"Mark the whole group, or tap a cable below":"Tap to see its "+gl.length+" cable"+(gl.length===1?"":"s"))),h("span",{class:"ctag"},fin+"/"+gl.length+" done")));
         if(gopen&&can)gh.append(h("div",{class:"csteps"},ss.map(st=>{const allOn=gl.every(c=>markOf(j,c.id,st.id));
           return h("button",{type:"button",class:"sbtn","aria-pressed":String(allOn),onclick:()=>setMarks(j,gl.filter(c=>!!markOf(j,c.id,st.id)===allOn).map(c=>[c.id,st.id]),!allOn)},(allOn?"✓ ":"")+"All "+(st.name===st.name.toUpperCase()?st.name:st.name.toLowerCase()));})));
+        if(gopen&&trackGroup==="pull"){const nl=noteLines(j,pullNotes(j,g),()=>{closeSheet();setTimeout(()=>{notesSheet(j.id,{pull:g,cab:(gl[0]||{}).rack||"",sys:(gl[0]||{}).type||""});sheetBack=()=>cableTracker(j.id);},60);});
+          gh.append(h("div",{style:"padding:0 12px 10px;display:grid;gap:6px"},nl||null,CAN_POST()?h("button",{type:"button",class:"btn ghost small",style:"justify-self:start",onclick:()=>{closeSheet();setTimeout(()=>{notesSheet(j.id,{pull:g,cab:(gl[0]||{}).rack||"",sys:(gl[0]||{}).type||""});sheetBack=()=>cableTracker(j.id);},60);}},"📝 Note for this pull"):null));}
         body.push(gh);if(gopen||trackQ.trim())shown.forEach(c=>body.push(row(c)));});}
     else list.filter(visible).forEach(c=>body.push(row(c)));
     const anyOpen=list.some(c=>openCab.has(c.id));
@@ -4502,12 +4504,13 @@ function parsePullInput(txt,pool){const out=new Set(),miss=[];
     const lt=t.toLowerCase(),hits=pool.filter(c=>c.name.toLowerCase()===lt||String(c.from||"").toLowerCase().startsWith(lt));
     if(hits.length)hits.forEach(c=>out.add(c));else miss.push(t);});
   return {cabs:[...out],miss};}
+let pbReopen=null;
 function pullBuilder(jid){
   const job=()=>S.jobs.find(x=>x.id===jid);
   const j0=job();if(!j0)return;
   const idfs=()=>[...new Set(cablesOf(job()).map(c=>c.rack).filter(Boolean))].sort(natCmp);
   const syssIn=idf=>[...new Set(cablesOf(job()).filter(c=>c.rack===idf).map(c=>c.type).filter(Boolean))].sort((a,b)=>sysRank(job(),a)-sysRank(job(),b)||natCmp(a,b));
-  let idf=null,sys=null,pick=new Set(),busy=false;const openPulls=new Set(),pSel=new Set();
+  let idf=null,sys=null,pick=new Set(),busy=false;const openPulls=new Set(pbReopen?[pbReopen]:[]),pSel=new Set();pbReopen=null;
   try{idf=localStorage.getItem("pbIdf:"+jid);sys=localStorage.getItem("pbSys:"+jid);}catch(e){}
   const box=h("div",{class:"full stack"}),top=h("div",{class:"stack",style:"gap:6px"}),mid=h("div",{class:"stack"}),bottom=h("div",{class:"stack"});
   const nameIn=h("input",{id:"pbName",class:"full-in",placeholder:"Pull name",autocomplete:"off"});
@@ -4582,8 +4585,16 @@ function pullBuilder(jid){
       card.append(h("button",{type:"button",class:"linkbtn","aria-expanded":String(isOpen),style:"display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;text-decoration:none;color:var(--ink);text-align:left;padding:0",onclick:()=>{isOpen?openPulls.delete(k):openPulls.add(k);draw();}},
         h("strong",{},(isOpen?"▾ ":"▸ ")+pullShort({pull:k}),urgentNotes(j,{pull:k}).length?h("span",{style:"color:#fff;background:var(--over);border-radius:999px;padding:1px 8px;font-size:.72rem;font-weight:700;margin-left:6px"},"⚠ urgent"):null),
         h("span",{class:"status"},gl.length+" cables"+(ss.length?" · "+fin+" done":""))));
+      const backHere=()=>{pbReopen=k;pullBuilder(jid);};
+      const pn=pullNotes(j,k);
+      if(!isOpen&&pn.length)card.append(h("div",{class:"status",style:"margin:0"},"📝 "+pn.length+" note"+(pn.length>1?"s":"")+" for pullers"));
       if(isOpen){
-        card.append(h("div",{class:"status",style:"margin:0"},"Tap cables to pick them, then put them back in the pool or move them to another pull."),
+        const nl=noteLines(j,pn,()=>{closeSheet();setTimeout(()=>{notesSheet(jid,{cab:idf,sys,pull:k});sheetBack=backHere;},60);});
+        if(nl)card.append(h("div",{class:"flabel",style:"margin:0"},"Notes for pullers"),nl);
+        card.append(h("div",{style:"display:flex;gap:6px;flex-wrap:wrap"},
+          h("button",{type:"button",class:"btn ghost small",onclick:()=>{closeSheet();setTimeout(()=>{notesSheet(jid,{cab:idf,sys,pull:k});sheetBack=backHere;},60);}},"📝 Note for this pull"),
+          sel.length===1?h("button",{type:"button",class:"btn ghost small",onclick:()=>{const c=sel[0];closeSheet();setTimeout(()=>{notesSheet(jid,{cab:idf,sys,pull:k,cable:c.id});sheetBack=backHere;},60);}},"📝 Note for "+sel[0].name):null));
+        card.append(h("div",{class:"status",style:"margin:0"},"Tap cables to pick them, then put them back in the pool, move them, or pick one to add a note for it."),
           h("div",{class:"chips",style:"gap:6px"},gl.map(c=>{const started=ss.some(st=>markOf(j,c.id,st.id)),x=c.from||c.tag||"";
             return h("button",{type:"button",class:"chipbtn","aria-pressed":String(pSel.has(c.id)),title:c.name+(started?" · has steps checked":""),onclick:()=>{pSel.has(c.id)?pSel.delete(c.id):pSel.add(c.id);draw();}},
               h("span",{class:"mono"},String(labelNum(c.name)).padStart(3,"0")),x?h("small",{style:"opacity:.75;margin-left:4px"},x):null,started?h("small",{style:"margin-left:4px"},"✓"):null);})));
@@ -4798,6 +4809,15 @@ function urgentPill(j,w,label){const u=urgentNotes(j,w);if(!u.length)return null
 async function saveNote(j,id,val){const upd={updatedAt:Date.now()};upd["marks._note_"+id]=val;
   try{await db.collection("jobs").doc(j.id).update(upd);return true;}catch(e){writeErr(e);return false;}}
 function noteWhere(n){return [n.cab?"Cabinet "+n.cab:"",n.sys||"",n.pull?pullShort({pull:n.pull}):"",n.cableName?"Cable "+n.cableName:""].filter(Boolean).join(" · ");}
+/* notes that belong to a pull: notes on the pull itself and on any cable in it */
+function pullNotes(j,pk){const ids=new Set(cablesOf(j).filter(c=>c.pull===pk).map(c=>c.id));
+  return openNotesOf(j).filter(n=>n.pull===pk||(n.cable&&ids.has(n.cable))).sort((a,b)=>sevRank(a.sev)-sevRank(b.sev)||b.at-a.at);}
+function noteLines(j,list,onOpen){if(!list.length)return null;
+  return h("div",{class:"stack",style:"gap:4px"},list.map(n=>{const col=sevInfo(n.sev)[2];
+    return h("button",{type:"button",class:"linkbtn",style:"display:block;text-align:left;text-decoration:none;color:var(--ink);padding:6px 8px;border-left:4px solid "+col+";background:var(--bg,transparent);border-radius:6px",onclick:onOpen},
+      h("span",{style:"color:"+col+";font-weight:700"},(n.sev==="urgent"?"⚠ ":"")+(n.fix?"🔧 ":"")+(n.cableName?n.cableName.replace(/^.*-/,"")+": ":"")),
+      n.text.length>160?n.text.slice(0,160)+"…":n.text,
+      S.files.some(f=>f.noteId===n.id&&!f.noteRec)?h("span",{class:"status"}," 📷"):null);}));}
 function notesSheet(jid,pre){pre=pre||{};
   const job=()=>S.jobs.find(x=>x.id===jid);if(!job())return;
   let sev="fyi",cab=pre.cab||"",sys=pre.sys||"",pull=pre.pull||"",cable=pre.cable||"",order="sev",view="all",showDone=false,busy=false,editId="",fixOn=false;const pics=[],fixTo=new Set();
