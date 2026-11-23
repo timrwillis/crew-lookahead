@@ -1243,7 +1243,7 @@ function jobPanel(j){
   box.append(h("div",{class:"jhead"},
     h("div",{class:"ttl"},h("div",{},h("h3",{},j.name),h("div",{class:"status"},[pj?pj.name:"",j.site,j.scope,fmtS(j.start)+" – "+fmtS(jobEnd(j)),CONF[j.conf||"likely"]].filter(Boolean).join(" · ")),
         (()=>{const on=openNotesOf(j),u=on.filter(x=>x.sev==="urgent").length;
-          const np=on.length||CAN_POST()?h("button",{type:"button",class:"tpill "+(on.length?"":"ghost"),style:u?"background:var(--over);color:#fff":on.length?"background:var(--locked);color:#fff":"",title:"Notes for everyone on this job",onclick:e=>{e.stopPropagation();notesSheet(j.id);}},u?"⚠ "+u+" urgent · Notes "+on.length:on.length?"Notes "+on.length:"+ Note"):null;
+          const np=on.length||CAN_POST()?h("button",{type:"button",class:"tpill "+(on.length?"":"ghost"),style:u?"background:var(--over);color:#fff":on.length?"background:var(--locked);color:#fff":"",title:"Notes for everyone on this job",onclick:e=>{e.stopPropagation();notesSheet(j.id);}},(u?"⚠ "+u+" urgent · ":"")+(on.length?"Notes "+on.length:"+ Note")+(on.some(x=>x.fix&&x.fix.status!=="fixed")?" · 🔧 "+on.filter(x=>x.fix&&x.fix.status!=="fixed").length:"")):null;
           const ps=[cablePill(j,null),docPill(j,null,false),np].filter(Boolean);return ps.length?h("div",{class:"pills"},ps):null;})()),
       h("div",{class:"acts"},m&&!j.doneOn?priControl(j):h("span",{class:"pill pri"+priOf(j)},PRI[priOf(j)]+" priority"),heldOn(j,d)?h("span",{class:"pill bad"},"Job on hold"):null,runningLong(j)?h("span",{class:"pill bad"},"Running long"):null)),
     pg?h("button",{type:"button",class:"pr prbtn","aria-expanded":String(openSteps.has(j.id)),title:"Show each step",onclick:()=>{openSteps.has(j.id)?openSteps.delete(j.id):openSteps.add(j.id);render();}},
@@ -4774,16 +4774,32 @@ async function saveNote(j,id,val){const upd={updatedAt:Date.now()};upd["marks._n
 function noteWhere(n){return [n.cab?"Cabinet "+n.cab:"",n.sys||"",n.pull?pullShort({pull:n.pull}):"",n.cableName?"Cable "+n.cableName:""].filter(Boolean).join(" · ");}
 function notesSheet(jid,pre){pre=pre||{};
   const job=()=>S.jobs.find(x=>x.id===jid);if(!job())return;
-  let sev="fyi",cab=pre.cab||"",sys=pre.sys||"",pull=pre.pull||"",cable=pre.cable||"",order="sev",showDone=false,busy=false;const pics=[];
+  let sev="fyi",cab=pre.cab||"",sys=pre.sys||"",pull=pre.pull||"",cable=pre.cable||"",order="sev",view="all",showDone=false,busy=false,editId="",fixOn=false;const pics=[],fixTo=new Set();
+  let fixing="";const fixPics=[];/* note id whose "mark fixed" box is open */
   const box=h("div",{class:"full stack",style:"gap:10px"}),form=h("div",{class:"panel stack",style:"gap:8px;padding:10px"}),list=h("div",{class:"stack",style:"gap:8px"});
   const txt=h("textarea",{id:"ntText",placeholder:"What does everyone need to know?",style:"min-height:70px"});
+  const howTxt=h("textarea",{id:"ntHow",placeholder:"What was done to fix it?",style:"min-height:56px"});
   const can=CAN_POST(),m=MGR();
+  const canEdit=n=>can&&!n.doneAt&&(m||n.by===myId);
+  const safe=x=>String(x).replace(/[\\/:*?"<>|]/g,"-");
+  const picBtns=(arr,redraw)=>h("div",{style:"display:flex;gap:6px;flex-wrap:wrap;align-items:center"},
+    arr.map((x,k)=>h("span",{style:"position:relative"},h("img",{src:x.u,alt:"Photo "+(k+1),style:"width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line)"}),
+      h("button",{type:"button","aria-label":"Remove photo",style:"position:absolute;top:-6px;right:-6px;border-radius:99px;border:0;width:22px;height:22px;background:var(--ink);color:var(--panel)",onclick:()=>{URL.revokeObjectURL(x.u);arr.splice(k,1);redraw();}},"✕"))),
+    h("button",{type:"button",class:"btn ghost small",onclick:()=>{const inp=h("input",{type:"file",accept:"image/*",multiple:true,style:"display:none"});
+      inp.addEventListener("change",()=>{[...inp.files].forEach(f=>arr.push({f,u:URL.createObjectURL(f)}));inp.remove();redraw();});document.body.append(inp);inp.click();}},"📷 Add photos"));
+  const techChipsFor=set=>{const j=job(),crewNow=new Set(membersOn(j,TODAY())),ts=activeTechs().slice().sort((a,b)=>(crewNow.has(b.id)-crewNow.has(a.id))||(a.name||"").localeCompare(b.name||""));
+    return h("div",{class:"skillpick"},ts.map(t=>h("button",{type:"button",class:"skill","aria-pressed":String(set.has(t.id)),onclick:()=>{set.has(t.id)?set.delete(t.id):set.add(t.id);drawForm();}},t.name)));};
+  function resetForm(){editId="";sev="fyi";fixOn=false;fixTo.clear();txt.value="";pics.forEach(x=>{try{URL.revokeObjectURL(x.u);}catch(e){}});pics.length=0;cab=pre.cab||"";sys=pre.sys||"";pull=pre.pull||"";cable=pre.cable||"";}
+  function startEdit(n){resetForm();editId=n.id;sev=n.sev||"fyi";txt.value=n.text||"";cab=n.cab||"";sys=n.sys||"";pull=n.pull||"";cable=n.cable||"";
+    fixOn=!!n.fix;(n.fix&&n.fix.to||[]).forEach(t=>fixTo.add(t));drawForm();const sh=$(".sheet");if(sh)sh.scrollTop=0;setTimeout(()=>txt.focus(),50);}
   function drawForm(){form.textContent="";if(!can)return;const j=job(),cs=cablesOf(j);
     const cabs=cabsOf(j),syss=[...new Set(cs.filter(c=>!cab||c.rack===cab).map(c=>c.type).filter(Boolean))].sort((a,b)=>sysRank(j,a)-sysRank(j,b)),
       pulls=[...new Set(cs.filter(c=>c.pull&&(!cab||c.rack===cab)&&(!sys||c.type===sys)).map(c=>c.pull))].sort(natCmp);
     const sel=(lbl,val,opts,on)=>{const s_=h("select",{"aria-label":lbl},h("option",{value:""},lbl+": any"),opts.map(([v,l])=>h("option",{value:v,selected:val===v},l)));s_.addEventListener("change",()=>on(s_.value));return s_;};
-    const cObj=cable?cs.find(c=>c.id===cable):null;
-    form.append(...[h("strong",{},cObj?"Add a note for "+cObj.name:"Add a note"),
+    const cObj=cable?cs.find(c=>c.id===cable):null,ed=editId?notesOf(j).find(x=>x.id===editId):null;
+    const oldPh=ed?S.files.filter(f=>f.noteId===ed.id&&!f.noteRec):[];
+    form.style.borderColor=ed?"var(--accent)":"";
+    form.append(...[h("strong",{},ed?"Edit note":cObj?"Add a note for "+cObj.name:"Add a note"),
       cObj?h("div",{class:"chips",style:"gap:6px;align-items:center"},h("span",{class:"chip"},"🔌 "+cObj.name+(cObj.from&&cObj.to?" · "+cObj.from+" → "+cObj.to:""),
         h("button",{type:"button",class:"iconbtn","aria-label":"Not for this cable",onclick:()=>{cable="";drawForm();}},"✕"))):null,
       h("div",{class:"chips",style:"gap:6px"},NOTE_SEV.map(([k,l,col])=>h("button",{type:"button",class:"chipbtn","aria-pressed":String(sev===k),style:sev===k?"background:"+col+";border-color:"+col+";color:#fff":"border-color:"+col+";color:"+col,onclick:()=>{sev=k;drawForm();}},l))),
@@ -4792,46 +4808,77 @@ function notesSheet(jid,pre){pre=pre||{};
         cabs.length?sel("Cabinet",cab,cabs.map(c=>[c,"Cabinet "+c]),v=>{cab=v;sys="";pull="";drawForm();}):null,
         syss.length?sel("System",sys,syss.map(s_=>[s_,s_]),v=>{sys=v;pull="";drawForm();}):null,
         pulls.length?sel("Pull",pull,pulls.map(p=>[p,pullShort({pull:p})]),v=>{pull=v;if(v){const c=cs.find(x=>x.pull===v);if(c){cab=c.rack||cab;sys=c.type||sys;}}drawForm();}):null):null,
-      h("div",{style:"display:flex;gap:6px;flex-wrap:wrap;align-items:center"},
-        pics.map((x,k)=>h("span",{style:"position:relative"},h("img",{src:x.u,alt:"Photo "+(k+1),style:"width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line)"}),
-          h("button",{type:"button","aria-label":"Remove photo",style:"position:absolute;top:-6px;right:-6px;border-radius:99px;border:0;width:22px;height:22px;background:var(--ink);color:var(--panel)",onclick:()=>{URL.revokeObjectURL(x.u);pics.splice(k,1);drawForm();}},"✕"))),
-        h("button",{type:"button",class:"btn ghost small",onclick:()=>{const inp=h("input",{type:"file",accept:"image/*",multiple:true,style:"display:none"});
-          inp.addEventListener("change",()=>{[...inp.files].forEach(f=>pics.push({f,u:URL.createObjectURL(f)}));inp.remove();drawForm();});document.body.append(inp);inp.click();}},"📷 Add photos")),
-      h("div",{style:"display:flex;gap:8px;align-items:center"},h("button",{type:"button",class:"btn",disabled:busy,onclick:post},busy?"Posting…":"Post note"),h("span",{class:"status"},"Everyone on the job can see it. It's also saved in Documents → Notes."))].filter(Boolean));}
-  async function post(){const t=txt.value.trim();if(!t){toast("Type the note first");txt.focus();return;}if(busy)return;busy=true;
-    const id=Date.now().toString(36)+Math.random().toString(36).slice(2,5);
-    const cObj=cable?cablesOf(job()).find(c=>c.id===cable):null;
-    const n={text:t,sev,at:Date.now(),by:myId||"",cab:cab||"",sys:sys||"",pull:pull||"",cable:cObj?cObj.id:"",cableName:cObj?cObj.name:""};
-    drawForm();
-    const where=noteWhere(n),stamp=fmt(new Date(n.at),{month:"short",day:"numeric"})+" "+fmtTime(n.at),base="Note · "+sevInfo(sev)[1]+(where?" · "+where:"")+" · "+stamp;
-    const ex={noteId:id,folder:"Notes",quiet:true};if(cObj)ex.cableId=cObj.id;
-    try{if(pics.length)n.photos=(await uploadFiles(pics.map((x,k)=>new File([x.f],(base+" "+(k+1)).replace(/[\\/:*?"<>|]/g,"-")+".jpg",{type:x.f.type||"image/jpeg"})),jid,"",Object.assign({},ex))).filter(Boolean);
-      const rec=[sevInfo(sev)[1].toUpperCase()+" NOTE · "+job().name,"When: "+stamp,"By: "+meName(),where?"Where: "+where:"","",t,n.photos&&n.photos.length?"\nPhotos: "+n.photos.length+" (in this Notes folder)":""].filter(x=>x!=="").join("\n");
-      const recIds=await uploadFiles([new File([rec],base.replace(/[\\/:*?"<>|]/g,"-")+".txt",{type:"text/plain"})],jid,"",Object.assign({},ex,{noteRec:true}));if(recIds[0])n.rec=recIds[0];}
-    catch(e){}
-    if(await saveNote(job(),id,n)){pics.forEach(x=>{try{URL.revokeObjectURL(x.u);}catch(e){}});pics.length=0;txt.value="";logEvent(meName()+" posted a"+(sev==="urgent"?"n URGENT":"")+" note on "+job().name+": "+t.slice(0,80),{ev:"note",jobId:jid});toast(sev==="urgent"?"Urgent note posted":"Note posted");}
-    busy=false;drawList();}
-  function card(n){const [k,l,col]=sevInfo(n.sev),done=!!n.doneAt,where=noteWhere(n);
+      oldPh.length?h("div",{style:"display:flex;gap:6px;flex-wrap:wrap;align-items:center"},h("span",{class:"status"},"Photos on it:"),oldPh.map(f=>thumb(f))):null,
+      picBtns(pics,drawForm),
+      /* fix-it ticket */
+      h("label",{class:"check",for:"ntFix",style:"text-transform:none;letter-spacing:0"},(()=>{const c=h("input",{type:"checkbox",id:"ntFix",checked:fixOn});c.addEventListener("change",()=>{fixOn=c.checked;drawForm();});return c;})(),"🔧 Fix-it ticket: something needs to be fixed"),
+      fixOn?h("div",{class:"stack",style:"gap:4px"},h("span",{class:"flabel",style:"margin:0"},"Who should fix it (optional)"),techChipsFor(fixTo)):null,
+      h("div",{style:"display:flex;gap:8px;align-items:center;flex-wrap:wrap"},h("button",{type:"button",class:"btn",disabled:busy,onclick:post},busy?"Saving…":ed?"Save changes":fixOn?"Post fix-it ticket":"Post note"),
+        ed?h("button",{type:"button",class:"btn ghost",onclick:()=>{resetForm();drawForm();}},"Cancel"):null,
+        h("span",{class:"status"},ed?"Changes and new photos are saved in Documents → Notes too.":"Everyone on the job can see it. It's also saved in Documents → Notes."))].filter(Boolean));}
+  async function record(j,id,n,title,lines,ex){try{const stamp=fmt(new Date(),{month:"short",day:"numeric"})+" "+fmtTime(Date.now());
+      const body=[title+" · "+j.name,"When: "+stamp,"By: "+meName(),noteWhere(n)?"Where: "+noteWhere(n):"",""].concat(lines).filter(x=>x!==undefined).join("\n");
+      await uploadFiles([new File([body],safe(title+(noteWhere(n)?" · "+noteWhere(n):"")+" · "+stamp)+".txt",{type:"text/plain"})],jid,"",Object.assign({},ex,{noteRec:true}));}catch(e){}}
+  async function upPics(arr,base,ex){if(!arr.length)return [];try{return (await uploadFiles(arr.map((x,k)=>new File([x.f],safe(base+" "+(k+1))+".jpg",{type:x.f.type||"image/jpeg"})),jid,"",Object.assign({},ex))).filter(Boolean);}catch(e){return [];}}
+  async function post(){const t=txt.value.trim();if(!t){toast("Type the note first");txt.focus();return;}if(busy)return;busy=true;drawForm();
+    const j=job(),cObj=cable?cablesOf(j).find(c=>c.id===cable):null,old=editId?notesOf(j).find(x=>x.id===editId):null;
+    const id=old?old.id:Date.now().toString(36)+Math.random().toString(36).slice(2,5);
+    const n=Object.assign({},old||{at:Date.now(),by:myId||""},{text:t,sev,cab:cab||"",sys:sys||"",pull:pull||"",cable:cObj?cObj.id:"",cableName:cObj?cObj.name:""});delete n.id;
+    if(fixOn)n.fix=Object.assign({status:"open"},old&&old.fix||{},{to:[...fixTo]});else delete n.fix;
+    if(old){n.editedAt=Date.now();n.editedBy=myId||"";}
+    const stamp=fmt(new Date(),{month:"short",day:"numeric"})+" "+fmtTime(Date.now()),ex={noteId:id,folder:"Notes",quiet:true};if(cObj)ex.cableId=cObj.id;
+    const kind=(fixOn?"Fix-it":"Note")+" · "+sevInfo(sev)[1];
+    const newPh=await upPics(pics,kind+(noteWhere(n)?" · "+noteWhere(n):"")+" · "+stamp,ex);if(newPh.length)n.photos=[...(n.photos||[]),...newPh];
+    await record(j,id,n,(old?"EDITED ":"")+kind.toUpperCase(),[t,fixOn&&fixTo.size?"Fix it: "+[...fixTo].map(techName).join(", "):"",newPh.length?"\nPhotos added: "+newPh.length:""].filter(Boolean),ex);
+    if(await saveNote(j,id,n)){logEvent(meName()+(old?" edited a note":fixOn?" opened a fix-it ticket":" posted a"+(sev==="urgent"?"n URGENT":"")+" note")+" on "+j.name+": "+t.slice(0,80),{ev:"note",jobId:jid});
+      toast(old?"Note updated":fixOn?"Fix-it ticket posted":sev==="urgent"?"Urgent note posted":"Note posted");resetForm();}
+    busy=false;drawForm();drawList();}
+  const put=async(n,chg,msg,log)=>{const v=Object.assign({},n,chg);delete v.id;if(await saveNote(job(),n.id,v)){if(msg)toast(msg);if(log)logEvent(log,{ev:"note",jobId:jid});}drawList();};
+  async function saveFixed(n){if(busy)return;busy=true;drawList();const j=job(),how=howTxt.value.trim(),ex={noteId:n.id,folder:"Notes",quiet:true};if(n.cable)ex.cableId=n.cable;
+    const ph=await upPics(fixPics,"Fixed · "+(noteWhere(n)||j.name)+" · "+fmt(new Date(),{month:"short",day:"numeric"})+" "+fmtTime(Date.now()),ex);
+    await record(j,n.id,n,"FIXED",["Ticket: "+n.text,how?"What was done: "+how:"",ph.length?"\nPhotos: "+ph.length:""].filter(Boolean),ex);
+    const fx=Object.assign({},n.fix,{status:"fixed",fixedBy:myId||"",fixedAt:Date.now(),how,fixPhotos:ph});
+    fixPics.forEach(x=>{try{URL.revokeObjectURL(x.u);}catch(e){}});fixPics.length=0;howTxt.value="";fixing="";busy=false;
+    await put(n,{fix:fx,photos:[...(n.photos||[]),...ph]},"Marked fixed. A lead closes it after checking.",meName()+" fixed: "+n.text.slice(0,80)+" · "+j.name);}
+  const FIXST={open:["Open","var(--over)"],fixing:["Being fixed","var(--warn,#b7791f)"],fixed:["Fixed · needs a lead to check","var(--ok)"]};
+  function card(n){const [k,l,col]=sevInfo(n.sev),done=!!n.doneAt,where=noteWhere(n),fx=n.fix,fst=fx&&FIXST[fx.status||"open"];
+    const btns=[];
+    if(!done&&canEdit(n))btns.push(h("button",{type:"button",class:"btn ghost small",onclick:()=>startEdit(n)},"✎ Edit"));
+    if(!done&&can&&!fx&&(m||n.by===myId))btns.push(h("button",{type:"button",class:"btn ghost small",onclick:()=>put(n,{fix:{status:"open",to:[]}},"Made into a fix-it ticket",meName()+" made a note a fix-it ticket on "+job().name)},"🔧 Make fix-it"));
+    if(!done&&can&&fx&&fx.status==="open")btns.push(h("button",{type:"button",class:"btn ghost small",onclick:()=>put(n,{fix:Object.assign({},fx,{status:"fixing",fixer:myId||"",fixingAt:Date.now()})},"You're on it")},"Start fixing"));
+    if(!done&&can&&fx&&fx.status!=="fixed")btns.push(h("button",{type:"button",class:"btn small",onclick:()=>{fixing=fixing===n.id?"":n.id;drawList();}},"✓ Mark fixed"));
+    if(!done&&m&&fx&&fx.status==="fixed")btns.push(h("button",{type:"button",class:"btn ghost small",onclick:()=>put(n,{fix:Object.assign({},fx,{status:"open",fixedAt:0,fixedBy:""})},"Sent back: still needs fixing",meName()+" sent a fix-it ticket back on "+job().name)},"Not fixed yet"));
+    if(m)btns.push(done?h("button",{type:"button",class:"btn ghost small",onclick:()=>put(n,{doneAt:0,doneBy:""},"Reopened")},"Reopen")
+      :h("button",{type:"button",class:"btn small",onclick:()=>put(n,{doneAt:Date.now(),doneBy:myId||""},fx?"Checked and closed":"Marked done and archived",meName()+" closed a "+(fx?"fix-it ticket":"note")+" on "+job().name)},fx&&fx.status==="fixed"?"✓ Checked · close":"✓ Done"));
+    const ph=S.files.filter(f=>f.noteId===n.id&&!f.noteRec);
     return h("div",{class:"panel stack",style:"gap:4px;padding:10px;border-left:6px solid "+col+(done?";opacity:.65":"")},
       h("div",{style:"display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"},
-        h("span",{class:"tpill",style:"background:"+col+";color:#fff;cursor:default"},l),
-        h("span",{class:"status"},(names[n.by]||"Someone")+" · "+fmtS(iso(new Date(n.at)))+" "+fmtTime(n.at))),
+        h("span",{style:"display:flex;gap:6px;flex-wrap:wrap"},h("span",{class:"tpill",style:"background:"+col+";color:#fff;cursor:default"},l),
+          fx?h("span",{class:"tpill",style:"background:"+fst[1]+";color:#fff;cursor:default"},"🔧 "+fst[0]):null),
+        h("span",{class:"status"},(names[n.by]||"Someone")+" · "+fmtS(iso(new Date(n.at)))+" "+fmtTime(n.at)+(n.editedAt?" · edited":""))),
       h("div",{style:"white-space:pre-wrap"},n.text),
       where?h("div",{class:"status",style:"margin:0"},"📍 "+where):null,
-      (()=>{const ph=S.files.filter(f=>f.noteId===n.id&&!f.noteRec);return ph.length?h("div",{style:"display:flex;gap:6px;flex-wrap:wrap"},ph.map(f=>h("button",{type:"button",class:"linkbtn",style:"padding:0",title:f.name,onclick:()=>openDoc(f,()=>notesSheet(jid,pre))},thumb(f)))):null;})(),
-      done?h("div",{class:"status",style:"margin:0"},"✓ Done by "+(names[n.doneBy]||"a lead")+" "+ago(n.doneAt)):null,
-      m?h("div",{style:"display:flex;gap:6px;justify-content:flex-end"},done?h("button",{type:"button",class:"btn ghost small",onclick:async()=>{const v=Object.assign({},n,{doneAt:0,doneBy:""});delete v.id;await saveNote(job(),n.id,v);drawList();}},"Reopen")
-          :h("button",{type:"button",class:"btn small",onclick:async()=>{const v=Object.assign({},n,{doneAt:Date.now(),doneBy:myId||""});delete v.id;if(await saveNote(job(),n.id,v)){toast("Marked done and archived");logEvent(meName()+" closed a note on "+job().name,{ev:"note",jobId:jid});}drawList();}},"✓ Done")):null);}
-  function drawList(){list.textContent="";const j=job();if(!j)return;const all=notesOf(j),open=all.filter(n=>!n.doneAt),done=all.filter(n=>n.doneAt);
-    const srt=a=>a.slice().sort((x,y)=>((pre.cable&&y.cable===pre.cable)-(pre.cable&&x.cable===pre.cable))||(order==="sev"?(sevRank(x.sev)-sevRank(y.sev)||y.at-x.at):(y.at-x.at)));
-    list.append(h("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"},h("strong",{},"Open notes ("+open.length+")"),
+      fx&&(fx.to||[]).length?h("div",{class:"status",style:"margin:0"},"🔧 Fix it: "+fx.to.map(techName).join(", ")):null,
+      fx&&fx.status==="fixing"?h("div",{class:"status",style:"margin:0"},"Being fixed by "+(names[fx.fixer]||realName(fx.fixer)||"someone")+" · "+ago(fx.fixingAt)):null,
+      fx&&fx.status==="fixed"?h("div",{class:"status",style:"margin:0;color:var(--ok)"},"✓ Fixed by "+(names[fx.fixedBy]||realName(fx.fixedBy)||"someone")+" · "+ago(fx.fixedAt)+(fx.how?": "+fx.how:"")):null,
+      ph.length?h("div",{style:"display:flex;gap:6px;flex-wrap:wrap"},ph.map(f=>h("button",{type:"button",class:"linkbtn",style:"padding:0",title:f.name,onclick:()=>openDoc(f,()=>notesSheet(jid,pre))},thumb(f)))):null,
+      fixing===n.id?h("div",{class:"panel stack",style:"gap:6px;padding:8px"},h("strong",{},"Mark fixed"),howTxt,picBtns(fixPics,drawList),
+        h("div",{style:"display:flex;gap:8px"},h("button",{type:"button",class:"btn small",disabled:busy,onclick:()=>saveFixed(n)},busy?"Saving…":"Save · fixed"),h("button",{type:"button",class:"btn ghost small",onclick:()=>{fixing="";drawList();}},"Cancel"))):null,
+      done?h("div",{class:"status",style:"margin:0"},"✓ Closed by "+(names[n.doneBy]||"a lead")+" "+ago(n.doneAt)):null,
+      btns.length?h("div",{style:"display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap"},btns):null);}
+  function drawList(){list.textContent="";const j=job();if(!j)return;const all=notesOf(j),open=all.filter(n=>!n.doneAt),done=all.filter(n=>n.doneAt),fixN=open.filter(n=>n.fix).length;
+    const fixRank=n=>!n.fix?3:n.fix.status==="open"?0:n.fix.status==="fixing"?1:2;
+    const srt=a=>a.slice().sort((x,y)=>((pre.cable&&y.cable===pre.cable)-(pre.cable&&x.cable===pre.cable))||(view==="fix"?fixRank(x)-fixRank(y):0)||(order==="sev"?(sevRank(x.sev)-sevRank(y.sev)||y.at-x.at):(y.at-x.at)));
+    const shown=view==="fix"?open.filter(n=>n.fix):open;
+    list.append(h("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"},
+      h("div",{class:"seg-ctl"},[["all","Open notes ("+open.length+")"],["fix","🔧 Fix-it ("+fixN+")"]].map(([k,l])=>h("button",{type:"button","aria-pressed":String(view===k),onclick:()=>{view=k;drawList();}},l))),
       h("div",{class:"seg-ctl"},[["sev","By severity"],["time","Newest first"]].map(([k,l])=>h("button",{type:"button","aria-pressed":String(order===k),onclick:()=>{order=k;drawList();}},l)))));
-    if(!open.length)list.append(h("p",{class:"status",style:"margin:0"},"No open notes."));
-    srt(open).forEach(n=>list.append(card(n)));
+    if(!shown.length)list.append(h("p",{class:"status",style:"margin:0"},view==="fix"?"No open fix-it tickets.":"No open notes."));
+    srt(shown).forEach(n=>list.append(card(n)));
     if(done.length)list.append(h("button",{type:"button",class:"linkbtn",style:"justify-self:start",onclick:()=>{showDone=!showDone;drawList();}},(showDone?"▾ ":"▸ ")+"Archived ("+done.length+")"));
     if(showDone)done.sort((x,y)=>y.doneAt-x.doneAt).forEach(n=>list.append(card(n)));}
   box.append(form,list);drawForm();drawList();
-  openView("Notes · "+job().name,[box]);$(".sheet").classList.add("wide");liveSheet=()=>{if(document.activeElement!==txt)drawList();};}
+  openView("Notes · "+job().name,[box]);$(".sheet").classList.add("wide");liveSheet=()=>{if(document.activeElement!==txt&&document.activeElement!==howTxt)drawList();};}
 
 /* phase progress from cable steps that share the phase's id */
 function phaseCables(j,p){if(p.cab){const r=scopeDone(j,{rack:p.cab});return r.gl.length?{n:r.done,of:r.gl.length,cab:p.cab}:null;}const cs=cablesOf(j);if(!cs.length||!stepsOf(j).some(s=>s.id===p.id))return null;return {n:stepCount(j,p.id),of:cs.length};}
