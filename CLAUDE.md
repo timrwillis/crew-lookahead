@@ -20,6 +20,7 @@ Live at https://timrwillis.github.io/crew-lookahead (GitHub Pages from `main` of
 - Check list items 2-5 are derived in `ckOf` from sign-offs (2+3 Ported, 4 VFL/Tested, 5 = lead/super who recorded them once 1-4 done), marked `fromSteps`, never saved (`saveCk` strips them); `ckRaw` = stored only.
 - Roll call: `attendance/<date>` {marks:{techId:{s:"here"|"out",at,by}}}, managers only (own listener `startAtt`, not in `S`, so missing rules don't break the board). `outOn`/`awayOn` feed `dayInfo` (marked-out people count as off). UI: `rollBar`/`attBtns` on Home → Manpower, `attHistory` view.
 - Job notes: `marks._note_<id>` {text,sev(urgent/fyi/suggest/other),cab,sys,pull,cable,photos,fix:{status open/fixing/fixed,to,…},doneAt}; `notesSheet(jid,pre)`; photos + .txt records go to Documents folder "Notes" (files carry `noteId`).
+- Crew home (`renderMyWork`): main card = current task; `myWorkList` (via `workFooter`) lists every open task they're on in any job (`myOpenWork`), each opens `myTaskSheet` to check off cables / mark done / scan.
 - Quick tasks: `kind:"quick"`, `quick.pri` (critical/high/normal/low), `quick.client`.
 
 ## Working on it

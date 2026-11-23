@@ -399,6 +399,9 @@ details summary{cursor:pointer;color:var(--muted);font-size:.9rem}
 .wcard{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px;display:grid;gap:8px}
 .wcard.main{border:2px solid var(--locked);box-shadow:0 2px 10px rgba(0,0,0,.06)}
 .wcard.next{background:var(--bg)}
+.mywjob{font-weight:700;margin-top:6px;color:var(--muted);font-size:.85rem}
+.mywrow{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;text-align:left;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:10px;padding:10px 12px;min-height:48px}
+.mywrow .nm{font-weight:600;overflow-wrap:anywhere}.mywrow .nm small{display:block;font-weight:400;color:var(--muted);font-size:.8rem}.mywrow .go{font-size:1.3rem;color:var(--muted)}
 .wlbl{font:700 .7rem var(--f-body);text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
 .wtitle{font-size:1.45rem;font-weight:800;line-height:1.2;overflow-wrap:anywhere}.wtitle.sm{font-size:1.1rem}
 .wsub{color:var(--muted);font-weight:600}
@@ -2251,6 +2254,7 @@ function renderMyWork(v){const d=TODAY(),me=myTech(),t=today();
   if(tk){const nx=nextAfter(me,j,tk,d);
     v.append(h("div",{class:"wcard next"},h("div",{class:"wlbl"},"Next up"),nx?h("div",{},h("div",{class:"wtitle sm"},nx.t?nx.t.name:nx.j.name),h("div",{class:"status"},nx.t?nx.j.name:"Whole job")):h("div",{class:"status"},"Nothing lined up yet. Your lead will assign you.")));}
   const myFlags=S.asks.filter(a=>isFlag(a)&&a.by===myId&&a.status!=="done");
+  curWorkKey=j.id+":"+(tk?tk.id:"");
   if(myFlags.length)v.append(h("div",{class:"wcard"},h("div",{class:"wlbl"},"Your open flags"),myFlags.map(f=>h("div",{class:"status",style:"color:var(--ink)"},(f.reason||"Problem")+(f.jobId?" · "+jobName(f.jobId):"")+" · "+(f.to==="boss"?"with the superintendent":"with your lead")+(f.reply?" · Reply: "+f.reply:"")))));
   workFooter(v);}
 function finishJobForm(j){const open=tasksOf(j).filter(t=>!t.doneOn);
@@ -2258,7 +2262,43 @@ function finishJobForm(j){const open=tasksOf(j).filter(t=>!t.doneOn);
     open.length?h("p",{class:"full",style:"margin:0;color:var(--over)"},open.length+" task"+(open.length>1?"s are":" is")+" still open: "+open.map(t=>t.name).join(", ")+"."):null,
     field({id:"fjNote",label:"Anything they should know (optional)",value:"",full:true,placeholder:"e.g. All cables landed and tested, labels on"})].filter(Boolean),
     async()=>{try{await crewFinishJob(j,val("fjNote"));const me=myTech(),nx=me?nextJobAfter(me,j,TODAY()):null;setTimeout(()=>whatsNext(j.name,nx&&nx.j.id!==j.id?nx:null),350);}catch(err){writeErr(err);return false;}});}
-function workFooter(v){v.append(h("div",{class:"wfoot"},
+/* everything assigned to me on any open job, so crew can knock out small things on other tasks too */
+let curWorkKey="";
+function myOpenWork(me,d){const out=[],seen=new Set(),add=(j,t,tag)=>{const k=j.id+":"+(t?t.id:"");if(seen.has(k))return;seen.add(k);out.push({j,t,tag,k});};
+  realJobs().filter(j=>j.start&&!doneDate(j)&&!jobFin(j)).sort(byPri).forEach(j=>{
+    const open=tasksOf(j).filter(t=>!t.doneOn);
+    open.filter(t=>crewOn(t,d).includes(me.id)).forEach(t=>add(j,t,""));
+    if(crewOn(j,d).includes(me.id)){if(open.length)open.forEach(t=>add(j,t,"Whole-job crew"));else if(!tasksOf(j).length)add(j,null,"");}});
+  return out;}
+function myWorkList(v){const me=myTech(),d=TODAY();if(!me)return;
+  const items=myOpenWork(me,d).filter(x=>x.k!==curWorkKey);curWorkKey="";if(!items.length)return;
+  const card=h("div",{class:"wcard"},h("div",{class:"wlbl"},"All my work ("+items.length+")"),h("div",{class:"status"},"Everything you're on. Tap one to check off cables or mark it done, even if you're working on something else."));
+  let last="";items.forEach(x=>{if(x.j.id!==last){last=x.j.id;card.append(h("div",{class:"mywjob"},x.j.name));}
+    const st=x.t?tstate(x.j,x.t):null,step=x.t?stepForTask(x.j,x.t):null,cs=cablesOf(x.j);
+    const left=step?cs.filter(c=>!markOf(x.j,c.id,step.id)).length:0;
+    const sub=[x.j.start>d?"Starts "+fmtS(x.j.start):"",heldOn(x.t||x.j,d)||st&&st.state==="hold"?"On hold":st&&st.state==="working"?"Someone's working on it":"",step?(left?left+" of "+cs.length+" cables left":"All cables ✓"):"",x.tag].filter(Boolean).join(" · ");
+    card.append(h("button",{type:"button",class:"mywrow",onclick:()=>myTaskSheet(x.j.id,x.t?x.t.id:"")},h("span",{class:"nm"},x.t?x.t.name:"Whole job",sub?h("small",{},sub):null),h("span",{class:"go"},"›")));});
+  v.append(card);}
+function myTaskSheet(jid,tid){const j=S.jobs.find(x=>x.id===jid);if(!j)return;const t=tid?tasksOf(j).find(x=>x.id===tid):null,me=myTech(),d=TODAY();
+  const step=t?stepForTask(j,t):null,cs=cablesOf(j),left=step?cs.filter(c=>!markOf(j,c.id,step.id)):[];
+  const nodes=[h("p",{class:"status",style:"margin:0"},[t?j.name:"",j.site,t?phaseName(j,t):""].filter(Boolean).join(" · ")||"Whole job"),
+    (()=>{const ps=[step?cablePill(j,t):null,docPill(j,t||null,false)].filter(Boolean);return ps.length?h("div",{class:"pills"},ps):null;})(),
+    step?h("div",{class:"wleft"},h("strong",{},left.length?left.length+" cable"+(left.length>1?"s":"")+" left":"All cables "+step.name.toLowerCase()+" ✓"),left.length?h("div",{class:"status"},left.slice(0,8).map(c=>c.name).join(", ")+(left.length>8?" +"+(left.length-8)+" more":"")):null):null];
+  const btns=h("div",{class:"stack",style:"gap:8px"});
+  if(CAN_POST()){
+    if(cs.length&&stepsOf(j).length)btns.append(h("button",{type:"button",class:"btn",onclick:()=>cableTracker(j.id)},"Check off cables"));
+    if(needsScan(j))btns.append(h("button",{type:"button",class:"btn ghost",onclick:()=>scanFindCable(j.id)},isLaptop()?"⌨ Scan a cable":"📷 Scan a cable"));
+    if(t){let armed=false;const b=h("button",{type:"button",class:"btn ghost",onclick:async()=>{
+        if(!armed){armed=true;b.textContent=left.length?"Tap again: "+left.length+" cable"+(left.length>1?"s":"")+" not marked":"Tap again to confirm";setTimeout(()=>{armed=false;b.textContent="✓ Mark this task done";},4000);return;}
+        b.disabled=true;try{await setTaskState(j,t,{state:"done",on:d,at:Date.now(),by:myId||""});
+          const nm=(me&&me.name)||meName(),msg=nm+" finished "+targetLabel(j,t);logEvent(msg,{ev:"done",jobId:j.id});const ms=mgrUids();if(ms.length)logEvent(msg,{ev:"notice",notify:ms,title:"Task finished",jobId:j.id});
+          if(ms.length&&tasksOf(j).every(x=>x.id===t.id||x.doneOn))logEvent("Every task on "+j.name+" is done. Close the job when it's ready.",{ev:"notice",notify:ms,title:"Job ready to close",jobId:j.id});
+          toast(t.name+" marked done");closeSheet();}catch(err){writeErr(err);b.disabled=false;}}},"✓ Mark this task done");btns.append(b);}
+    else if(!jobFin(j))btns.append(h("button",{type:"button",class:"btn ghost",onclick:()=>finishJobForm(j)},"🏁 Whole job complete"));
+    btns.append(h("button",{type:"button",class:"btn ghost",onclick:()=>flagForm()},"⚑ Report a problem"));}
+  nodes.push(btns);
+  openView(t?t.name:j.name,[h("div",{class:"full stack"},nodes)]);}
+function workFooter(v){myWorkList(v);v.append(h("div",{class:"wfoot"},
   CAN_POST()?h("button",{type:"button",class:"btn ghost",onclick:()=>flagForm()},"⚑ Report a problem"):null,
   CAN_POST()?h("button",{type:"button",class:"btn ghost",onclick:()=>callInForm()},"Call in"):null,
   h("button",{type:"button",class:"btn ghost",onclick:()=>setTab("off",true)},"Time off"),
