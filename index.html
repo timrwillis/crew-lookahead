@@ -731,6 +731,23 @@ body:has(#scrim:not([hidden])) .fab,body:has(.popwrap) .fab{display:none}
 .toolsline{display:grid;gap:6px;margin:6px 0}
 .tl-h{font-weight:700;font-size:.85rem}
 .tool{display:inline-block;padding:4px 10px;border-radius:999px;background:var(--soft);color:var(--ink);font-size:.84rem;font-weight:600}
+
+.toolpick .ddwrap{position:relative}
+.tl-in{flex:1;min-width:0}
+.tl-in,.toolpick input[type=text]{width:100%;font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink)}
+.tooldd{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:5;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:4px;display:grid;max-height:280px;overflow:auto}
+.tooldd[hidden]{display:none}
+.ddi{border:0;background:transparent;color:var(--ink);text-align:left;font:inherit;padding:11px 12px;border-radius:8px;cursor:pointer;min-height:44px}
+.ddi.hi,.ddi:hover{background:var(--soft)}
+.ddi.add{color:var(--accent);font-weight:600}
+.tooltag{display:inline-flex;align-items:center;gap:4px;padding:5px 6px 5px 12px;border-radius:999px;background:var(--soft);color:var(--ink);font-weight:600;font-size:.88rem}
+.tooltag button{border:0;background:transparent;color:var(--muted);font-size:.85rem;width:26px;height:26px;border-radius:50%;cursor:pointer}
+.tooltag button:hover{background:var(--line);color:var(--ink)}
+.brand{min-width:0;flex:1}.brand .status{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.kitrows{display:grid;gap:4px;margin-top:4px}
+.kitrow{display:grid;grid-template-columns:minmax(80px,auto) minmax(0,1fr);gap:10px;font-size:.88rem;padding:6px 10px;border-radius:8px;background:var(--bg)}
+.kitn{font-weight:700}.kitt{color:var(--muted)}
+.kitedit{display:grid;gap:6px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
 </style>
 </head>
 <body>
@@ -1181,7 +1198,8 @@ function quickAdd(){const can=CAN_POST(),m=MGR(),go=fn=>()=>{closeSheet();setTim
     can?["⏱","Use recharge","Your monthly recharge hours",()=>rechargeForm()]:null,
     m?["🗓","Time off","Add time off for someone",()=>offForm(null)]:(can?["🗓","Request time off","PTO, classes, advance notice",()=>requestForm()]:null),
     m?["👷","Add tech","Or a temporary helper",()=>techForm(null)]:null,
-    m?["📦","Material item","Add to stock",()=>matForm(null)]:null].filter(Boolean);
+    m?["📦","Material item","Add to stock",()=>matForm(null)]:null,
+    m?["🧰","Tool list","Tools for each step and the crew list",()=>toolLibSheet()]:null].filter(Boolean);
   openView("Add",[h("div",{class:"full moregrid qagrid"},items.map(([ic,l,sub,fn])=>h("button",{type:"button",class:"moreitem",onclick:go(fn)},h("span",{class:"mi qi","aria-hidden":"true"},ic),h("span",{},h("strong",{},l),h("small",{},sub)))))]);}
 function moreSheet(){const main=MAIN_TABS(),items=[["crew","Crew","Techs, hours, team, reports"],["off","Time off","Call-ins, requests, recharge"],["messages","Messages","Notes, asks, activity, deleted"],["material","Material","Stock and orders"],["board","Board","Week and month planner"],["jobs","Jobs","Jobs and tasks"],["chat","Chat","Crew group chat"]]
   .filter(([t])=>!main.includes(t)&&tabAllowed(t));
@@ -2773,7 +2791,7 @@ function bumpQty(m,delta,qEl){const cur=(qtyPending[m.id]!=null?qtyPending[m.id]
   clearTimeout(qtyTimers[m.id]);qtyTimers[m.id]=setTimeout(async()=>{const val=qtyPending[m.id];try{await db.collection("material").doc(m.id).update({qty:val,updatedAt:Date.now(),updatedBy:myId||""});}catch(err){writeErr(err);}delete qtyPending[m.id];},700);}
 function renderMaterial(v){
   const low=lowStock();
-  v.append(h("div",{class:"sechead"},h("h2",{},"Material"),MGR()?h("div",{class:"tools"},h("button",{class:"btn ghost",type:"button",onclick:materialImport},"Import"),h("button",{class:"btn",type:"button",onclick:()=>matForm(null)},"+ Add item")):null));
+  v.append(h("div",{class:"sechead"},h("h2",{},"Material"),MGR()?h("div",{class:"tools"},h("button",{class:"btn ghost",type:"button",onclick:toolLibSheet},"🧰 Tool list"),h("button",{class:"btn ghost",type:"button",onclick:materialImport},"Import"),h("button",{class:"btn",type:"button",onclick:()=>matForm(null)},"+ Add item")):null));
   const si=h("input",{type:"search",id:"matSearch",placeholder:"Search item, part #, location, job",value:matSearch});
   si.addEventListener("input",()=>{matSearch=si.value;drawList();});
   v.append(h("div",{class:"crow",style:"margin-bottom:10px"},h("div",{class:"search"},si)));
@@ -2889,15 +2907,68 @@ function techChips(set,days,excludeJobId,ro,pool){
       wrap.append(list);}}
   draw();return wrap;
 }
-const TOOL_SUGG=["Punch-down tool","RJ45 crimper","Cable tester","Fluke","Label maker","Fish tape","Pull string","Lubricant","Velcro","Snips","Ladder","Lift","Drill","Spool cart","Flashlight","Fiber kit","VFL"];
-const splitTools=v=>String(v||"").split(/[,\n]/).map(x=>x.trim()).filter(Boolean);
-function toolsEditor(val,onChange,id){const inp=h("input",{type:"text",id:id||"",value:val||"",placeholder:"Punch-down tool, tester, ladder…",autocomplete:"off"}),chips=h("div",{class:"tchips"});
-  const draw=()=>{chips.textContent="";const have=new Set(splitTools(inp.value).map(x=>x.toLowerCase()));
-    TOOL_SUGG.filter(x=>!have.has(x.toLowerCase())).forEach(x=>chips.append(h("button",{type:"button",class:"tchip dep",onclick:()=>{inp.value=[...splitTools(inp.value),x].join(", ");if(onChange)onChange(inp.value);draw();}},"+ "+x)));};
-  inp.addEventListener("input",()=>{if(onChange)onChange(inp.value);draw();});draw();
-  return h("div",{class:"stack",style:"gap:6px"},inp,chips);}
-function toolsLine(j,t){const all=[...new Set([...splitTools(j&&j.tools),...splitTools(t&&t.tools)])];
-  return all.length?h("div",{class:"toolsline"},h("span",{class:"tl-h"},"🧰 Bring"),h("div",{class:"tchips"},all.map(x=>h("span",{class:"tool"},x)))):null;}
+const TOOL_SUGG=["Punch-down tool","RJ45 crimper","Cable tester","Fluke","Label maker","Labels","Fish tape","Pull string","Lubricant","Velcro","Tape","Snips","Ladder","Lift","Drill","Spool cart","Flashlight","Fiber kit","VFL","Prints","Harness","Hard hat","Gloves"];
+const splitTools=v=>(Array.isArray(v)?v:String(v||"").split(/[,\n]/)).map(x=>String(x).trim()).filter(Boolean);
+const toolKey=x=>String(x).trim().toLowerCase();
+const tidyTool=x=>{x=String(x).trim().replace(/\s+/g," ");return x?x[0].toUpperCase()+x.slice(1):x;};
+/* Shared tool list: the crew's saved list (team/crew.tools) + defaults + anything already used on a job or task */
+function toolLib(){const seen=new Map(),add=x=>{x=tidyTool(x);const k=toolKey(x);if(x&&!seen.has(k))seen.set(k,x);};
+  (Array.isArray(crewDoc.tools)?crewDoc.tools:[]).forEach(add);TOOL_SUGG.forEach(add);
+  S.jobs.forEach(j=>{splitTools(j.tools).forEach(add);tasksOf(j).forEach(t=>splitTools(t.tools).forEach(add));});
+  const hidden=new Set((crewDoc.toolsHidden||[]).map(toolKey));
+  return [...seen.values()].filter(x=>!hidden.has(toolKey(x)));}
+function rememberTools(list){if(!MGR())return;const have=new Set((Array.isArray(crewDoc.tools)?crewDoc.tools:[]).map(toolKey)),hid=(crewDoc.toolsHidden||[]).map(toolKey);
+  const add=splitTools(list).map(tidyTool).filter(x=>!have.has(toolKey(x)));const unhide=hid.filter(k=>splitTools(list).some(x=>toolKey(x)===k));
+  if(add.length||unhide.length)saveCrew({tools:[...(crewDoc.tools||[]),...add],toolsHidden:(crewDoc.toolsHidden||[]).filter(x=>!unhide.includes(toolKey(x)))});}
+/* Type-to-search tool picker. Picked tools show as tags; value kept as "A, B, C" (hidden input with id, if given). */
+function toolsEditor(val,onChange,id){let picked=splitTools(val).map(tidyTool),hi=0;
+  const hidden=h("input",{type:"hidden",id:id||"",value:picked.join(", ")});
+  const tags=h("div",{class:"tchips tooltags"}),inp=h("input",{type:"text",placeholder:"Type a tool…",autocomplete:"off","aria-label":"Add a tool",role:"combobox","aria-autocomplete":"list"}),list=h("div",{class:"tooldd",role:"listbox"}),quick=h("div",{class:"tchips"});
+  const emit=()=>{hidden.value=picked.join(", ");if(onChange)onChange(hidden.value);};
+  const add=x=>{x=tidyTool(x);if(!x||picked.some(p=>toolKey(p)===toolKey(x)))return;picked.push(x);inp.value="";emit();rememberTools([x]);draw();inp.focus();};
+  const matches=()=>{const q=toolKey(inp.value),lib=toolLib().filter(x=>!picked.some(p=>toolKey(p)===toolKey(x)));
+    if(!q)return [];return lib.filter(x=>toolKey(x).includes(q)).sort((a,b)=>(toolKey(a).startsWith(q)?0:1)-(toolKey(b).startsWith(q)?0:1)||a.localeCompare(b)).slice(0,8);};
+  function draw(){tags.textContent="";picked.forEach((x,i)=>tags.append(h("span",{class:"tooltag"},x,h("button",{type:"button","aria-label":"Remove "+x,onclick:()=>{picked.splice(i,1);emit();draw();}},"✕"))));
+    if(!picked.length)tags.append(h("span",{class:"status"},"No tools yet"));
+    list.textContent="";const m=matches(),q=inp.value.trim();
+    if(q){if(hi>=m.length+1)hi=0;m.forEach((x,i)=>list.append(h("button",{type:"button",role:"option",class:"ddi"+(i===hi?" hi":""),onmousedown:e=>e.preventDefault(),onclick:()=>add(x)},x)));
+      if(!m.some(x=>toolKey(x)===toolKey(q)))list.append(h("button",{type:"button",role:"option",class:"ddi add"+(hi===m.length?" hi":""),onmousedown:e=>e.preventDefault(),onclick:()=>add(q)},"+ Add “"+tidyTool(q)+"”"));}
+    list.hidden=!q;
+    quick.textContent="";if(!q){const lib=toolLib().filter(x=>!picked.some(p=>toolKey(p)===toolKey(x))).slice(0,10);
+      if(lib.length)quick.append(h("span",{class:"status",style:"align-self:center;font-size:.8rem"},"Quick add:"));lib.forEach(x=>quick.append(h("button",{type:"button",class:"tchip dep",onclick:()=>add(x)},"+ "+x)));}}
+  inp.addEventListener("input",()=>{hi=0;
+    if(/,/.test(inp.value)){const parts=inp.value.split(",");inp.value=parts.pop();parts.map(x=>x.trim()).filter(Boolean).forEach(x=>{const x2=tidyTool(x);if(!picked.some(p=>toolKey(p)===toolKey(x2)))picked.push(x2);});emit();rememberTools(picked);}
+    draw();});
+  inp.addEventListener("keydown",e=>{const m=matches(),n=m.length+(inp.value.trim()&&!m.some(x=>toolKey(x)===toolKey(inp.value))?1:0);
+    if(e.key==="ArrowDown"){e.preventDefault();hi=n?(hi+1)%n:0;draw();}
+    else if(e.key==="ArrowUp"){e.preventDefault();hi=n?(hi-1+n)%n:0;draw();}
+    else if(e.key==="Enter"){e.preventDefault();if(!inp.value.trim())return;add(hi<m.length?m[hi]:inp.value);}
+    else if(e.key==="Backspace"&&!inp.value&&picked.length){picked.pop();emit();draw();}});
+  draw();
+  return h("div",{class:"stack toolpick",style:"gap:6px"},hidden,tags,h("div",{class:"ddwrap"},inp,list),quick);}
+function toolLibSheet(){const box=h("div",{class:"full stack"});
+  const draw=()=>{box.textContent="";const lib=toolLib().sort((a,b)=>a.localeCompare(b)),inp=h("input",{type:"text",class:"tl-in",placeholder:"Add a tool to the list",autocomplete:"off"});
+    const addIt=()=>{const x=tidyTool(inp.value);if(!x)return;rememberTools([x]);inp.value="";setTimeout(draw,50);};
+    inp.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();addIt();}});
+    box.append(h("p",{class:"status",style:"margin:0"},"These show up as you type tools on a job or task. New tools you type are added here on their own."),
+      h("div",{style:"display:flex;gap:8px"},inp,h("button",{type:"button",class:"btn",onclick:addIt},"Add")),
+      h("div",{class:"flabel",style:"margin-top:6px"},"Tools for each step"),
+      h("p",{class:"status",style:"margin:0"},"Set these once. Every job with that step shows its tools to the crew automatically."),
+      h("div",{class:"stack",style:"gap:10px"},KIT_STEPS().map(([k,n])=>h("div",{class:"kitedit"},h("strong",{},n),toolsEditor((crewDoc.stepTools||{})[k]||"",v=>{saveCrew({stepTools:Object.assign({},crewDoc.stepTools||{},{[k]:v})});})))),
+      h("div",{class:"flabel",style:"margin-top:6px"},"All tools in the list"),
+      h("div",{class:"tchips"},lib.map(x=>h("span",{class:"tooltag"},x,h("button",{type:"button","aria-label":"Remove "+x+" from the list",onclick:()=>{const k=toolKey(x);saveCrew({tools:(crewDoc.tools||[]).filter(t=>toolKey(t)!==k),toolsHidden:[...new Set([...(crewDoc.toolsHidden||[]),k])]});setTimeout(draw,50);}},"✕")))));};
+  draw();openView("🧰 Tool list",[box]);}
+const STEP_ALIAS={pulled:"pull",pulling:"pull",pulls:"pull",dressed:"dress",dressing:"dress",terminated:"terminate",terminating:"terminate",terms:"terminate",term:"terminate",termination:"terminate",labeled:"label",labelled:"label",labels:"label",labeling:"label",tested:"test",testing:"test",tests:"test",ported:"port",certified:"certify",certifying:"certify"};
+const stepKey=n=>{const k=toolKey(n);return STEP_ALIAS[k]||k;};
+const stepKit=n=>splitTools((crewDoc.stepTools||{})[stepKey(n)]);
+const KIT_STEPS=()=>{const m=new Map();[...CAB_STEPS_DEFAULT,"VFL","Port","Certify"].forEach(n=>m.set(stepKey(n),n));S.jobs.forEach(j=>stepsOf(j).forEach(st=>{const k=stepKey(st.name);if(k&&!/^scan/.test(st.id)&&!m.has(k))m.set(k,st.name);}));return [...m.entries()];};
+function toolsLine(j,t){const uniq=a=>[...new Map(a.map(x=>[toolKey(x),tidyTool(x)])).values()];
+  const st=j&&t?stepForTask(j,t):null;
+  const base=uniq([...splitTools(j&&j.tools),...splitTools(t&&t.tools),...(st?stepKit(st.name):[])]);
+  const bySt=!st&&j?stepsOf(j).filter(x=>!/^scan/.test(x.id)).map(x=>[x.name,stepKit(x.name)]).filter(([,k])=>k.length):[];
+  if(!base.length&&!bySt.length)return null;
+  return h("div",{class:"toolsline"},h("span",{class:"tl-h"},"🧰 Bring"),base.length?h("div",{class:"tchips"},base.map(x=>h("span",{class:"tool"},x))):null,
+    bySt.length?h("div",{class:"kitrows"},bySt.map(([n,k])=>h("div",{class:"kitrow"},h("span",{class:"kitn"},n),h("span",{class:"kitt"},k.join(", "))))):null);}
 function jobForm(j,sec){
   const ro=!MGR();if(ro||!j)sec="";
   let conf=j?.conf||"likely",pri=j?priOf(j):3;
@@ -2958,7 +3029,8 @@ function jobForm(j,sec){
         others.forEach(o=>{const on=t.after.includes(o.id);wf.append(h("button",{type:"button",class:"tchip dep","aria-pressed":String(on),onclick:()=>{t.after=on?t.after.filter(x=>x!==o.id):[...t.after,o.id];drawCrews();}},o.name||"Untitled"));});
         box.append(h("div",{class:"tpanel"},h("div",{class:"status"},"Most tasks can start anytime. Only pick a task here if this one truly can't start until it's done."),wf,
           h("div",{style:"display:flex;gap:8px"},t.after.length?h("button",{type:"button",class:"btn ghost small",onclick:()=>{t.after=[];drawCrews();}},"Can start anytime"):null,h("button",{type:"button",class:"btn small",onclick:()=>tog("wait")},"Done"))));}
-      if(t.open==="tools"&&!ro)box.append(h("div",{class:"tpanel"},toolsEditor(t.tools,v=>{t.tools=v;}),h("div",{},h("button",{type:"button",class:"btn small",onclick:()=>tog("tools")},"Done"))));
+      if(t.open==="tools"&&!ro)box.append(h("div",{class:"tpanel"},toolsEditor(t.tools,v=>{t.tools=v;}),h("div",{style:"display:flex;gap:8px;flex-wrap:wrap"},h("button",{type:"button",class:"btn small",onclick:()=>tog("tools")},"Done"),
+        tasks.length>1?h("button",{type:"button",class:"btn ghost small",onclick:()=>{const mine=splitTools(t.tools);tasks.forEach(x=>{if(x!==t){const have=splitTools(x.tools);x.tools=[...have,...mine.filter(m=>!have.some(y=>toolKey(y)===toolKey(m)))].join(", ");}});t.open="";drawCrews();toast("Added to every task. Tap Save to keep it.");}},"Add these to every task"):null)));
       if(t.after.length&&!t.doneOn){const sc=h("input",{type:"checkbox",id:"tks-"+i,checked:!!t.startedOn,disabled:ro});sc.addEventListener("change",()=>{t.startedOn=sc.checked?(t.orig&&t.orig.startedOn||TODAY()):"";});
         box.append(h("label",{class:"check",for:"tks-"+i,style:"font-size:.82rem"},sc,"Start now without waiting"));}
       taskWrap.append(box);});
@@ -3019,7 +3091,7 @@ function jobForm(j,sec){
     j&&j.doneOn&&!ro?S_("details",field({id:"fDone",label:"Finished on",type:"date",value:j.doneOn,full:true})):null,
     !ro?h("div",{class:"full"},h("button",{type:"button",class:"btn ghost small",onclick:()=>{nextAfterSave=()=>{const id=j?j.id:lastNewJob&&lastNewJob.id;cableEditor(S.jobs.find(x=>x.id===id)||j||lastNewJob);};$("#form").requestSubmit();}},j&&cablesOf(j).length?"Save & edit cables & steps ("+cablesOf(j).length+" cables)":"Save & add cables to track")):null,
     j?S_("crew",crewHistory(j)):null,
-    S_("details",h("div",{class:"field full"},h("label",{for:"fTools"},"Tools for this job"),toolsEditor(j?.tools||"",null,"fTools"))),
+    S_("details",h("div",{class:"field full"},h("label",{for:"fTools"},"Tools for this job"),toolsEditor(j?.tools||"",null,"fTools"),ro?null:h("button",{type:"button",class:"linkbtn",style:"justify-self:start;margin-top:4px",onclick:()=>{closeSheet();setTimeout(toolLibSheet,60);}},"Set tools for each step (Pull, Terminate, Test…) →"))),
     S_("details",field({id:"fNotes",label:"Notes",type:"textarea",value:j?.notes||"",full:true,placeholder:"Drop count, special skills, material lead times…"}))].filter(Boolean);
   if(sec)nodes.forEach(n=>{if(n.dataset&&n.dataset.sec!==sec)n.style.display="none";});
   if(sec&&nodes[0])nodes.unshift(h("div",{class:"full",style:"display:flex;justify-content:space-between;align-items:center;gap:8px"},h("span",{class:"status"},"Only "+({crew:"the crew",tasks:"tasks & phases",details:"job details"}[sec])+" shown."),h("button",{type:"button",class:"linkbtn",onclick:()=>{closeSheet();setTimeout(()=>jobEditMenu(j),50);}},"Edit something else")));
@@ -6175,7 +6247,7 @@ async function startSession(u){
   const sid=myId,retry=(ref,ok,denied)=>{const go=()=>{if(myId!==sid)return;unsubs.push(ref.onSnapshot(ok,err=>{denied();if(err&&err.code==="permission-denied")setTimeout(go,20000);}));};go();};
   retry(db.doc("team/roles"),s=>{roles=s.exists?((s.data()||{}).roles||{}):{};gotRoles=true;
     if(!s.metadata.fromCache&&isOwner&&!roles[myId])saveRole(myId,{role:"lead",techId:""});ready();},()=>{gotRoles=true;ready();});
-  retry(db.doc("team/crew"),s=>{const d=s.exists?(s.data()||{}):{};crewDoc={members:d.members||{},declined:d.declined||{},hours:d.hours||null,holidays:Array.isArray(d.holidays)?d.holidays:[],hoursPlan:Array.isArray(d.hoursPlan)?d.hoursPlan:[],dismissedPlans:d.dismissedPlans||[],links:d.links||{},rechargeHrs:d.rechargeHrs||2};gotCrew=true;ready();},()=>{gotCrew=true;ready();});
+  retry(db.doc("team/crew"),s=>{const d=s.exists?(s.data()||{}):{};crewDoc={members:d.members||{},declined:d.declined||{},hours:d.hours||null,holidays:Array.isArray(d.holidays)?d.holidays:[],hoursPlan:Array.isArray(d.hoursPlan)?d.hoursPlan:[],dismissedPlans:d.dismissedPlans||[],links:d.links||{},rechargeHrs:d.rechargeHrs||2,tools:Array.isArray(d.tools)?d.tools:[],stepTools:d.stepTools&&typeof d.stepTools==="object"?d.stepTools:{},toolsHidden:Array.isArray(d.toolsHidden)?d.toolsHidden:[]};gotCrew=true;ready();},()=>{gotCrew=true;ready();});
   unsubs.push(pr.onSnapshot(s=>{me_=s.exists?(s.data()||{}):{};if(me_.name)$("#whoMe").textContent=me_.name;schedule();},()=>{}));
 }
 
