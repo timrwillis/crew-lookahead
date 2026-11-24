@@ -814,6 +814,9 @@ body:has(#scrim:not([hidden])) .fab,body:has(.popwrap) .fab{display:none}
 .rl{display:grid;gap:6px}
 .wrap{grid-template-columns:minmax(0,1fr)}#view{min-width:0}
 @media (max-width:760px){.subnav{flex-wrap:nowrap;overflow-x:auto;max-width:100%;scrollbar-width:none}.subnav::-webkit-scrollbar{display:none}.subnav button{flex:none}}
+.mbar{display:grid;grid-template-columns:minmax(60px,1fr) auto;gap:8px;align-items:center;margin-top:4px;font-size:.78rem}.mbar .bar{display:block;height:6px;border-radius:3px;background:var(--line);overflow:hidden}.mbar .bar i{display:block;height:100%;background:var(--ok)}.mbar b{color:var(--muted)}
+.arow.mv{border-color:color-mix(in srgb,var(--ok) 50%,transparent)}
+.pickp{grid-template-columns:28px minmax(0,1fr) auto}.pickp .pk{width:24px;height:24px;border-radius:6px;border:2px solid var(--line);display:grid;place-items:center;font-weight:800;color:var(--accent-ink)}.pickp.on{border-color:var(--accent)}.pickp.on .pk{background:var(--accent);border-color:var(--accent)}
 .sugg{display:grid;gap:6px;padding:10px;border-radius:12px;border:1px solid color-mix(in srgb,var(--accent) 50%,var(--line));background:color-mix(in srgb,var(--accent) 8%,var(--panel))}
 .tdl{text-transform:none;letter-spacing:0;display:inline-flex;align-items:center;gap:6px;font-size:.82rem;color:var(--muted);font-weight:600}
 .tdue{padding:4px 8px!important}
@@ -2326,22 +2329,56 @@ function remForm(kind,pre){pre=pre||{};const isMeet=kind==="meeting",isDue=kind=
       try{const ref=await db.collection("messages").add({text:full,kind:isMeet?"meeting":isDue?"due":"reminder",to:[],by:myId||"",at:Date.now(),jobId:val("rmJob"),remindOn:date,remindAt:at,dur,done:false});
         toast(isMeet?"Meeting added":isDue?"Due date added":"Reminder set");
         if(val("rmIcs"))sendICS([icsEvent({id:ref.id,k:isMeet?"meeting":isDue?"due":"reminder",t:text+(where?" · "+where:""),at,dur,job:val("rmJob")},date)],text);}catch(e){writeErr(e);return false;}});}
+/* move several people one after another, waiting for each save to land so nobody overwrites the last move */
+async function moveMany(pairs){const d=TODAY();let n=0;
+  for(const p of pairs){memo={};const j=S.jobs.find(x=>x.id===p.jobId);if(!j)continue;const t=p.taskId?tasksOf(j).find(x=>x.id===p.taskId):null;
+    await moveTech(p.tid,{job:j,task:t});n++;
+    for(let k=0;k<30;k++){memo={};const jj=S.jobs.find(x=>x.id===p.jobId),tt=p.taskId&&jj?tasksOf(jj).find(x=>x.id===p.taskId):null;if(tt?crewOn(tt,d).includes(p.tid):(jj&&crewOn(jj,d).includes(p.tid)))break;await new Promise(r=>setTimeout(r,100));}}
+  return n;}
+/* how far along a task is, from its own cables (cabinet + system) */
+function taskProg(j,t){if(!t)return null;const sc=t.scope||((scopePlan(j)||{tasks:[]}).tasks.find(x=>x.id===t.id)||{}).scope;if(!sc)return null;
+  const gl=scopeCables(j,sc),ss=stepsOf(j).filter(st=>!/^scan_/.test(st.id));if(!gl.length||!ss.length)return null;
+  const tot=gl.length*ss.length,done=gl.reduce((a,c)=>a+ss.filter(st=>markOf(j,c.id,st.id)).length,0),left=gl.filter(c=>!ss.every(st=>markOf(j,c.id,st.id))).length;
+  return {pct:Math.round(done*100/tot),left,n:gl.length};}
 function suggestAssign(d){const di=dayInfo(d),tg=liveTargets(d).filter(x=>x.task||!tasksOf(x.job).length),cnt=new Map(tg.map(x=>[x,x.ids.length])),out=[];
-  const score=x=>{const j=x.job,t=x.task,n=cnt.get(x);let s=0;const why=[];
+  const score=(x,from)=>{const j=x.job,t=x.task,n=cnt.get(x);let s=0;const why=[];
     if(!n){s+=50;why.push("no one on it");}
-    const need=+j.techs||0,have=workingOn(j,d).length+out.filter(o=>o.x.job===j).length;if(need&&have<need){s+=20;why.push("job is short "+(need-have));}
+    if(from&&from.job===j){s+=12;if(t&&from.task&&t.scope&&from.task.scope&&t.scope.rack===from.task.scope.rack)s+=10;}
+    const need=+j.techs||0,have=workingOn(j,d).length;if(need&&have<need){s+=20;why.push("job is short "+(need-have));}
     const p=priOf(j);if(p===1){s+=15;why.push("top priority");}else s+=(5-p)*3;
     const due=t&&t.due?t.due:jobEnd(j);const days=Math.round((parseD(due)-parseD(d))/864e5);if(days<=14){s+=(14-Math.max(0,days))*3;if(days<=7)why.push(days<=0?"due today":"due "+fmtS(due,{weekday:"short"}));}
+    const pr=taskProg(j,t);if(pr&&pr.pct>=90)s-=40;
     s-=n*8;return [s,why];};
-  di.idle.forEach(tc=>{let best=null;tg.forEach(x=>{const [sc,why]=score(x);if(!best||sc>best.sc)best={x,sc,why};});if(best){out.push({tc,x:best.x,why:best.why});cnt.set(best.x,cnt.get(best.x)+1);}});
+  const fin=new Set(tg.filter(x=>{const pr=taskProg(x.job,x.task);return pr&&pr.pct>=100;}));
+  const best=(from,skip)=>{let b=null;tg.forEach(x=>{if(x===skip||fin.has(x))return;const [sc,why]=score(x,from);if(!b||sc>b.sc)b={x,sc,why};});return b;};
+  // 1) people on tasks that are done or almost done → next task
+  tg.forEach(x=>{if(!x.task||!x.ids.length)return;const pr=taskProg(x.job,x.task);if(!pr)return;
+    const movers=pr.pct>=100?x.ids.slice():pr.pct>=85&&x.ids.length>1?x.ids.slice(Math.max(1,Math.ceil(pr.left/6))):[];
+    movers.forEach(id=>{const tc=techById(id);if(!tc||isLeadTech(tc))return;const b=best(x,x);if(!b||b.sc<0)return;
+      out.push({tc,x:b.x,from:x,why:[pr.pct>=100?x.task.name+" is done":x.task.name+" is "+pr.pct+"% done ("+pr.left+" cables left)",...b.why]});cnt.set(b.x,cnt.get(b.x)+1);cnt.set(x,cnt.get(x)-1);});});
+  // 2) free people → where they're needed most
+  di.idle.forEach(tc=>{const b=best(null,null);if(b){out.push({tc,x:b.x,why:b.why});cnt.set(b.x,cnt.get(b.x)+1);}});
   return out;}
+function suggBox(d){const sg=suggestAssign(d);if(!sg.length)return null;
+  const pairs=g=>({tid:g.tc.id,jobId:g.x.job.id,taskId:g.x.task?g.x.task.id:""});
+  return h("div",{class:"sugg"},h("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:8px"},h("strong",{},"💡 Suggested moves"),
+      sg.length>1?h("button",{type:"button",class:"btn small",onclick:async e=>{e.target.disabled=true;const n=await moveMany(sg.map(pairs));toast("Moved "+n+" people");}},"Do all "+sg.length):null),
+    sg.map(g=>h("div",{class:"arow"+(g.from?" mv":"")},h("span",{},h("strong",{},g.tc.name+(g.from?" · "+g.from.task.name:"")+" → "+(g.x.task?g.x.task.name:g.x.job.name)),h("small",{},g.why.join(" · ")||"best fit right now")),
+      h("span",{style:"display:flex;gap:6px"},h("button",{type:"button",class:"btn small",onclick:async()=>{await moveMany([pairs(g)]);toast(g.tc.name+" → "+targetLabel(g.x.job,g.x.task));}},"Do it"),h("button",{type:"button",class:"btn ghost small",onclick:()=>pickTarget(g.tc.id)},"Other")))));}
+function pickTech(target){const d=TODAY(),di=dayInfo(d),free=new Set(di.idle.map(t=>t.id)),sel=new Set();
+  const here=activeTechs().filter(t=>!awayOn(t.id,d)&&!target.ids.includes(t.id)&&!isLeadTech(t)).sort((a,b)=>(free.has(b.id)?1:0)-(free.has(a.id)?1:0)||a.name.localeCompare(b.name));
+  const box=h("div",{class:"full stack",style:"gap:8px"}),go=h("button",{type:"button",class:"btn",disabled:true},"Pick people");
+  const draw=()=>{box.textContent="";
+    here.forEach(t=>{const on=sel.has(t.id);box.append(h("button",{type:"button",class:"moreitem pickp"+(on?" on":""),"aria-pressed":String(on),onclick:()=>{on?sel.delete(t.id):sel.add(t.id);draw();}},
+      h("span",{class:"pk"},on?"✓":""),h("span",{},h("strong",{},t.name),h("small",{},free.has(t.id)?"Free":"Now on "+assignLabel(t.id,d))),free.has(t.id)?h("span",{class:"pill good"},"Free"):null));});
+    if(!here.length)box.append(h("div",{class:"status"},"Everyone here is already on it."));
+    go.disabled=!sel.size;go.textContent=sel.size?"Put "+sel.size+" on "+(target.task?target.task.name:target.job.name):"Pick people";};
+  go.addEventListener("click",async()=>{const ids=[...sel];closeSheet();const n=await moveMany(ids.map(id=>({tid:id,jobId:target.job.id,taskId:target.task?target.task.id:""})));toast(n+" → "+targetLabel(target.job,target.task));});
+  draw();openView("Who's going to "+(target.task?target.task.name:target.job.name)+"?",[h("p",{class:"status full",style:"margin:0"},"Tap everyone who's going, then tap the button."),box,h("div",{class:"full",style:"position:sticky;bottom:0;background:var(--panel);padding:8px 0"},go)]);}
 function pickTarget(tid){const d=TODAY(),tg=liveTargets(d);
   openView("Put "+techName(tid)+" on…",[h("div",{class:"full moregrid"},tg.map(x=>h("button",{type:"button",class:"moreitem",onclick:async()=>{closeSheet();await moveTech(tid,{job:x.job,task:x.task});toast(techName(tid)+" → "+targetLabel(x.job,x.task));}},
     h("span",{},h("strong",{},x.task?x.task.name:x.job.name),h("small",{},(x.task?x.job.name+" · ":"")+(x.ids.length?x.ids.length+" on it: "+crewNames(x.ids):"No one on it"))),x.ids.length?null:h("span",{class:"badge"},"0")))),
     h("button",{type:"button",class:"btn ghost full",onclick:async()=>{closeSheet();await moveTech(tid,null);toast(techName(tid)+" taken off their task");}},"Take off any task")]);}
-function pickTech(target){const d=TODAY(),di=dayInfo(d),free=new Set(di.idle.map(t=>t.id));const here=activeTechs().filter(t=>!awayOn(t.id,d)&&!target.ids.includes(t.id)).sort((a,b)=>(free.has(b.id)?1:0)-(free.has(a.id)?1:0)||a.name.localeCompare(b.name));
-  openView("Who's going to "+(target.task?target.task.name:target.job.name)+"?",[h("div",{class:"full moregrid"},here.length?here.map(t=>h("button",{type:"button",class:"moreitem",onclick:async()=>{closeSheet();await moveTech(t.id,{job:target.job,task:target.task});toast(t.name+" → "+targetLabel(target.job,target.task));}},
-    h("span",{},h("strong",{},t.name),h("small",{},free.has(t.id)?"Free":"Now on "+assignLabel(t.id,d))),free.has(t.id)?h("span",{class:"pill good"},"Free"):null)):h("div",{class:"status"},"Everyone here is already on it."))]);}
 function daySummary(d){const t0=parseD(d).getTime(),t1=t0+864e5,lines=[];
   jobsOn(d).forEach(j=>{const ss=stepsOf(j).filter(st=>!/^scan_/.test(st.id)),parts=[];
     ss.forEach(st=>{const n=cablesOf(j).filter(c=>{const m=markOf(j,c.id,st.id);return m&&m.at>=t0&&m.at<t1;}).length;if(n)parts.push(st.name+" "+n);});
@@ -2383,11 +2420,9 @@ function renderDay(v){const d=TODAY(),att=ATT[d]||{},hd=att.huddle,wr=att.wrap,r
   const tg=liveTargets(d),empty=tg.filter(x=>x.task&&!x.ids.length),outOn_=r.out.filter(t=>assignOn(t.id,d));
   const ab=h("div",{class:"stack",style:"gap:8px"});
   outOn_.forEach(t=>ab.append(h("div",{class:"arow warn"},h("span",{},h("strong",{},t.name+" is out"),h("small",{},"Was on "+assignLabel(t.id,d))),h("button",{type:"button",class:"btn ghost small",onclick:()=>moveTech(t.id,null).then(()=>toast(t.name+" taken off"))},"Take off"))));
-  {const sg=suggestAssign(d);if(sg.length)ab.append(h("div",{class:"sugg"},h("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:8px"},h("strong",{},"💡 Suggested"),sg.length>1?h("button",{type:"button",class:"btn small",onclick:async e=>{e.target.disabled=true;for(const g of sg){g.x.job=S.jobs.find(x=>x.id===g.x.job.id)||g.x.job;if(g.x.task)g.x.task=tasksOf(g.x.job).find(x=>x.id===g.x.task.id)||g.x.task;await moveTech(g.tc.id,{job:g.x.job,task:g.x.task});for(let k=0;k<30;k++){memo={};const j=S.jobs.find(x=>x.id===g.x.job.id),t=g.x.task&&j?tasksOf(j).find(x=>x.id===g.x.task.id):null;if(t?crewOn(t,d).includes(g.tc.id):assignOn(g.tc.id,d))break;await new Promise(r=>setTimeout(r,100));}}toast("Put "+sg.length+" people to work");}},"Do all "+sg.length):null),
-    sg.map(g=>h("div",{class:"arow"},h("span",{},h("strong",{},g.tc.name+" → "+(g.x.task?g.x.task.name:g.x.job.name)),h("small",{},(g.x.task?g.x.job.name+" · ":"")+(g.why.join(", ")||"best fit right now"))),
-      h("span",{style:"display:flex;gap:6px"},h("button",{type:"button",class:"btn small",onclick:async()=>{const jj=S.jobs.find(x=>x.id===g.x.job.id)||g.x.job;await moveTech(g.tc.id,{job:jj,task:g.x.task?tasksOf(jj).find(x=>x.id===g.x.task.id):null});toast(g.tc.name+" → "+targetLabel(g.x.job,g.x.task));}},"Do it"),h("button",{type:"button",class:"btn ghost small",onclick:()=>pickTarget(g.tc.id)},"Other")))) ));}
+  {const sb=suggBox(d);if(sb)ab.append(sb);}
   if(di.idle.length)ab.append(h("div",{},h("div",{class:"status",style:"margin-bottom:4px"},"Free · tap to put them on a task"),h("div",{class:"tchips"},di.idle.map(t=>h("button",{type:"button",class:"tchip free",onclick:()=>pickTarget(t.id)},t.name+" ＋")))));
-  tg.forEach(x=>ab.append(h("div",{class:"arow"+(x.task&&!x.ids.length?" noone":"")},h("span",{},h("strong",{},x.task?x.task.name:x.job.name+" (whole job)"),h("small",{},(x.task?x.job.name+" · ":"")+(x.ids.length?crewNames(x.ids):"No one on it"))),
+  tg.forEach(x=>ab.append(h("div",{class:"arow"+(x.task&&!x.ids.length?" noone":"")},h("span",{},h("strong",{},x.task?x.task.name:x.job.name+" (whole job)"),h("small",{},(x.task?x.job.name+" · ":"")+(x.ids.length?crewNames(x.ids):"No one on it")),(()=>{const pr=taskProg(x.job,x.task);return pr?h("span",{class:"mbar"},h("span",{class:"bar"},h("i",{style:"width:"+pr.pct+"%"})),h("b",{},pr.pct+"%"+(pr.left?" · "+pr.left+" left":" ✓"))):null;})()),
     h("span",{style:"display:flex;gap:6px"},x.ids.length?h("button",{type:"button",class:"btn ghost small",onclick:()=>{const id=x.ids[x.ids.length-1];pickTarget(id);}},"Move"):null,h("button",{type:"button",class:"btn small"+(x.ids.length?" ghost":""),onclick:()=>pickTech(x)},"＋")))));
   if(!tg.length)ab.append(h("div",{class:"status"},"No work on the board today."));
   v.append(flowCard(3,"Assignments · delegate or pivot",outOn_.length||empty.length?"warn":tg.length?"done":"",ab,{chip:(empty.length?empty.length+" need crew":"")+(empty.length&&di.idle.length?" · ":"")+(di.idle.length?di.idle.length+" free":"")||"All set"}));
