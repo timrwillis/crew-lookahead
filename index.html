@@ -1146,7 +1146,7 @@ function dayInfo(d){
 const isFlag=a=>a.type==="flag";
 const isEvent=m=>m.kind==="event";
 const isChat=m=>m.kind==="chat";
-const isNote=m=>!isEvent(m)&&!isChat(m);
+const isNote=m=>!isEvent(m)&&!isChat(m)&&m.kind!=="feedback";
 const isLog=m=>isEvent(m)&&m.ev!=="notice";
 const openAsks=()=>S.asks.filter(a=>!isFlag(a)&&a.status!=="done");
 const openFlags=()=>S.asks.filter(a=>isFlag(a)&&a.status!=="done");
@@ -1295,8 +1295,39 @@ function setTheme(t){const r=document.documentElement;if(t==="auto")delete r.dat
 function themePicker(){const cur=document.documentElement.dataset.theme||"auto",box=h("div",{});
   const draw=c=>{box.textContent="";box.append(h("div",{class:"flabel"},"Screen colors"),h("div",{class:"subnav",role:"group","aria-label":"Screen colors"},[["light","☀ Light"],["dark","☾ Dark"],["auto","Auto (match phone)"]].map(([k,l])=>h("button",{type:"button","aria-pressed":String(c===k),onclick:()=>{setTheme(k);draw(k);}},l))));};
   draw(cur);return box;}
+/* ===== FEEDBACK: anyone sends a note (+ screenshot) from any screen; leads see the list and can copy it all ===== */
+const FB_CATS=[["confusing","😕 Confusing"],["broken","🐞 Something's broken"],["idea","💡 Idea"],["love","👍 Love this"]];
+const isFeedback=m=>m.kind==="feedback";
+const screenName=()=>{const G=groupOf(tab);return [G?G.l:"",tab==="home"?(MGR()?({day:"My day",cal:"Calendar",dash:"Dashboard",crew:"Manpower",progress:"Progress"}[homeSeg]||""):"My work"):(G&&G.tabs.length>1?(G.tabs.find(([t])=>t===tab)||[])[1]:""),$("#scrim").hidden||["You","Add"].includes($("#sheetTitle").textContent)?"":$("#sheetTitle").textContent].filter((x,i,a)=>x&&a.indexOf(x)===i).join(" › ");};
+function feedbackForm(){const where=screenName();let cat="idea",fileId="";
+  const cBox=h("div",{class:"tchips"});const drawC=()=>{cBox.textContent="";FB_CATS.forEach(([k,l])=>cBox.append(h("button",{type:"button",class:"tchip dep","aria-pressed":String(cat===k),onclick:()=>{cat=k;drawC();}},l)));};drawC();
+  const ph=h("div",{style:"display:flex;gap:8px;align-items:center;flex-wrap:wrap"});
+  const drawP=()=>{ph.textContent="";ph.append(h("button",{type:"button",class:"btn ghost small",onclick:()=>{const inp=h("input",{type:"file",accept:"image/*",style:"display:none"});
+      inp.addEventListener("change",async()=>{const f=inp.files[0];inp.remove();if(!f)return;const ids=await uploadFiles([f],"",null,{folder:"Feedback",quiet:true});if(ids[0]){fileId=ids[0];drawP();}});document.body.append(inp);inp.click();}},fileId?"📷 Change screenshot":"📷 Add a screenshot"),fileId?h("span",{class:"status"},"Screenshot added ✓"):h("span",{class:"status"},"Take a phone screenshot first, then add it here."));};drawP();
+  closeSheet();setTimeout(()=>openSheet("Send feedback",[
+    h("div",{class:"field full"},h("span",{class:"flabel"},"What kind?"),cBox),
+    field({id:"fbText",label:"Tell us",type:"textarea",value:"",full:true,placeholder:"What were you trying to do? What happened? What would make it easier?"}),
+    h("div",{class:"field full"},ph),
+    h("p",{class:"status full",style:"margin:0"},"Screen: "+(where||"—")+". This goes to "+(MGR()?"the team leads":"your lead")+".")],
+    async()=>{const text=val("fbText");if(!text&&!fileId){formErr("Add a note or a screenshot.");return false;}
+      try{await db.collection("messages").add({kind:"feedback",cat,text,where,fileId,ua:(navigator.userAgent.match(/(iPhone|Android|Windows|Mac)/)||["?"])[0],w:innerWidth,to:[],by:myId||"",at:Date.now(),done:false});
+        logEvent(meName()+" sent feedback: "+(text||"(screenshot)").slice(0,140),{ev:"notice",notify:mgrUids(),title:"New feedback"});toast("Thanks! Sent.");}catch(e){writeErr(e);return false;}}),80);}
+function feedbackList(){const box=h("div",{class:"full stack",style:"gap:8px"});let showDone=false;
+  const draw=()=>{box.textContent="";const all=S.messages.filter(isFeedback).sort((a,b)=>b.at-a.at),list=all.filter(m=>showDone||!m.done);
+    const open=all.filter(m=>!m.done);
+    box.append(h("div",{style:"display:flex;gap:8px;flex-wrap:wrap;align-items:center"},open.length?h("button",{type:"button",class:"btn small",onclick:async()=>{const t=open.map(m=>"- ["+(FB_CATS.find(c=>c[0]===m.cat)||["",""])[1]+"] "+(names[m.by]||"Someone")+", "+fmtS(iso(new Date(m.at)))+(m.where?" on "+m.where:"")+(m.ua?" ("+m.ua+")":"")+": "+(m.text||"(screenshot only)")).join("\n");
+        try{await navigator.clipboard.writeText("Crew Lookahead feedback from the crew:\n"+t);toast("Copied. Paste it to Claude.");}catch(e){toast("Couldn't copy on this device");}}},"📋 Copy all "+open.length+" for Claude"):null,
+      h("label",{class:"check"},h("input",{type:"checkbox",checked:showDone,onchange:e=>{showDone=e.target.checked;draw();}}),"Show done")));
+    if(!list.length)box.append(h("div",{class:"status"},all.length?"All caught up.":"No feedback yet. Anyone can send it from the + button."));
+    list.forEach(m=>{const fd=m.fileId?S.files.find(f=>f.id===m.fileId):null;
+      box.append(h("div",{class:"arow"+(m.done?" isdone":"")},h("span",{},h("strong",{},((FB_CATS.find(c=>c[0]===m.cat)||["",""])[1])+" · "+(names[m.by]||"Someone")),h("small",{},fmtS(iso(new Date(m.at)),{month:"short",day:"numeric"})+" "+fmtTime(m.at)+(m.where?" · "+m.where:"")),m.text?h("span",{style:"white-space:pre-wrap;margin-top:4px"},m.text):null),
+        h("span",{style:"display:flex;gap:6px"},fd?h("button",{type:"button",class:"btn ghost small",onclick:()=>openDoc(fd,()=>feedbackList())},"📷"):null,!m.done?h("button",{type:"button",class:"btn ghost small",title:"Mark handled",onclick:async()=>{try{await db.collection("messages").doc(m.id).update({done:true,doneBy:myId||"",doneAt:Date.now()});}catch(e){writeErr(e);}}},"✓"):null)));});};
+  draw();openView("💬 Feedback",[box]);liveSheet=draw;}
 function acctSheet(){
+  const fbN=S.messages.filter(m=>isFeedback(m)&&!m.done).length;
   openView("You",[h("div",{class:"full stack"},h("div",{class:"status"},"Signed in as "+meName()),alertsToggle(),
+    h("button",{type:"button",class:"btn ghost",onclick:()=>feedbackForm()},"💬 Send feedback"),
+    MGR()?h("button",{type:"button",class:"btn ghost",onclick:()=>{closeSheet();setTimeout(feedbackList,60);}},"📥 Crew feedback"+(fbN?" ("+fbN+" new)":"")):null,
     h("button",{type:"button",class:"btn ghost",onclick:()=>{closeSheet();setTimeout(()=>setupSheet(false),60);}},"📲 Set up this "+(isPhone()?"phone":"device")+(needInstall()||needAlerts()?" · not done":"")),
     myTech()||!MGR()?h("button",{type:"button",class:"btn ghost",onclick:()=>{closeSheet();MGR()&&myTech()?techForm(myTech()):profileForm();}},"My profile"):null,
     themePicker(),
@@ -1316,7 +1347,8 @@ function quickAdd(){const can=CAN_POST(),m=MGR(),go=fn=>()=>{closeSheet();setTim
     m?["🗓","Time off","Add time off for someone",()=>offForm(null)]:(can?["🗓","Request time off","PTO, classes, advance notice",()=>requestForm()]:null),
     m?["👷","Add tech","Or a temporary helper",()=>techForm(null)]:null,
     m?["📦","Material item","Add to stock",()=>matForm(null)]:null,
-    m?["🧰","Tool list","Tools for each step and the crew list",()=>toolLibSheet()]:null].filter(Boolean);
+    m?["🧰","Tool list","Tools for each step and the crew list",()=>toolLibSheet()]:null,
+    ["💬","Send feedback","Something confusing, broken, or an idea",()=>feedbackForm()]].filter(Boolean);
   openView("Add",[h("div",{class:"full moregrid qagrid"},items.map(([ic,l,sub,fn])=>h("button",{type:"button",class:"moreitem",onclick:go(fn)},h("span",{class:"mi qi","aria-hidden":"true"},ic),h("span",{},h("strong",{},l),h("small",{},sub)))))]);}
 function moreSheet(){const main=MAIN_TABS(),items=[["crew","Crew","Techs, hours, team, reports"],["off","Time off","Call-ins, requests, recharge"],["messages","Messages","Notes, asks, activity, deleted"],["material","Material","Stock and orders"],["board","Board","Week and month planner"],["jobs","Jobs","Jobs and tasks"],["chat","Chat","Crew group chat"]]
   .filter(([t])=>!main.includes(t)&&tabAllowed(t));
