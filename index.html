@@ -744,6 +744,13 @@ body:has(#scrim:not([hidden])) .fab,body:has(.popwrap) .fab{display:none}
 .tooltag button{border:0;background:transparent;color:var(--muted);font-size:.85rem;width:26px;height:26px;border-radius:50%;cursor:pointer}
 .tooltag button:hover{background:var(--line);color:var(--ink)}
 .brand{min-width:0;flex:1}.brand .status{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.form>*{min-width:0}
+.form .stack,.form .field,.stepcard,.tpanel{grid-template-columns:minmax(0,1fr)}
+.cgrid{overflow-x:auto;max-width:100%}
+.stepcard{min-width:0;display:grid;gap:6px;padding:8px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.stepcard .tlink{justify-self:start}
+.stepcard .crow2>input{flex:1;min-width:0;width:auto}
+.stepcard .crow2 .btn{padding-inline:8px}
 .kitrows{display:grid;gap:4px;margin-top:4px}
 .kitrow{display:grid;grid-template-columns:minmax(80px,auto) minmax(0,1fr);gap:10px;font-size:.88rem;padding:6px 10px;border-radius:8px;background:var(--bg)}
 .kitn{font-weight:700}.kitt{color:var(--muted)}
@@ -4656,9 +4663,17 @@ function cableEditor(j){
   let sysOrder=sysOrderOf(j).slice(),steps=stepsOf(j).map(x=>Object.assign({},x)),cables=cablesOf(j).map(x=>Object.assign({},x)),typeMat=Object.assign({},j.typeMat||{}),slack=(j.slack===0||+j.slack>0)?+j.slack:10;
   const nid=p=>p+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
   const stepBox=h("div",{class:"stack"}),cabBox=h("div",{class:"cgrid"}),cabCount=h("span",{class:"status"}),matBox=h("div",{});
+  const toolOpen=new Set();
   function drawSteps(){stepBox.textContent="";
-    steps.forEach((st,i)=>{const inp=h("input",{type:"text",id:"st-"+i,value:st.name,"aria-label":"Step name"});inp.addEventListener("input",()=>{st.name=inp.value;});
-      stepBox.append(h("div",{class:"crow2"},h("span",{class:"ix"},(i+1)+"."),inp,h("button",{type:"button",class:"btn ghost small","aria-pressed":String(isSplit(st)),title:"Sign-off by part: each person records what part they did",style:"white-space:nowrap",onclick:()=>{st.split=!isSplit(st);drawSteps();}},isSplit(st)?"✎ Sign-off":"✓ Check"),h("button",{type:"button",class:"iconbtn","aria-label":"Move up",disabled:i===0,onclick:()=>{[steps[i-1],steps[i]]=[steps[i],steps[i-1]];drawSteps();}},"↑"),h("button",{type:"button",class:"iconbtn","aria-label":"Remove step",onclick:()=>{steps.splice(i,1);drawSteps();}},"✕")));});
+    steps.forEach((st,i)=>{const inp=h("input",{type:"text",id:"st-"+i,value:st.name,"aria-label":"Step name"});inp.addEventListener("input",()=>{st.name=inp.value;});inp.addEventListener("change",()=>drawSteps());
+      const k=stepKey(st.name),kit=splitTools((crewDoc.stepTools||{})[k]),isOpen=toolOpen.has(i);
+      const card=h("div",{class:"stepcard"});stepBox.append(card);
+      card.append(h("div",{class:"crow2"},h("span",{class:"ix"},(i+1)+"."),inp,h("button",{type:"button",class:"btn ghost small","aria-pressed":String(isSplit(st)),title:"Sign-off by part: each person records what part they did",style:"white-space:nowrap",onclick:()=>{st.split=!isSplit(st);drawSteps();}},isSplit(st)?"✎ Sign-off":"✓ Check"),h("button",{type:"button",class:"iconbtn","aria-label":"Move up",disabled:i===0,onclick:()=>{[steps[i-1],steps[i]]=[steps[i],steps[i-1]];drawSteps();}},"↑"),h("button",{type:"button",class:"iconbtn","aria-label":"Remove step",onclick:()=>{steps.splice(i,1);toolOpen.clear();drawSteps();}},"✕")));
+      if(/^scan_/.test(st.id||"")||!k)return;
+      card.append(h("button",{type:"button",class:"tlink"+(kit.length?" on":""),"aria-expanded":String(isOpen),onclick:()=>{isOpen?toolOpen.delete(i):toolOpen.add(i);drawSteps();}},kit.length?"🧰 "+kit.join(", "):"🧰 Add tools for "+(st.name||"this step")));
+      if(isOpen)card.append(h("div",{class:"tpanel"},h("div",{class:"status"},"Tools for "+(st.name||"this step")+". Saved for every job that has this step."),
+        toolsEditor(kit.join(", "),v=>{saveCrew({stepTools:Object.assign({},crewDoc.stepTools||{},{[k]:v})});}),
+        h("div",{},h("button",{type:"button",class:"btn small",onclick:()=>{toolOpen.delete(i);drawSteps();}},"Done"))));});
     if(!steps.length)stepBox.append(h("div",{class:"status"},"Add the steps every cable goes through, in the order you do them."));}
   const SHOW=400;
   function drawCables(){cabBox.textContent="";cabCount.textContent=cables.length+" cable"+(cables.length===1?"":"s");
