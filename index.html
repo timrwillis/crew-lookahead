@@ -818,6 +818,14 @@ body:has(#scrim:not([hidden])) .fab,body:has(.popwrap) .fab{display:none}
 .mbar{display:grid;grid-template-columns:minmax(60px,1fr) auto;gap:8px;align-items:center;margin-top:4px;font-size:.78rem}.mbar .bar{display:block;height:6px;border-radius:3px;background:var(--line);overflow:hidden}.mbar .bar i{display:block;height:100%;background:var(--ok)}.mbar b{color:var(--muted)}
 .arow.mv{border-color:color-mix(in srgb,var(--ok) 50%,transparent)}
 .pickp{grid-template-columns:28px minmax(0,1fr) auto}.pickp .pk{width:24px;height:24px;border-radius:6px;border:2px solid var(--line);display:grid;place-items:center;font-weight:800;color:var(--accent-ink)}.pickp.on{border-color:var(--accent)}.pickp.on .pk{background:var(--accent);border-color:var(--accent)}
+.pushban{display:grid;gap:8px;padding:10px 12px;border-radius:12px;border:2px solid var(--over);background:color-mix(in srgb,var(--over) 10%,var(--panel))}
+.pushban small{display:block;color:var(--muted)}
+.priobox{border:1px solid var(--line);border-radius:12px;padding:8px 10px;background:var(--panel)}
+.priobox>summary{cursor:pointer;font-weight:700;padding:2px 0}
+.priobox[open]>summary{margin-bottom:8px}
+.arow.prio{gap:8px}.arow.prio small{display:block}
+.arow.pushrow{border-color:var(--over)}
+.prn{flex:0 0 26px;height:26px;border-radius:50%;display:grid;place-items:center;background:var(--line);font-weight:700;font-size:13px}
 .sugg{display:grid;gap:6px;padding:10px;border-radius:12px;border:1px solid color-mix(in srgb,var(--accent) 50%,var(--line));background:color-mix(in srgb,var(--accent) 8%,var(--panel))}
 .tdl{text-transform:none;letter-spacing:0;display:inline-flex;align-items:center;gap:6px;font-size:.82rem;color:var(--muted);font-weight:600}
 .tdue{padding:4px 8px!important}
@@ -1802,6 +1810,133 @@ async function moveTech(tid,target){
     logEvent(techName(tid)+": "+from+" → "+to,{ev:"move",techId:tid,jobId:target?target.job.id:""});toast(techName(tid)+" → "+to);}
   catch(err){writeErr(err);}
 }
+/* ===== ALL HANDS (push): send everyone available to one task, pause the rest, send them back after =====
+   Stored on the job: j.push {taskId, start, until ("" = until done/ended), at, by, snap:{techId:[[jobId,taskId],...]}}.
+   snap = where each person was before the push, so ending it puts everyone back. Assignments carry forward day to day, so a push lasts until it's ended. */
+function activePush(){for(const j of S.jobs){const p=j.push;if(!p||!p.at||doneDate(j))continue;const t=p.taskId?tasksOf(j).find(x=>x.id===p.taskId):null;if(p.taskId&&(!t||t.doneOn))continue;return {job:j,task:t,p};}return null;}
+const pushIds=(ap,d)=>ap?(ap.task?crewOn(ap.task,d):crewOn(ap.job,d)):[];
+const isPushTarget=(ap,x)=>!!ap&&!!x&&x.job.id===ap.job.id&&((x.task&&x.task.id)||"")===(ap.p.taskId||"");
+const pushLabel=ap=>ap?(ap.task?ap.task.name:ap.job.name):"";
+// where a person is right now (every open task/job they're on), to come back to later
+function placesOf(tid,d){const out=[];jobsOn(d).forEach(j=>{if(heldOn(j,d))return;if(crewOn(j,d).includes(tid))out.push([j.id,""]);
+  tasksOf(j).forEach(t=>{if(taskOpen(t,d)&&!heldOn(t,d)&&!blockedOn(j,t,d)&&crewOn(t,d).includes(tid))out.push([j.id,t.id]);});});return out;}
+function placeTarget(pl){const j=S.jobs.find(x=>x.id===pl[0]);if(!j||doneDate(j))return null;const d=TODAY();if(!pl[1])return jobOn(j,d)&&!heldOn(j,d)?{job:j,task:null}:null;
+  const t=tasksOf(j).find(x=>x.id===pl[1]);return t&&taskOpen(t,d)&&!heldOn(t,d)?{job:j,task:t}:null;}
+const backLabel=(ap,tid)=>{const pl=((ap&&ap.p.snap)||{})[tid]||[];const ts=pl.map(placeTarget).filter(Boolean);return ts.length?ts.map(x=>x.task?x.task.name:x.job.name).join(", "):"";};
+// who's waiting to come back to this task/job once the push ends
+function pausedFor(ap,x,d){if(!ap||isPushTarget(ap,x))return [];const on=new Set(pushIds(ap,d)),k=x.job.id+"|"+(x.task?x.task.id:"");
+  return Object.entries(ap.p.snap||{}).filter(([tid,pl])=>on.has(tid)&&pl.some(p=>p[0]+"|"+p[1]===k)).map(([tid])=>tid);}
+/* move several people in one save per job. moves: [{tid, to:[{job,task}]}] (empty "to" = take off everything). extra: {jobId:{field:value}} saved with it */
+async function moveSet(moves,extra){const d=TODAY(),touched={};extra=extra||{};
+  const get=j=>touched[j.id]||(touched[j.id]={j,jc:Object.assign({},j),tasks:tasksOf(j).map(t=>Object.assign({},t)),gen:false,dirty:false});
+  moves.forEach(({tid})=>jobsOn(d).forEach(j=>{if(heldOn(j,d))return;const u=get(j);
+    if(crewOn(u.jc,d).includes(tid)){Object.assign(u.jc,logChange(u.jc,j.start,endOf(j),d,crewOn(u.jc,d).filter(x=>x!==tid),false));u.gen=u.dirty=true;}
+    tasksOf(j).forEach(t=>{const tt=u.tasks.find(x=>x.id===t.id);if(taskOpen(t,d)&&!heldOn(t,d)&&!blockedOn(j,t,d)&&crewOn(tt,d).includes(tid)){Object.assign(tt,logChange(tt,j.start,endOf(j),d,crewOn(tt,d).filter(x=>x!==tid),false));u.dirty=true;}});}));
+  moves.forEach(({tid,to})=>(to||[]).forEach(tg=>{const u=get(tg.job);u.dirty=true;
+    if(tg.task){const tt=u.tasks.find(x=>x.id===tg.task.id);if(!tt)return;if(!tt.startedOn&&blockedOn(tg.job,tg.task,d))tt.startedOn=d;Object.assign(tt,logChange(tt,tg.job.start,endOf(tg.job),d,[...new Set([...crewOn(tt,d),tid])],false));}
+    else{Object.assign(u.jc,logChange(u.jc,tg.job.start,endOf(tg.job),d,[...new Set([...crewOn(u.jc,d),tid])],false));u.gen=true;}}));
+  Object.keys(extra).forEach(id=>{const j=S.jobs.find(x=>x.id===id);if(j)get(j).dirty=true;});
+  for(const u of Object.values(touched)){if(!u.dirty)continue;const body=Object.assign({tasks:u.tasks,updatedAt:Date.now()},extra[u.j.id]||{});
+    if(u.gen)Object.assign(body,{crewLog:u.jc.crewLog,crew:u.jc.crew,crewAt:u.jc.crewAt});await db.collection("jobs").doc(u.j.id).update(body);}
+  memo={};}
+// wait until our own save shows up in the board data (so the next save builds on it)
+async function waitFor(fn,ms){for(let k=0;k<(ms||40);k++){memo={};if(fn())return true;await new Promise(r=>setTimeout(r,100));}memo={};return false;}
+const pushGone=jid=>()=>{const j=S.jobs.find(x=>x.id===jid);return !j||!j.push;};
+// people who could go: here today, not a lead/super/foreman
+const pushPool=d=>activeTechs().filter(t=>!awayOn(t.id,d)&&!isLeadTech(t));
+function pushSheet(j,task){const d=TODAY(),ap=activePush(),tg={job:j,task},lbl=task?task.name:j.name,pool=pushPool(d),sel=new Set(pool.map(t=>t.id));
+  if(ap&&isPushTarget(ap,tg)){pushAddSheet(ap);return;}
+  const box=h("div",{class:"full stack",style:"gap:6px"}),go=h("button",{type:"button",class:"btn"},"");let until="";
+  const draw=()=>{box.textContent="";pool.forEach(t=>{const on=sel.has(t.id),now=assignLabel(t.id,d);
+      box.append(h("button",{type:"button",class:"moreitem pickp"+(on?" on":""),"aria-pressed":String(on),onclick:()=>{on?sel.delete(t.id):sel.add(t.id);draw();}},
+        h("span",{class:"pk"},on?"✓":""),h("span",{},h("strong",{},t.name),h("small",{},now?"Now on "+now:"Free")),on?null:h("span",{class:"pill plain"},"Stays put")));});
+    if(!pool.length)box.append(h("div",{class:"status"},"No one is marked here yet. Do roll call first, or people not marked out still count."));
+    go.disabled=!sel.size;go.textContent="🚨 Send "+sel.size+" to "+lbl;};
+  const len=h("div",{class:"full skillpick"},[["","Until it's done or I end it"],["today","Today only"]].map(([k,l])=>h("button",{type:"button",class:"skill","aria-pressed":String(until===k),onclick:e=>{until=k;[...len.children].forEach(b=>b.setAttribute("aria-pressed",String(b===e.currentTarget)));}},l)));
+  go.addEventListener("click",async()=>{go.disabled=true;go.textContent="Moving everyone…";const ids=[...sel];
+    try{const extra={};if(ap&&ap.job.id!==j.id){await endPush(ap,{quiet:true});await waitFor(pushGone(ap.job.id));}
+      const cur=activePush(),old=cur&&cur.job.id===j.id&&cur.p?cur.p.snap||{}:{},snap={};
+      ids.forEach(id=>{snap[id]=old[id]||placesOf(id,d).filter(p=>!(p[0]===j.id&&p[1]===(task?task.id:"")));});
+      extra[j.id]={push:{taskId:task?task.id:"",start:d,until:until==="today"?d:"",at:Date.now(),by:myId||"",snap}};
+      await moveSet(ids.map(tid=>({tid,to:[tg]})),extra);closeSheet();
+      notifyTechs(ids.map(tid=>[tid,"All hands: you're on "+targetLabel(j,task)+" now."]),"All hands");
+      logEvent("🚨 All hands on "+targetLabel(j,task)+": "+crewNames(ids)+(until==="today"?" (today only)":""),{ev:"move",jobId:j.id});toast("All hands on "+lbl+" · "+ids.length+" people");}
+    catch(e){writeErr(e);go.disabled=false;draw();}});
+  draw();
+  openView("🚨 All hands on "+lbl,[h("p",{class:"status full",style:"margin:0"},(task?j.name+" · ":"")+"Everyone checked goes here and their other work pauses. The app remembers where each person was, so ending it sends them back. Pull anyone off any time by tapping their name."),
+    ap&&ap.job.id!==j.id?h("div",{class:"full arow warn"},h("span",{},h("strong",{},"All hands is already on "+pushLabel(ap)),h("small",{},"Starting this one ends that one and sends those people back first."))):null,
+    h("div",{class:"flabel full"},"How long"),len,h("div",{class:"flabel full"},"Who's going ("+pool.length+" here · leads and supers stay free)"),box,
+    h("div",{class:"full",style:"position:sticky;bottom:0;background:var(--panel);padding:8px 0"},go)].filter(Boolean));}
+// add people who aren't on the push yet (back from time off, pulled off earlier, new today)
+function pushAddSheet(ap){const d=TODAY(),on=new Set(pushIds(ap,d)),left=pushPool(d).filter(t=>!on.has(t.id));
+  if(!left.length){toast("Everyone here is already on "+pushLabel(ap));return;}
+  pickTech({job:ap.job,task:ap.task,ids:[...on]});}
+async function pushAdd(ap,ids){const d=TODAY(),snap=Object.assign({},ap.p.snap||{});ids.forEach(id=>{if(!snap[id])snap[id]=placesOf(id,d).filter(p=>!(p[0]===ap.job.id&&p[1]===(ap.p.taskId||"")));});
+  await moveSet(ids.map(tid=>({tid,to:[{job:ap.job,task:ap.task}]})),{[ap.job.id]:{push:Object.assign({},ap.p,{snap})}});}
+// end it: everyone still on it goes back where they were (or free if that work is gone)
+async function endPush(ap,o){o=o||{};const d=TODAY(),on=pushIds(ap,d),snap=ap.p.snap||{};
+  const moves=on.filter(tid=>!isLeadTech(techById(tid))).map(tid=>({tid,to:(snap[tid]||[]).map(placeTarget).filter(Boolean)}));
+  const log=[...(Array.isArray(ap.job.pushLog)?ap.job.pushLog:[]),{taskId:ap.p.taskId||"",start:ap.p.start,end:d,by:myId||"",n:on.length}].slice(-30);
+  await moveSet(o.keep?[]:moves,{[ap.job.id]:{push:null,pushLog:log}});
+  if(!o.keep)notifyTechs(moves.map(m=>[m.tid,"All hands on "+pushLabel(ap)+" is over. "+(m.to.length?"You're back on "+m.to.map(x=>targetLabel(x.job,x.task)).join(", ")+".":"Check with your lead.")]),"All hands over");
+  logEvent("All hands on "+targetLabel(ap.job,ap.task)+" ended"+(o.keep?" (crew stays on it)":" · "+moves.length+" sent back"),{ev:"move",jobId:ap.job.id});
+  if(!o.quiet)toast(o.keep?"All hands ended. Crew stays put.":"Everyone's back on their regular work");}
+function endPushSheet(ap){const d=TODAY(),on=pushIds(ap,d).filter(tid=>!isLeadTech(techById(tid)));
+  openView("End all hands on "+pushLabel(ap)+"?",[h("div",{class:"full stack",style:"gap:6px"},on.map(tid=>h("div",{class:"arow"},h("span",{},h("strong",{},techName(tid)),h("small",{},backLabel(ap,tid)?"Back to "+backLabel(ap,tid):"Free (wasn't on anything)"))))),
+    h("button",{type:"button",class:"btn full",onclick:async e=>{e.target.disabled=true;closeSheet();try{await endPush(ap);}catch(x){writeErr(x);}}},"↩ Send everyone back"),
+    h("button",{type:"button",class:"btn ghost full",onclick:async e=>{e.target.disabled=true;closeSheet();try{await endPush(ap,{keep:true});}catch(x){writeErr(x);}}},"End it but leave everyone where they are")]);}
+// "Today only" pushes end on the next workday the first time a lead opens the app
+let pushExpBusy=false;
+function checkPushExpiry(){if(!MGR()||pushExpBusy)return;const ap=activePush();if(!ap||!ap.p.until||ap.p.until>=TODAY())return;pushExpBusy=true;
+  endPush(ap).catch(writeErr).finally(()=>{pushExpBusy=false;});}
+// the banner on My day and the live board
+function pushBanner(d){const ap=activePush();if(!ap)return null;const on=pushIds(ap,d),m=MGR(),left=m?pushPool(d).filter(t=>!on.includes(t.id)):[],pr=taskProg(ap.job,ap.task);
+  const paused=liveTargets(d).filter(x=>!isPushTarget(ap,x)&&pausedFor(ap,x,d).length);
+  return h("div",{class:"pushban"},
+    h("div",{style:"display:flex;justify-content:space-between;gap:8px;align-items:flex-start;flex-wrap:wrap"},
+      h("span",{},h("strong",{},"🚨 All hands: "+pushLabel(ap)),h("small",{},[ap.task?ap.job.name:"",on.length+" on it",ap.p.start<d?"since "+fmtS(ap.p.start,{weekday:"short"}):"started "+fmtTime(ap.p.at),ap.p.until?"today only":"until done",pr?pr.pct+"% done":""].filter(Boolean).join(" · "))),
+      m?h("span",{style:"display:flex;gap:6px;flex-wrap:wrap"},left.length?h("button",{type:"button",class:"btn small",onclick:()=>pushAddSheet(ap)},"＋ "+left.length+" not on it"):null,h("button",{type:"button",class:"btn ghost small",onclick:()=>endPushSheet(ap)},"End")):null),
+    pr?h("span",{class:"bar",style:"display:block;height:6px;border-radius:3px;background:var(--line);overflow:hidden"},h("i",{style:"display:block;height:100%;background:var(--ok);width:"+pr.pct+"%"})):null,
+    h("div",{class:"tchips"},on.map(tid=>h("button",{type:"button",class:"tchip",disabled:!m,title:m?"Pull "+techName(tid)+" off":"",onclick:()=>pickTarget(tid)},techName(tid)+(m?" ⇄":"")))),
+    m&&on.length?h("div",{class:"status"},"Tap a name to pull them off for something else."):null,
+    paused.length?h("div",{class:"status"},"⏸ Paused: "+paused.map(x=>(x.task?x.task.name:x.job.name)+" ("+pausedFor(ap,x,d).length+")").join(", ")):null);}
+
+/* ===== TODAY'S PRIORITIES: the app ranks open work and says why; the lead's own order (crewDoc.order) always wins ===== */
+const prioKey=x=>x.job.id+"|"+(x.task?x.task.id:"");
+function prioScore(x,d,M){const j=x.job,t=x.task,why=[];let s=0;
+  if(isQuick(j)){const q=qPri(j);s+=q==="critical"?90:q==="high"?50:20;why.push(q==="critical"?"critical quick task":"quick task");}
+  else{const p=priOf(j);s+=[0,40,25,10,0][p]||10;if(p<=2)why.push(PRI[p].toLowerCase()+" priority job");}
+  const due=t&&t.due?t.due:(!isQuick(j)&&j.start?jobEnd(j):"");if(due){const days=Math.round((parseD(due)-parseD(d))/864e5);
+    if(days<=0){s+=45;why.push(days<0?"overdue":"due today");}else if(days<=3){s+=28;why.push("due "+fmtS(due,{weekday:"short"}));}else if(days<=7){s+=14;why.push("due in "+days+" days");}}
+  if(!isQuick(j)&&M){const f=jobForecast(j,M);if(f&&f.late){s+=Math.min(30,8+f.late*3);why.push("job "+f.late+" days behind");}}
+  if(t){const waiting=tasksOf(j).filter(o=>o.id!==t.id&&!o.doneOn&&waitsOn(j,o,d).some(w=>w.id===t.id)).length;if(waiting){s+=Math.min(30,waiting*8);why.push(waiting+" task"+(waiting>1?"s wait":" waits")+" on it");}
+    const nt=needTotal(t);if(nt>=4){s+=12;why.push("big crew job ("+needText(t)+")");}
+    const lift=Object.entries(needOf(t)).some(([k])=>roleOf(k).k==="lift");if(lift&&nt<4)why.push("needs lifts");}
+  const pr=taskProg(j,t);if(pr){if(pr.pct>=100){s-=80;why.push("all checked off");}else if(pr.pct>=85){s+=12;why.push(pr.pct+"% — close it out");}else if(pr.left>=40){s+=8;why.push(pr.left+" cables left");}}
+  return {s,why};}
+function prioList(d){const ap=activePush(),M=computeMetrics(30),order=Array.isArray(crewDoc.order)?crewDoc.order:[];
+  const items=liveTargets(d).filter(x=>x.task||!tasksOf(x.job).length).map(x=>Object.assign({x,k:prioKey(x)},prioScore(x,d,M)));
+  items.forEach(it=>{it.rank=order.indexOf(it.k);it.push=isPushTarget(ap,it.x);});
+  return items.sort((a,b)=>(b.push-a.push)||((a.rank<0?1e9:a.rank)-(b.rank<0?1e9:b.rank))||(b.s-a.s));}
+function saveOrder(keys){saveCrew({order:keys.slice(0,60)});memo={};schedule();}
+function prioMove(list,i,dir){const keys=list.map(it=>it.k),k=keys[i],ni=i+dir;if(ni<0||ni>=keys.length)return;keys.splice(i,1);keys.splice(ni,0,k);
+  // keep only what the lead has actually placed: everything from the top down to the lowest moved item
+  saveOrder(keys.slice(0,Math.max(i,ni)+1));}
+// bonus used by suggestions/auto-fill so the lead's order steers them
+function orderBonus(x){const o=Array.isArray(crewDoc.order)?crewDoc.order:[],i=o.indexOf(prioKey(x));return i<0?0:Math.max(10,50-i*10);}
+function prioCard(d){const list=prioList(d);if(!list.length)return null;const ap=activePush(),mine=Array.isArray(crewDoc.order)&&crewDoc.order.length;
+  const rows=list.slice(0,8).map((it,i)=>{const x=it.x,lbl=x.task?x.task.name:x.job.name;
+    return h("div",{class:"arow prio"+(it.push?" pushrow":"")},
+      h("span",{class:"prn"},String(i+1)),
+      h("span",{style:"flex:1;min-width:0"},h("strong",{},lbl),h("small",{},[x.task?x.job.name:"",x.ids.length?x.ids.length+" on it":"no one on it",...it.why.slice(0,3)].filter(Boolean).join(" · ")),it.rank>=0?h("small",{class:"needok"},"📌 your order"):null),
+      h("span",{style:"display:flex;gap:4px;align-items:center"},
+        h("button",{type:"button",class:"btn ghost small",title:"Move up","aria-label":"Move "+lbl+" up",disabled:i===0,onclick:()=>prioMove(list,i,-1)},"▲"),
+        h("button",{type:"button",class:"btn ghost small",title:"Move down","aria-label":"Move "+lbl+" down",disabled:i===list.length-1,onclick:()=>prioMove(list,i,1)},"▼"),
+        it.push?h("span",{class:"pill bad"},"All hands"):h("button",{type:"button",class:"btn small",title:"Send everyone here",onclick:()=>pushSheet(x.job,x.task)},"🚨")));});
+  return h("div",{class:"stack",style:"gap:6px"},
+    h("div",{style:"display:flex;justify-content:space-between;gap:8px;align-items:baseline;flex-wrap:wrap"},h("strong",{},"Today's priorities"),
+      mine?h("button",{type:"button",class:"linkbtn",onclick:()=>saveOrder([])},"Reset to the app's order"):h("span",{class:"status"},"Ranked by the app · ▲▼ to set your own")),
+    ...rows,h("div",{class:"status"},"Ranks use job priority, due dates, how far behind, what's waiting on it and crew size. Your ▲▼ order wins and carries to the next days. 🚨 = all hands on it."));}
 function cableLine(j,task){const cs=cablesOf(j);if(!cs.length||!stepsOf(j).length)return null;
   const st=stepForTask(j,task),pr=jobProgress(j);
   const n=st?stepCount(j,st.id):pr.done,tot=st?cs.length:pr.total,lbl=st?st.name+" "+n+"/"+tot:"Cables "+pr.pct+"%";
@@ -1833,7 +1968,8 @@ function renderLive(v){
   if(qWait.length)v.append(h("div",{class:"stack",style:"margin-bottom:12px"},h("div",{class:"month"},"Quick tasks waiting ("+qWait.length+")"),qWait.map(quickCard)));
   if(picked&&MGR())v.append(h("div",{class:"hint"},h("span",{},"Moving ",h("strong",{},techName(picked)),". Tap where they're going."),h("button",{class:"btn small",type:"button",onclick:()=>{picked=null;render();}},"Cancel")));
   const fl=myAlertFlags();if(fl.length)v.append(h("div",{class:"stack",style:"margin-bottom:12px"},fl.map(flagCard)));
-  const targets=liveTargets(d),info=dayInfo(d);
+  const targets=liveTargets(d),info=dayInfo(d),ap=activePush();checkPushExpiry();
+  {const pb=pushBanner(d);if(pb)v.append(h("div",{style:"margin-bottom:10px"},pb));}
   const grid=h("div",{class:"board"});
   if(!targets.length)grid.append(h("div",{class:"empty"},h("strong",{},"Nothing active today"),MGR()?"Add a job on the Jobs tab, or resume something on hold.":"Check back once a lead sets up today's work."));
   targets.forEach(tg=>{const j=tg.job,p=priOf(j);
@@ -1841,10 +1977,11 @@ function renderLive(v){
     const card=h("div",{class:"tcard p"+p},
       h("div",{class:"tt"},h("div",{class:"tn"},tg.task?tg.task.name:j.name,h("small",{},tg.task?[j.name,phaseName(j,tg.task)].filter(Boolean).join(" · "):(tasksOf(j).length?"Whole job":[j.site,PRI[p]+" priority"].filter(Boolean).join(" · ")))),
         MGR()?h("div",{class:"tbtns"},tg.task?h("button",{class:"btn ghost small",type:"button",onclick:()=>taskDone(j,tg.task)},"Done"):null,
-          moreBtn(tg.task?tg.task.name:j.name,[["✏️","Edit job",()=>jobEditMenu(j)],["⏸","Put on hold",()=>holdForm(j,tg.task)]])):null),
+          moreBtn(tg.task?tg.task.name:j.name,[isPushTarget(ap,tg)?["↩","End all hands",()=>endPushSheet(ap)]:["🚨","All hands on this",()=>pushSheet(j,tg.task)],["✏️","Edit job",()=>jobEditMenu(j)],["⏸","Put on hold",()=>holdForm(j,tg.task)]])):null),
       cableLine(j,tg.task),
       (()=>{const p2=docPill(j,null,false);return p2?h("div",{class:"pills"},p2):null;})(),
-      h("div",{class:"pchips"},tg.ids.length?tg.ids.map(x=>pchip(x,{})):h("span",{class:"status"},"No one on it")),
+      isPushTarget(ap,tg)?h("div",{class:"pills"},h("span",{class:"pill bad"},"🚨 All hands")):null,
+      h("div",{class:"pchips"},tg.ids.length?tg.ids.map(x=>pchip(x,{})):h("span",{class:"status"},pausedFor(ap,tg,d).length?"⏸ Paused for all hands · "+crewNames(pausedFor(ap,tg,d))+" come back here":"No one on it")),
       picked&&MGR()&&!tg.ids.includes(picked)?h("button",{class:"movehere",type:"button",onclick:()=>{const t=picked;picked=null;moveTech(t,tg);}},"Move here"):null);
     grid.append(dropZone(card,tg));});
   const bench=h("div",{class:"tcard bench"},
@@ -2368,7 +2505,8 @@ async function resumeHold(j,task){const x=task||j;if(!x.hold)return;
     notifyTechs(withJob(sim,()=>lined.filter(tid=>!offRec(tid,d)).map(tid=>{const now=assignLabel(tid,d);return [tid,targetLabel(j,task)+" is back on. "+(now?"You're on "+now+".":"Check with your lead.")];})),"Resumed");
     logEvent("Resumed: "+targetLabel(j,task)+" after "+durTxt(Date.now()-x.hold.at)+" on hold",{ev:"resume",jobId:j.id});toast("Resumed "+targetLabel(j,task));}
   catch(err){writeErr(err);}}
-async function taskDone(j,task){try{const tasks=tasksOf(j).map(t=>t.id===task.id?Object.assign({},t,{doneOn:TODAY(),doneBy:myId||"",doneAt:Date.now()}):t);
+async function taskDone(j,task){try{{const ap=activePush();if(ap&&ap.job.id===j.id&&ap.p.taskId===task.id){await endPush(ap,{quiet:true});await waitFor(pushGone(j.id));toast("All hands done · everyone's back on their regular work");j=S.jobs.find(x=>x.id===j.id)||j;}}
+  const tasks=tasksOf(j).map(t=>t.id===task.id?Object.assign({},t,{doneOn:TODAY(),doneBy:myId||"",doneAt:Date.now()}):t);
   await db.collection("jobs").doc(j.id).update({tasks,updatedAt:Date.now()});logEvent("Done: "+targetLabel(j,task),{ev:"done",jobId:j.id});
   const ms=mgrUids();if(ms.length)logEvent(meName()+" finished "+targetLabel(j,task),{ev:"notice",notify:ms,title:"Task finished",jobId:j.id});
   if(tasks.every(t=>t.doneOn)){const all=[...new Set([...mgrUids(),myId])];logEvent("Every task on "+j.name+" is done. Close the job when it's ready.",{ev:"notice",notify:all,title:"Job ready to close",jobId:j.id});}readyAfter(j,j,Object.assign({},j,{tasks}));toast(task.name+" done");}catch(err){writeErr(err);}}
@@ -2499,13 +2637,15 @@ function taskProg(j,t){if(!t)return null;const sc=t.scope||((scopePlan(j)||{task
   const gl=scopeCables(j,sc),ss=stepsOf(j).filter(st=>!/^scan_/.test(st.id));if(!gl.length||!ss.length)return null;
   const tot=gl.length*ss.length,done=gl.reduce((a,c)=>a+ss.filter(st=>markOf(j,c.id,st.id)).length,0),left=gl.filter(c=>!ss.every(st=>markOf(j,c.id,st.id))).length;
   return {pct:Math.round(done*100/tot),left,n:gl.length};}
-function suggestAssign(d){const di=dayInfo(d),tg=liveTargets(d).filter(x=>x.task||!tasksOf(x.job).length),cnt=new Map(tg.map(x=>[x,x.ids.length])),out=[];
+function suggestAssign(d){const ap=activePush(),di=dayInfo(d),tg=liveTargets(d).filter(x=>x.task||!tasksOf(x.job).length),cnt=new Map(tg.map(x=>[x,x.ids.length])),out=[];
   const score=(x,from)=>{const j=x.job,t=x.task,n=cnt.get(x);let s=0;const why=[];
     if(!n){s+=50;why.push("no one on it");}
     if(t&&needTotal(t)>n){s+=30;if(n)why.push("short "+(needTotal(t)-n)+" of "+needTotal(t));}
     if(from&&from.job===j){s+=12;if(t&&from.task&&t.scope&&from.task.scope&&t.scope.rack===from.task.scope.rack)s+=10;}
     const need=+j.techs||0,have=workingOn(j,d).length;if(need&&have<need){s+=20;why.push("job is short "+(need-have));}
     const p=priOf(j);if(p===1){s+=15;why.push("top priority");}else s+=(5-p)*3;
+    {const ob=orderBonus(x);if(ob){s+=ob;why.push("high on your list");}}
+    if(ap){if(isPushTarget(ap,x)){s+=200;why.unshift("all hands");}else if(!(isQuick(j)&&qPri(j)==="critical"))s-=200;}
     const due=t&&t.due?t.due:jobEnd(j);const days=Math.round((parseD(due)-parseD(d))/864e5);if(days<=14){s+=(14-Math.max(0,days))*3;if(days<=7)why.push(days<=0?"due today":"due "+fmtS(due,{weekday:"short"}));}
     const pr=taskProg(j,t);if(pr&&pr.pct>=90)s-=40;
     s-=n*8;return [s,why];};
@@ -2514,7 +2654,7 @@ function suggestAssign(d){const di=dayInfo(d),tg=liveTargets(d).filter(x=>x.task
   // 1) people on tasks that are done or almost done → next task
   tg.forEach(x=>{if(!x.task||!x.ids.length)return;const pr=taskProg(x.job,x.task);if(!pr)return;
     const movers=pr.pct>=100?x.ids.slice():pr.pct>=85&&x.ids.length>1?x.ids.slice(Math.max(1,Math.ceil(pr.left/6))):[];
-    movers.forEach(id=>{const tc=techById(id);if(!tc||isLeadTech(tc))return;const b=best(x,x);if(!b||b.sc<0)return;
+    movers.forEach(id=>{const tc=techById(id);if(!tc||isLeadTech(tc))return;const b=best(x,x);if(!b||b.sc<0||(ap&&isPushTarget(ap,x)))return;
       out.push({tc,x:b.x,from:x,why:[pr.pct>=100?x.task.name+" is done":x.task.name+" is "+pr.pct+"% done ("+pr.left+" cables left)",...b.why]});cnt.set(b.x,cnt.get(b.x)+1);cnt.set(x,cnt.get(x)-1);});});
   // 2) free people → where they're needed most
   di.idle.forEach(tc=>{const b=best(null,null);if(b){out.push({tc,x:b.x,why:b.why});cnt.set(b.x,cnt.get(b.x)+1);}});
@@ -2533,11 +2673,16 @@ function pickTech(target){const d=TODAY(),di=dayInfo(d),free=new Set(di.idle.map
       h("span",{class:"pk"},on?"✓":""),h("span",{},h("strong",{},t.name),h("small",{},free.has(t.id)?"Free":"Now on "+assignLabel(t.id,d))),free.has(t.id)?h("span",{class:"pill good"},"Free"):null));});
     if(!here.length)box.append(h("div",{class:"status"},"Everyone here is already on it."));
     go.disabled=!sel.size;go.textContent=sel.size?"Put "+sel.size+" on "+(target.task?target.task.name:target.job.name):"Pick people";};
-  go.addEventListener("click",async()=>{const ids=[...sel];closeSheet();const n=await moveMany(ids.map(id=>({tid:id,jobId:target.job.id,taskId:target.task?target.task.id:""})));toast(n+" → "+targetLabel(target.job,target.task));});
+  go.addEventListener("click",async()=>{const ids=[...sel];closeSheet();const ap=activePush();
+    if(ap&&isPushTarget(ap,target)){try{await pushAdd(ap,ids);toast(ids.length+" → all hands on "+pushLabel(ap));}catch(e){writeErr(e);}return;}
+    const n=await moveMany(ids.map(id=>({tid:id,jobId:target.job.id,taskId:target.task?target.task.id:""})));toast(n+" → "+targetLabel(target.job,target.task));});
   draw();openView("Who's going to "+(target.task?target.task.name:target.job.name)+"?",[h("p",{class:"status full",style:"margin:0"},"Tap everyone who's going, then tap the button."),box,h("div",{class:"full",style:"position:sticky;bottom:0;background:var(--panel);padding:8px 0"},go)]);}
-function pickTarget(tid){const d=TODAY(),tg=liveTargets(d);
-  openView("Put "+techName(tid)+" on…",[h("div",{class:"full moregrid"},tg.map(x=>h("button",{type:"button",class:"moreitem",onclick:async()=>{closeSheet();await moveTech(tid,{job:x.job,task:x.task});toast(techName(tid)+" → "+targetLabel(x.job,x.task));}},
-    h("span",{},h("strong",{},x.task?x.task.name:x.job.name),h("small",{},(x.task?x.job.name+" · ":"")+(x.ids.length?x.ids.length+" on it: "+crewNames(x.ids):"No one on it"))),x.ids.length?null:h("span",{class:"badge"},"0")))),
+function pickTarget(tid){const d=TODAY(),tg=liveTargets(d),ap=activePush(),onPush=ap&&pushIds(ap,d).includes(tid),back=ap?backLabel(ap,tid):"";
+  const fast=[];
+  if(ap&&onPush&&back)fast.push(h("button",{type:"button",class:"btn full",onclick:async()=>{closeSheet();try{await moveSet([{tid,to:((ap.p.snap||{})[tid]||[]).map(placeTarget).filter(Boolean)}]);toast(techName(tid)+" → back to "+back);}catch(e){writeErr(e);}}},"↩ Back to their regular work: "+back));
+  if(ap&&!onPush)fast.push(h("button",{type:"button",class:"btn full",onclick:async()=>{closeSheet();try{await pushAdd(ap,[tid]);toast(techName(tid)+" → all hands on "+pushLabel(ap));}catch(e){writeErr(e);}}},"🚨 To all hands: "+pushLabel(ap)));
+  openView("Put "+techName(tid)+" on…",[...fast,h("div",{class:"full moregrid"},tg.map(x=>h("button",{type:"button",class:"moreitem",onclick:async()=>{closeSheet();await moveTech(tid,{job:x.job,task:x.task});toast(techName(tid)+" → "+targetLabel(x.job,x.task));}},
+    h("span",{},h("strong",{},x.task?x.task.name:x.job.name),h("small",{},(x.task?x.job.name+" · ":"")+(isPushTarget(ap,x)?"🚨 All hands · ":pausedFor(ap,x,d).length?"⏸ Paused · ":"")+(x.ids.length?x.ids.length+" on it: "+crewNames(x.ids):"No one on it"))),x.ids.length?null:h("span",{class:"badge"},"0")))),
     h("button",{type:"button",class:"btn ghost full",onclick:async()=>{closeSheet();await moveTech(tid,null);toast(techName(tid)+" taken off their task");}},"Take off any task")]);}
 function daySummary(d){const t0=parseD(d).getTime(),t1=t0+864e5,lines=[];
   jobsOn(d).forEach(j=>{const ss=stepsOf(j).filter(st=>!/^scan_/.test(st.id)),parts=[];
@@ -2577,16 +2722,18 @@ function renderDay(v){const d=TODAY(),att=ATT[d]||{},hd=att.huddle,wr=att.wrap,r
   const rcDone=!r.unk.length&&(r.here.length||r.out.length);
   v.append(flowCard(2,"Roll call",rcDone?"done":"",h("div",{class:"stack",style:"gap:8px"},rollBar(d),r.unk.length||r.out.length?rollList(d,true):null),{chip:r.here.length+" here · "+(r.out.length+r.off.length)+" out"}));
   // 3 assignments
-  const tg=liveTargets(d),empty=tg.filter(x=>x.task&&!x.ids.length),outOn_=r.out.filter(t=>assignOn(t.id,d));
-  const ab=h("div",{class:"stack",style:"gap:8px"});
+  const ap=activePush(),tg=liveTargets(d),empty=ap?[]:tg.filter(x=>x.task&&!x.ids.length),outOn_=r.out.filter(t=>assignOn(t.id,d));
+  const ab=h("div",{class:"stack",style:"gap:8px"});checkPushExpiry();
+  {const pb=pushBanner(d);if(pb)ab.append(pb);}
+  {const pc=prioCard(d);if(pc)ab.append(h("details",{class:"priobox",open:!ap},h("summary",{},ap?"Today's priorities":"Today's priorities · what to push"),pc));}
   outOn_.forEach(t=>ab.append(h("div",{class:"arow warn"},h("span",{},h("strong",{},t.name+" is out"),h("small",{},"Was on "+assignLabel(t.id,d))),h("button",{type:"button",class:"btn ghost small",onclick:()=>moveTech(t.id,null).then(()=>toast(t.name+" taken off"))},"Take off"))));
   if(tg.length)ab.append(h("button",{type:"button",class:"btn",style:"justify-self:start",onclick:()=>autoFillSheet()},"⚡ Auto-fill crew"));
   {const sb=suggBox(d);if(sb)ab.append(sb);}
   if(di.idle.length)ab.append(h("div",{},h("div",{class:"status",style:"margin-bottom:4px"},"Free · tap to put them on a task"),h("div",{class:"tchips"},di.idle.map(t=>h("button",{type:"button",class:"tchip free",onclick:()=>pickTarget(t.id)},t.name+" ＋")))));
-  tg.forEach(x=>ab.append(h("div",{class:"arow"+(x.task&&!x.ids.length?" noone":"")},h("span",{},h("strong",{},x.task?x.task.name:x.job.name+" (whole job)"),h("small",{},(x.task?x.job.name+" · ":"")+(x.ids.length?crewNames(x.ids):"No one on it")),x.task&&needTotal(x.task)?(()=>{const g=needGap(x.task,x.ids);return h("small",{class:g.length?"needwarn":"needok"},"👥 "+x.ids.length+"/"+needTotal(x.task)+" · "+needText(x.task)+(g.length?" · ⚠ "+g.join(", "):" ✓"));})():null,(()=>{const pr=taskProg(x.job,x.task);if(!pr)return null;const lm=x.ids.length&&pr.left?lastMarkAt(x.job,x.task):0,stale=x.ids.length&&pr.left&&(!lm||Date.now()-lm>2*864e5);return h("span",{style:"display:grid;gap:2px"},h("span",{class:"mbar"},h("span",{class:"bar"},h("i",{style:"width:"+pr.pct+"%"})),h("b",{},pr.pct+"%"+(pr.left?" · "+pr.left+" left":" ✓"))),stale?h("small",{class:"needwarn"},"⚠ "+(lm?"No check-offs since "+fmtS(iso(new Date(lm)),{weekday:"short",month:"short",day:"numeric"}):"Nothing checked off yet")):null);})()),
+  tg.forEach(x=>ab.append(h("div",{class:"arow"+(x.task&&!x.ids.length&&!ap?" noone":"")+(isPushTarget(ap,x)?" pushrow":"")},h("span",{},h("strong",{},x.task?x.task.name:x.job.name+" (whole job)"),h("small",{},(x.task?x.job.name+" · ":"")+(x.ids.length?crewNames(x.ids):pausedFor(ap,x,d).length?"⏸ Paused for all hands · "+crewNames(pausedFor(ap,x,d))+" come back here":"No one on it")),x.task&&needTotal(x.task)?(()=>{const g=needGap(x.task,x.ids);return h("small",{class:g.length?"needwarn":"needok"},"👥 "+x.ids.length+"/"+needTotal(x.task)+" · "+needText(x.task)+(g.length?" · ⚠ "+g.join(", "):" ✓"));})():null,(()=>{const pr=taskProg(x.job,x.task);if(!pr)return null;const lm=x.ids.length&&pr.left?lastMarkAt(x.job,x.task):0,stale=x.ids.length&&pr.left&&(!lm||Date.now()-lm>2*864e5);return h("span",{style:"display:grid;gap:2px"},h("span",{class:"mbar"},h("span",{class:"bar"},h("i",{style:"width:"+pr.pct+"%"})),h("b",{},pr.pct+"%"+(pr.left?" · "+pr.left+" left":" ✓"))),stale?h("small",{class:"needwarn"},"⚠ "+(lm?"No check-offs since "+fmtS(iso(new Date(lm)),{weekday:"short",month:"short",day:"numeric"}):"Nothing checked off yet")):null);})()),
     h("span",{style:"display:flex;gap:6px"},x.ids.length?h("button",{type:"button",class:"btn ghost small",onclick:()=>{const id=x.ids[x.ids.length-1];pickTarget(id);}},"Move"):null,h("button",{type:"button",class:"btn small"+(x.ids.length?" ghost":""),onclick:()=>pickTech(x)},"＋")))));
   if(!tg.length)ab.append(h("div",{class:"status"},"No work on the board today."));
-  v.append(flowCard(3,"Assignments · delegate or pivot",outOn_.length||empty.length?"warn":tg.length?"done":"",ab,{chip:(empty.length?empty.length+" need crew":"")+(empty.length&&di.idle.length?" · ":"")+(di.idle.length?di.idle.length+" free":"")||"All set"}));
+  v.append(flowCard(3,"Assignments · delegate or pivot",outOn_.length||empty.length?"warn":tg.length?"done":"",ab,{chip:ap?"🚨 All hands":(empty.length?empty.length+" need crew":"")+(empty.length&&di.idle.length?" · ":"")+(di.idle.length?di.idle.length+" free":"")||"All set"}));
   // 4 meetings & reminders
   const rs=remsOn(d),late=S.messages.filter(m=>isNote(m)&&m.remindOn&&m.remindOn<d&&!m.done);
   const mb=h("div",{class:"stack",style:"gap:6px"});
@@ -2708,12 +2855,15 @@ function positionsFor(d,M){const out=new Map();
     const fc=jobForecast(j,M);let slots=+j.techs||0;if(fc&&fc.people)slots=Math.max(slots,Math.min(fc.people,slots?slots*2:fc.people));if(!slots)slots=tg.length;
     tg.forEach((x,i)=>{if(!rem[i]){out.set(x,0);return;}let n=totRem?Math.round(slots*rem[i]/totRem):1;n=Math.max(1,Math.min(n,Math.ceil(rem[i]/2)||1),needTotal(x.task));out.set(x,n);});});
   return out;}
-function autoFill(d){const M=computeMetrics(45),pos=positionsFor(d,M),tg=[...pos.keys()],avail=activeTechs().filter(t=>!awayOn(t.id,d)&&!isLeadTech(t));
+function autoFill(d){const ap=activePush();
+  if(ap){const x=liveTargets(d).find(y=>isPushTarget(ap,y));if(x){const pool=pushPool(d),plan=pool.filter(t=>!x.ids.includes(t.id)).map(t=>({tc:t,x,why:["all hands"]}));
+    return {plan,pos:new Map([[x,pool.length]]),seat:new Map([[x,pool.map(t=>t.id)]])};}}
+  const M=computeMetrics(45),pos=positionsFor(d,M),tg=[...pos.keys()],avail=activeTechs().filter(t=>!awayOn(t.id,d)&&!isLeadTech(t));
   const seat=new Map(tg.map(x=>[x,[]])),used=new Set(),plan=[];
   // 1) keep people where they are if their task still needs them
   tg.forEach(x=>{x.ids.forEach(id=>{const t=techById(id);if(!t||isLeadTech(t)||used.has(id))return;if(seat.get(x).length<pos.get(x)){seat.get(x).push(id);used.add(id);}});});
   // 2) fill open spots, most urgent first, with the best fit
-  const urg=x=>{const j=x.job,t=x.task,due=t&&t.due?t.due:jobEnd(j);return (priOf(j)*100)+Math.max(0,Math.round((parseD(due)-parseD(d))/864e5));};
+  const urg=x=>{const j=x.job,t=x.task,due=t&&t.due?t.due:jobEnd(j);return (priOf(j)*100)+Math.max(0,Math.round((parseD(due)-parseD(d))/864e5))-orderBonus(x)*4;};
   const fit=(id,x)=>{const sy=x.task&&scopeOfTask(x.job,x.task)?scopeOfTask(x.job,x.task).type:"",rack=x.task&&scopeOfTask(x.job,x.task)?scopeOfTask(x.job,x.task).rack:"";
     const base=sysRate(M,sy)||1,mine=techRate(M,id,sy),o=M.tech[id]||{rack:{}};let s=mine?Math.min(2,mine/base)*30:15;const why=[];
     if(mine&&mine>base*1.15)why.push("fast on "+(sy||"this work"));if(rack&&o.rack[rack]){s+=10;why.push("knows "+rack);}
@@ -2735,7 +2885,7 @@ function autoFillSheet(){const d=TODAY(),r=autoFill(d);
     h("p",{class:"status",style:"margin:0"},"Spots per task come from how much work is left, how many people the job needs, and how fast the crew has been going. People stay put unless a task needs them more. Leads and supers aren't moved."),
     h("div",{class:"flabel"},"Spots filled"),h("div",{class:"stack",style:"gap:4px"},grid),
     h("div",{class:"flabel"},r.plan.length?r.plan.length+" moves":"No moves needed"),...rows,
-    r.plan.length?h("button",{type:"button",class:"btn",onclick:async e=>{e.target.disabled=true;e.target.textContent="Moving…";const n=await moveMany(r.plan.map(g=>({tid:g.tc.id,jobId:g.x.job.id,taskId:g.x.task?g.x.task.id:""})));closeSheet();toast("Auto-filled · "+n+" moves");}},"Apply all "+r.plan.length+" moves"):null)]);}
+    r.plan.length?h("button",{type:"button",class:"btn",onclick:async e=>{e.target.disabled=true;e.target.textContent="Moving…";const ap=activePush();if(ap&&r.plan.every(g=>isPushTarget(ap,g.x))){try{await pushAdd(ap,r.plan.map(g=>g.tc.id));}catch(x){writeErr(x);}closeSheet();toast("Auto-filled · all hands");return;}const n=await moveMany(r.plan.map(g=>({tid:g.tc.id,jobId:g.x.job.id,taskId:g.x.task?g.x.task.id:""})));closeSheet();toast("Auto-filled · "+n+" moves");}},"Apply all "+r.plan.length+" moves"):null)]);}
 function renderMetrics(v){const M=computeMetrics(metricsDays),fmt1=n=>n>=10?Math.round(n):Math.round(n*10)/10;
   v.append(h("div",{class:"sechead"},h("h2",{},"Productivity"),subnav(String(metricsDays),[["14","2 wks"],["30","30 days"],["90","90 days"]],k=>{metricsDays=+k;})));
   v.append(h("p",{class:"status",style:"margin:0 0 10px"},"Counted from cables checked off in the app. 1 unit = one cable through one step (pull, dress, terminate, label, test). A day's work on a task is split across the crew on it that day."));
@@ -2960,6 +3110,7 @@ function whatsNext(doneLabel,nx){const me=myTech(),d=TODAY();if(!me)return;
     h("button",{type:"button",class:"linkbtn",onclick:closeSheet},"Not now"))]);}
 function renderMyWork(v){const d=TODAY(),me=myTech(),t=today();
   {const ng=checkoffNudge();if(ng)v.append(ng);}
+  {const ap=activePush();if(ap&&me&&pushIds(ap,d).includes(me.id))v.append(h("div",{class:"pushban",style:"margin-bottom:10px"},h("strong",{},"🚨 All hands on "+targetLabel(ap.job,ap.task)),h("small",{},"Everyone's on this. Your other work is paused and you'll go back to it after.")));}
   v.append(h("div",{class:"dayline"},h("strong",{},fmt(t,{weekday:"long",month:"short",day:"numeric"})),h("span",{class:"status"},hoursTxt(d)),notifState()==="default"?h("button",{type:"button",class:"linkbtn",onclick:()=>enableAlerts()},"Turn on alerts"):null));
   {const mj=me?assignOn(me.id,d):null,mt=mj?taskFor(mj,me.id,d):null,shown=mj&&mt&&CAN_POST()&&needsScan(mj)&&!offRec(me.id,d)&&isWeekday(d);
     if(CAN_POST()&&scanJobs().length)v.append(h("div",{style:"display:flex;gap:8px;margin:0 0 10px"},
@@ -7039,7 +7190,7 @@ async function startSession(u){
   const sid=myId,retry=(ref,ok,denied)=>{const go=()=>{if(myId!==sid)return;unsubs.push(ref.onSnapshot(ok,err=>{denied();if(err&&err.code==="permission-denied")setTimeout(go,20000);}));};go();};
   retry(db.doc("team/roles"),s=>{roles=s.exists?((s.data()||{}).roles||{}):{};gotRoles=true;
     if(!s.metadata.fromCache&&isOwner&&!roles[myId])saveRole(myId,{role:"lead",techId:""});ready();},()=>{gotRoles=true;ready();});
-  retry(db.doc("team/crew"),s=>{const d=s.exists?(s.data()||{}):{};crewDoc={members:d.members||{},declined:d.declined||{},hours:d.hours||null,holidays:Array.isArray(d.holidays)?d.holidays:[],hoursPlan:Array.isArray(d.hoursPlan)?d.hoursPlan:[],dismissedPlans:d.dismissedPlans||[],links:d.links||{},rechargeHrs:d.rechargeHrs||2,tools:Array.isArray(d.tools)?d.tools:[],stepTools:d.stepTools&&typeof d.stepTools==="object"?d.stepTools:{},crewKits:Array.isArray(d.crewKits)?d.crewKits:[],toolsHidden:Array.isArray(d.toolsHidden)?d.toolsHidden:[]};gotCrew=true;ready();},()=>{gotCrew=true;ready();});
+  retry(db.doc("team/crew"),s=>{const d=s.exists?(s.data()||{}):{};crewDoc={members:d.members||{},declined:d.declined||{},hours:d.hours||null,holidays:Array.isArray(d.holidays)?d.holidays:[],hoursPlan:Array.isArray(d.hoursPlan)?d.hoursPlan:[],dismissedPlans:d.dismissedPlans||[],links:d.links||{},rechargeHrs:d.rechargeHrs||2,tools:Array.isArray(d.tools)?d.tools:[],stepTools:d.stepTools&&typeof d.stepTools==="object"?d.stepTools:{},crewKits:Array.isArray(d.crewKits)?d.crewKits:[],toolsHidden:Array.isArray(d.toolsHidden)?d.toolsHidden:[],order:Array.isArray(d.order)?d.order:[]};gotCrew=true;ready();},()=>{gotCrew=true;ready();});
   unsubs.push(pr.onSnapshot(s=>{me_=s.exists?(s.data()||{}):{};if(me_.name)$("#whoMe").textContent=me_.name;schedule();},()=>{}));
 }
 
