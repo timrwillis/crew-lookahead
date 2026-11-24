@@ -850,6 +850,15 @@ body:has(#scrim:not([hidden])) .fab,body:has(.popwrap) .fab{display:none}
 .needrow.on{border-color:var(--accent);background:var(--soft)}.needrow small{display:block;color:var(--muted);font-size:.72rem}
 .stepper{display:inline-flex;align-items:center;gap:6px}.stepper button{width:34px;height:34px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font:700 1.1rem var(--f-body);cursor:pointer}.stepper b{min-width:18px;text-align:center}
 small.needwarn{color:var(--over)!important;font-weight:600}small.needok{color:var(--ok)!important}
+
+.qctop{display:flex;flex-wrap:wrap;gap:6px}.qcsum{display:grid;padding:6px 10px;border-radius:10px;background:var(--bg);font-size:.76rem;color:var(--muted);min-width:64px}.qcsum b{font-size:1rem;color:var(--ink)}.qcsum.isdone{background:var(--ok-soft)}.qcsum.isdone b{color:var(--ok)}
+.qcrow{display:grid;gap:8px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.qch{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.qcbtns{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:6px}
+.qcb{min-height:48px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font:700 .88rem var(--f-body);cursor:pointer;padding:6px}
+.qcb.part{border-color:var(--likely)}.qcb.isdone{background:var(--ok);border-color:var(--ok);color:#fff}.qcb.armed{background:var(--over);border-color:var(--over);color:#fff}
+.qcgo{width:100%;min-height:52px;font-size:1.02rem;margin:6px 0}
+.nudge{display:grid;gap:2px;width:100%;text-align:left;padding:14px;border-radius:14px;border:2px solid var(--likely);background:color-mix(in srgb,var(--likely) 14%,var(--panel));color:var(--ink);font:inherit;margin-bottom:10px;cursor:pointer}
 </style>
 </head>
 <body>
@@ -1295,9 +1304,11 @@ function acctSheet(){
 /* One + button: everything you can add, from any screen. */
 function quickAdd(){const can=CAN_POST(),m=MGR(),go=fn=>()=>{closeSheet();setTimeout(fn,60);};
   const items=[
+    (()=>{if(m||!can)return null;const me=myTech(),j=me?assignOn(me.id,TODAY()):null;if(!j||!cablesOf(j).length)return null;const tk=taskFor(j,me.id,TODAY());return ["✓","Check off work","Mark a whole pull done in one tap",()=>quickCheck(j.id,tk?tk.id:"")];})(),
     can&&scanJobs().length?["📷","Scan a cable","Fiber scan steps",scanAny]:null,
     can?["⚑","Flag a problem","Alerts the lead right away",()=>flagForm()]:null,
     m?["＋","New job","Step-by-step job setup",()=>jobWizard()]:null,
+    m?["⧉","Copy a past job","Same steps, systems, tools, crew needs",()=>openView("Copy which job?",[h("div",{class:"full moregrid"},[...S.jobs].filter(j=>!isQuick(j)).sort((a,b)=>(b.start||"")<(a.start||"")?-1:1).map(j=>h("button",{type:"button",class:"moreitem",onclick:()=>{closeSheet();setTimeout(()=>duplicateJob(j),60);}},h("span",{},h("strong",{},j.name),h("small",{},[j.doneOn?"Done "+fmtS(j.doneOn):"Open",cablesOf(j).length?cablesOf(j).length+" cables":"",tasksOf(j).length?tasksOf(j).length+" tasks":""].filter(Boolean).join(" · "))))))])]:null,
     m?["⚡","Quick task","One-off ask, not part of a job",()=>quickForm(null)]:null,
     can?["✎","Note or ask","Note for the crew or ask the boss",()=>{msgSeg="notes";setTab("messages",true);setTimeout(()=>{const t=document.getElementById("msgText");if(t)t.focus();},150);}]:null,
     can?["☎","Call in","Late, sick, or out today",()=>callInForm()]:null,
@@ -2438,7 +2449,7 @@ function renderDay(v){const d=TODAY(),att=ATT[d]||{},hd=att.huddle,wr=att.wrap,r
   if(tg.length)ab.append(h("button",{type:"button",class:"btn",style:"justify-self:start",onclick:()=>autoFillSheet()},"⚡ Auto-fill crew"));
   {const sb=suggBox(d);if(sb)ab.append(sb);}
   if(di.idle.length)ab.append(h("div",{},h("div",{class:"status",style:"margin-bottom:4px"},"Free · tap to put them on a task"),h("div",{class:"tchips"},di.idle.map(t=>h("button",{type:"button",class:"tchip free",onclick:()=>pickTarget(t.id)},t.name+" ＋")))));
-  tg.forEach(x=>ab.append(h("div",{class:"arow"+(x.task&&!x.ids.length?" noone":"")},h("span",{},h("strong",{},x.task?x.task.name:x.job.name+" (whole job)"),h("small",{},(x.task?x.job.name+" · ":"")+(x.ids.length?crewNames(x.ids):"No one on it")),x.task&&needTotal(x.task)?(()=>{const g=needGap(x.task,x.ids);return h("small",{class:g.length?"needwarn":"needok"},"👥 "+x.ids.length+"/"+needTotal(x.task)+" · "+needText(x.task)+(g.length?" · ⚠ "+g.join(", "):" ✓"));})():null,(()=>{const pr=taskProg(x.job,x.task);return pr?h("span",{class:"mbar"},h("span",{class:"bar"},h("i",{style:"width:"+pr.pct+"%"})),h("b",{},pr.pct+"%"+(pr.left?" · "+pr.left+" left":" ✓"))):null;})()),
+  tg.forEach(x=>ab.append(h("div",{class:"arow"+(x.task&&!x.ids.length?" noone":"")},h("span",{},h("strong",{},x.task?x.task.name:x.job.name+" (whole job)"),h("small",{},(x.task?x.job.name+" · ":"")+(x.ids.length?crewNames(x.ids):"No one on it")),x.task&&needTotal(x.task)?(()=>{const g=needGap(x.task,x.ids);return h("small",{class:g.length?"needwarn":"needok"},"👥 "+x.ids.length+"/"+needTotal(x.task)+" · "+needText(x.task)+(g.length?" · ⚠ "+g.join(", "):" ✓"));})():null,(()=>{const pr=taskProg(x.job,x.task);if(!pr)return null;const lm=x.ids.length&&pr.left?lastMarkAt(x.job,x.task):0,stale=x.ids.length&&pr.left&&(!lm||Date.now()-lm>2*864e5);return h("span",{style:"display:grid;gap:2px"},h("span",{class:"mbar"},h("span",{class:"bar"},h("i",{style:"width:"+pr.pct+"%"})),h("b",{},pr.pct+"%"+(pr.left?" · "+pr.left+" left":" ✓"))),stale?h("small",{class:"needwarn"},"⚠ "+(lm?"No check-offs since "+fmtS(iso(new Date(lm)),{weekday:"short",month:"short",day:"numeric"}):"Nothing checked off yet")):null);})()),
     h("span",{style:"display:flex;gap:6px"},x.ids.length?h("button",{type:"button",class:"btn ghost small",onclick:()=>{const id=x.ids[x.ids.length-1];pickTarget(id);}},"Move"):null,h("button",{type:"button",class:"btn small"+(x.ids.length?" ghost":""),onclick:()=>pickTech(x)},"＋")))));
   if(!tg.length)ab.append(h("div",{class:"status"},"No work on the board today."));
   v.append(flowCard(3,"Assignments · delegate or pivot",outOn_.length||empty.length?"warn":tg.length?"done":"",ab,{chip:(empty.length?empty.length+" need crew":"")+(empty.length&&di.idle.length?" · ":"")+(di.idle.length?di.idle.length+" free":"")||"All set"}));
@@ -2814,6 +2825,7 @@ function whatsNext(doneLabel,nx){const me=myTech(),d=TODAY();if(!me)return;
     nx?h("button",{type:"button",class:"btn ghost",onclick:async()=>{closeSheet();await ping("has "+label+" lined up but wants to check");}},"📣 Ask lead / super instead"):null,
     h("button",{type:"button",class:"linkbtn",onclick:closeSheet},"Not now"))]);}
 function renderMyWork(v){const d=TODAY(),me=myTech(),t=today();
+  {const ng=checkoffNudge();if(ng)v.append(ng);}
   v.append(h("div",{class:"dayline"},h("strong",{},fmt(t,{weekday:"long",month:"short",day:"numeric"})),h("span",{class:"status"},hoursTxt(d)),notifState()==="default"?h("button",{type:"button",class:"linkbtn",onclick:()=>enableAlerts()},"Turn on alerts"):null));
   {const mj=me?assignOn(me.id,d):null,mt=mj?taskFor(mj,me.id,d):null,shown=mj&&mt&&CAN_POST()&&needsScan(mj)&&!offRec(me.id,d)&&isWeekday(d);
     if(CAN_POST()&&scanJobs().length)v.append(h("div",{style:"display:flex;gap:8px;margin:0 0 10px"},
@@ -2844,6 +2856,7 @@ function renderMyWork(v){const d=TODAY(),me=myTech(),t=today();
     toolsLine(j,tk),
     tk&&needTotal(tk)?h("div",{class:"status",style:"color:var(--ink)"},"👥 Crew: "+needText(tk)):null,
     stepBars(j,tk),
+    cablesOf(j).length&&nonScan(j).length&&CAN_POST()?h("button",{type:"button",class:"btn bigbtn qcgo",onclick:()=>quickCheck(j.id,tk?tk.id:"")},"✓ Check off work"):null,
     (()=>{const ps=[step?cablePill(j,tk):null,docPill(j,tk||null,false)].filter(Boolean);return ps.length?h("div",{class:"pills"},ps):null;})(),
     step?h("div",{class:"wleft"},h("strong",{},left.length?left.length+" cable"+(left.length>1?"s":"")+" left":"All cables "+step.name.toLowerCase()+" ✓"),left.length?h("div",{class:"status"},left.slice(0,5).map(c=>c.name).join(", ")+(left.length>5?" +"+(left.length-5)+" more":"")):null):null,
     state==="hold"&&st.reason?h("div",{class:"status",style:"color:var(--over)"},"You reported: "+st.reason+(st.text?" · "+st.text:"")):null);
@@ -2899,6 +2912,7 @@ function myTaskSheet(jid,tid){const j=S.jobs.find(x=>x.id===jid);if(!j)return;co
   const nodes=[h("p",{class:"status",style:"margin:0"},[t?j.name:"",j.site,t?phaseName(j,t):""].filter(Boolean).join(" · ")||"Whole job"),
     toolsLine(j,t),
     stepBars(j,t),
+    cablesOf(j).length&&nonScan(j).length&&CAN_POST()?h("button",{type:"button",class:"btn qcgo",onclick:()=>{closeSheet();setTimeout(()=>quickCheck(j.id,t?t.id:""),60);}},"✓ Check off work"):null,
     (()=>{const ps=[step?cablePill(j,t):null,docPill(j,t||null,false)].filter(Boolean);return ps.length?h("div",{class:"pills"},ps):null;})(),
     step?h("div",{class:"wleft"},h("strong",{},left.length?left.length+" cable"+(left.length>1?"s":"")+" left":"All cables "+step.name.toLowerCase()+" ✓"),left.length?h("div",{class:"status"},left.slice(0,8).map(c=>c.name).join(", ")+(left.length>8?" +"+(left.length-8)+" more":"")):null):null];
   const btns=h("div",{class:"stack",style:"gap:8px"});
@@ -3470,6 +3484,38 @@ function needEditor(need,onChange){let nd=Object.assign({},need||{});const box=h
     box.append(h("div",{class:"cgadd"},ci,h("button",{type:"button",class:"btn ghost small",onclick:()=>{if(ci.value.trim()){nd["c:"+ci.value.trim()]=1;emit();draw();}}},"Add role")),
       tot?h("div",{style:"display:flex;gap:8px;align-items:center;flex-wrap:wrap"},h("strong",{},"Minimum crew: "+tot),MGR()?(()=>{const tn=h("input",{type:"text",class:"tl-in",placeholder:"Save as template, e.g. Lift pull crew",style:"flex:1;min-width:140px"});const sv=()=>{const nm=tn.value.trim();if(!nm)return;saveCrew({crewKits:[...(crewDoc.crewKits||[]).filter(x=>x.name!==nm),{name:nm,need:Object.assign({},nd)}]});toast("Saved template “"+nm+"”");setTimeout(draw,60);};tn.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();sv();}});return h("span",{class:"cgadd",style:"flex:1"},tn,h("button",{type:"button",class:"btn ghost small",onclick:sv},"Save"));})():null):null);};
   draw();return box;}
+/* ===== QUICK CHECK-OFF: one tap marks a whole pull/row for a step ===== */
+const qcPull=c=>{if(c.pull){const p=String(c.pull),i=p.indexOf(" · ");return (i>=0?p.slice(i+3):p).trim()||"Pull";}const r=rowOf(c);return r?r.replace(/^ROW-/,"Row "):"Other cables";};
+function qcGroups(j,t){const sc=t?scopeOfTask(j,t):null,gl=sc?scopeCables(j,sc):cablesOf(j),m=new Map();
+  gl.forEach(c=>{const k=(sc?"":(c.rack?c.rack+" ":"")+(c.type?c.type+" · ":""))+qcPull(c);if(!m.has(k))m.set(k,[]);m.get(k).push(c);});
+  return [...m.entries()].sort((a,b)=>natCmp(a[0],b[0]));}
+function quickCheck(jid,tid){const j0=S.jobs.find(x=>x.id===jid);if(!j0)return;const t=tid?tasksOf(j0).find(x=>x.id===tid):null;
+  const box=h("div",{class:"full stack",style:"gap:10px"});let armed=null,q="";
+  const draw=()=>{const j=S.jobs.find(x=>x.id===jid)||j0,ss=nonScan(j),groups=qcGroups(j,t).filter(([k])=>!q||k.toLowerCase().includes(q));box.textContent="";
+    if(!ss.length){box.append(h("div",{class:"status"},"This job has no steps yet. Ask your lead to set them up."));return;}
+    const all=groups.flatMap(([,cs])=>cs),done=st=>all.filter(c=>markOf(j,c.id,st.id)).length;
+    box.append(h("div",{class:"qctop"},ss.map(st=>h("span",{class:"qcsum"+(all.length&&done(st)===all.length?" isdone":"")},h("b",{},done(st)+"/"+all.length),st.name))));
+    const si=h("input",{type:"search",class:"tl-in",placeholder:"Find a pull or row…",value:q});si.addEventListener("input",()=>{q=si.value.toLowerCase();draw();setTimeout(()=>{const n=box.querySelector("input[type=search]");if(n){n.focus();n.setSelectionRange(n.value.length,n.value.length);}},0);});
+    if(qcGroups(j,t).length>6)box.append(si);
+    groups.forEach(([k,cs])=>{const row=h("div",{class:"qcrow"});
+      row.append(h("div",{class:"qch"},h("strong",{},k),h("span",{class:"status"},cs.length+" cable"+(cs.length>1?"s":""))));
+      row.append(h("div",{class:"qcbtns"},ss.map(st=>{const n=cs.filter(c=>markOf(j,c.id,st.id)).length,full=n===cs.length,key=k+"|"+st.id;
+        return h("button",{type:"button",class:"qcb"+(full?" isdone":n?" part":"")+(armed===key?" armed":""),"aria-pressed":String(full),onclick:async()=>{
+          if(!CAN_POST())return;
+          if(full){if(armed!==key){armed=key;draw();setTimeout(()=>{if(armed===key){armed=null;draw();}},3000);return;}armed=null;await setMarks(j,cs.map(c=>[c.id,st.id]),false);toast(st.name+" undone for "+k);draw();return;}
+          armed=null;await setMarks(j,cs.filter(c=>!markOf(j,c.id,st.id)).map(c=>[c.id,st.id]),true);toast("✓ "+st.name+" · "+k+" ("+cs.length+")");draw();setTimeout(draw,700);}},
+          armed===key?"Tap again to undo":(full?"✓ ":"")+st.name+(full?"":" "+n+"/"+cs.length));})));
+      box.append(row);});
+    const sc=t?scopeOfTask(j,t):null;
+    box.append(h("button",{type:"button",class:"btn ghost small",style:"justify-self:start",onclick:()=>{closeSheet();setTimeout(()=>cableTracker(jid,"",sc?{cab:sc.rack,sys:sc.type||""}:undefined),60);}},"One cable at a time ›"));};
+  draw();openView("✓ Check off · "+(t?t.name:j0.name),[h("p",{class:"status full",style:"margin:0"},"Tap a step to mark the whole pull done. Tap a green one twice to undo."),box]);liveSheet=draw;$(".sheet").classList.add("wide");}
+function myMarksToday(j){const t0=parseD(TODAY()).getTime();let n=0;Object.values(j.marks||{}).forEach(cm=>{if(cm&&typeof cm==="object")Object.values(cm).forEach(m=>{if(m&&m.at>=t0&&m.by===myId)n++;});});return n;}
+function shiftEndSoon(){const hrs=hoursOn(TODAY());if(!hrs)return false;const [a,b]=hrs[1].split(":").map(Number),end=a*60+b,n=new Date(),now=n.getHours()*60+n.getMinutes();return now>=end-75&&now<=end+90;}
+function checkoffNudge(){if(MGR()||!myTech())return null;const me=myTech(),d=TODAY(),j=assignOn(me.id,d);if(!j||!cablesOf(j).length||!nonScan(j).length)return null;
+  if(!shiftEndSoon()||myMarksToday(j))return null;const tk=taskFor(j,me.id,d);
+  const k="cl_nudge_"+d;try{if(!localStorage.getItem(k)){localStorage.setItem(k,"1");notifyMe("Before you head out","Check off what you finished today. Takes 30 seconds.");}}catch(e){}
+  return h("button",{type:"button",class:"nudge",onclick:()=>quickCheck(j.id,tk?tk.id:"")},h("strong",{},"⏰ Before you head out"),h("span",{},"Check off what you finished today. Takes 30 seconds."));}
+function lastMarkAt(j,t){const sc=t?scopeOfTask(j,t):null,gl=sc?scopeCables(j,sc):cablesOf(j);let last=0;gl.forEach(c=>{const cm=(j.marks||{})[c.id];if(cm)Object.values(cm).forEach(m=>{if(m&&m.at>last)last=m.at;});});return last;}
 function toolsLine(j,t){const uniq=a=>[...new Map(a.map(x=>[toolKey(x),tidyTool(x)])).values()];
   const st=j&&t?stepForTask(j,t):null;
   const base=uniq([...splitTools(j&&j.tools),...splitTools(t&&t.tools),...(st?stepKit(st.name):[])]);
@@ -6148,7 +6194,7 @@ function stepMatrix(j,rows){const ss=stepsOf(j).filter(st=>!/^scan_/.test(st.id)
         onclick:e=>{e.stopPropagation();cableTracker(j.id,"",{cab:r.sc.rack,sys:r.sc.type||""});}},n===gl.length?"✓":n+"/"+gl.length));});});
   return h("div",{class:"smwrap"},tbl);}
 function stepBars(j,t){const sc=t&&(t.scope||((scopePlan(j)||{tasks:[]}).tasks.find(x=>x.id===t.id)||{}).scope);if(!sc)return null;const gl=scopeCables(j,sc),ss=stepsOf(j).filter(st=>!/^scan_/.test(st.id));if(!gl.length||!ss.length)return null;
-  return h("button",{type:"button",class:"sbars",onclick:e=>{e.stopPropagation();cableTracker(j.id,"",{cab:sc.rack,sys:sc.type||""});}},
+  return h("button",{type:"button",class:"sbars",onclick:e=>{e.stopPropagation();quickCheck(j.id,t.id);}},
     h("span",{class:"sbh"},sc.rack+" "+(sc.type||"")+" · "+gl.length+" cables · tap to check off"),
     ss.map(st=>{const n=gl.filter(c=>markOf(j,c.id,st.id)).length;return h("span",{class:"sbr"},h("span",{class:"sbn"},st.name),h("span",{class:"bar"},h("i",{style:"width:"+Math.round(n*100/gl.length)+"%"})),h("span",{class:"sbc"},n===gl.length?"✓":n+"/"+gl.length));}));}
 function cabSysPlan(cabs,syss){const phases=[],tasks=[];const nid=p=>p+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
