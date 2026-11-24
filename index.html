@@ -3510,7 +3510,7 @@ function ckTable(j){const head=["Cable","Cable Serial #","Cable QR code URL","So
   return [head,...cablesOf(j).map(c=>{const ck=ckOf(j,c.id);return [c.name,ck.serial||"",ck.qr||"",ck.src||"",ck.dst||"",...CK_ITEMS.flatMap((_,i)=>{const it=(ck.items||{})[i+1];return it&&it.at?[ckWho(it),ckDate(it.at),it.remark||""]:["","",""];})];})];}
 /* scan a cable's serial or label to jump straight to it */
 /* Cat6 / copper jobs never scan: no cable or enclosure scan steps */
-const isCat6Job=j=>!!j&&(j.kind==="cat6"||(cablesOf(j).length>0&&cablesOf(j).every(isPortCable)));
+const isCat6Job=j=>!!j&&!isRackJob(j)&&(j.kind==="cat6"||(cablesOf(j).length>0&&cablesOf(j).every(isPortCable)));
 const needsScan=j=>!!j&&!isQuick(j)&&!isCat6Job(j)&&cablesOf(j).length>0&&(j.scanCk===true||!!j.scanSteps||stepsOf(j).some(st=>/^scan_/.test(st.id))||(j.scanCk!==false&&cablesOf(j).some(c=>ckScanN(ckOf(j,c.id))>0)));
 /* open jobs with cables to scan; anyone on the crew can scan, assigned or not */
 const scanJobs=()=>S.jobs.filter(j=>!j.doneOn&&needsScan(j));
@@ -4020,7 +4020,7 @@ function cableTracker(jid,q0,f0){
       const tab=(on,txt,n,fn,id)=>h("button",{type:"button",class:"ntab",id:id||null,"aria-pressed":String(on),onclick:fn},txt,h("span",{class:"nb"},n));
       box.append(h("div",{class:"ntabs",role:"tablist","aria-label":groupNoun(j)},h("span",{class:"nlab"},groupNoun(j)),
           tab(!fCab,"All",cnt("",""),()=>{fCab="";fSys="";saveF();draw();}),cabL.map(cb=>tab(fCab===cb,cb,cnt(cb,""),()=>{fCab=cb;fSys="";saveF();draw();},"ctCab-"+cb))),
-        sysL.length?h("div",{class:"ntabs",role:"tablist","aria-label":"System"},h("span",{class:"nlab"},"System"),
+        sysL.length?h("div",{class:"ntabs",role:"tablist","aria-label":isRackJob(j)?"Rack type":"System"},h("span",{class:"nlab"},isRackJob(j)?"Type":"System"),
           tab(!fSys,"All",cnt(fCab,""),()=>{fSys="";saveF();draw();}),sysL.map(sy=>tab(fSys===sy,sy,cnt(fCab,sy),()=>{fSys=sy;saveF();draw();}))):"");}
     /* big labelled buttons, most used first (like an app home screen) */
     {const nOpen=openNotesOf(j).length,urg=urgentNotes(j,{cab:fCab||undefined,sys:fSys||undefined}).length,go=fn=>()=>{closeSheet();setTimeout(fn,60);};
@@ -4030,7 +4030,7 @@ function cableTracker(jid,q0,f0){
         can&&bulkSteps(j).length?tile("✍","Sign off",()=>bulkSignOff(j.id),{tip:"Sign off porting / testing on several cables"}):null,
         tile("📝","Notes",go(()=>notesSheet(j.id,{cab:fCab,sys:fSys})),{badge:nOpen?String(nOpen):"",warn:urg>0})].filter(Boolean);
       const seeT=[tile("🏷","Labels",go(()=>cableLabels(j.id))),tile("📅","Report",go(()=>cableReport(j.id)),{tip:"Dates & report"}),
-        MGR()&&cs.some(c=>c.rack&&c.type)?tile("🧩","Build pulls",go(()=>pullBuilder(j.id))):null,
+        MGR()&&!isRackJob(j)&&cs.some(c=>c.rack&&c.type)?tile("🧩","Build pulls",go(()=>pullBuilder(j.id))):null,
         MGR()?tile("✏️","Edit "+itemNoun(j),()=>{closeSheet();cableEditor(j);},{tip:"Edit cables & steps"}):null].filter(Boolean);
       box.append(h("div",{class:"ntiles"},doT,seeT));}
     const inF=c=>(!fCab||c.rack===fCab)&&(!fSys||c.type===fSys);
@@ -4885,7 +4885,7 @@ function jobWizard(){
   const body=h("div",{class:"full stack",style:"gap:12px"});
   const nid=p=>p+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
   const isCable=()=>W.kind==="cat6"||W.kind==="fiber";
-  const order=()=>W.kind==="racks"?["kind","rkWhere","basics","rkPrints","rkLabels","rkRows","rkSteps","crew","review"]:W.kind==="cat6"?["kind","basics","cables","cabinets","steps","crew","review"]:["kind","basics",...(isCable()?["cables","cabinets"]:[]),"phase","crew","review"];
+  const order=()=>W.kind==="racks"?["kind","rkWhere","rkTypes","basics","rkPrints","rkLabels","rkRows","rkSteps","crew","review"]:W.kind==="cat6"?["kind","basics","cables","cabinets","steps","crew","review"]:["kind","basics",...(isCable()?["cables","cabinets"]:[]),"phase","crew","review"];
   const go=s=>{scr=s;draw();const sh=$(".sheet");if(sh)sh.scrollTop=0;};
   const next=()=>{const o=order();go(o[o.indexOf(scr)+1]);};
   const back=()=>{if(scr==="phase"&&pi>0){pi--;draw();return;}const o=order();go(o[Math.max(0,o.indexOf(scr)-1)]);};
@@ -5005,19 +5005,25 @@ function jobWizard(){
 const RACK_STEPS_DEFAULT=["Set in place","Level & bolt down","Ground / bond","Label"];
 const RACK_STEP_SUGG=["Set in place","Level & bolt down","Ground / bond","Label","Ladder rack","Doors & panels","Power strips","Cable managers","Inspected"];
 function rackInit(){let st=RACK_STEPS_DEFAULT;try{const x=JSON.parse(localStorage.getItem("rackSteps")||"null");if(Array.isArray(x)&&x.length)st=x;}catch(e){}
-  return {projId:"",locIdx:"",zone:"",count:0,prints:[],labels:[],labSrc:"",rowN:1,perRow:0,startNo:1,prefix:"Row ",rows:[],rowsEdited:false,steps:st.map(n=>({name:n}))};}
+  return {projId:"",locIdx:"",zone:"",count:0,prints:[],labels:[],labSrc:"",rowN:1,perRow:0,startNo:1,prefix:"Row ",rows:[],rowsEdited:false,types:[],steps:st.map(n=>({name:n}))};}
 /* labels from a sheet: first filled cell of each row is the label, the rest is kept as a note. A header row is skipped. */
 function rackLabelsFrom(rows){const out=[];rows.forEach((r,i)=>{const cells=(r||[]).map(x=>String(x==null?"":x).trim()).filter(Boolean);if(!cells.length)return;
     if(i===0&&/^(rack|label|name|id|cab(inet)?|position|tag)s?\b/i.test(cells[0])&&!/\d/.test(cells[0]))return;
-    out.push({name:cells[0],note:cells.slice(1).join(" · ")});});return out;}
+    out.push({name:cells[0],note:cells.slice(1).join(" · "),type:cells.slice(1).join("\n")});});return out;}
+const RACK_TYPES_DEFAULT=["2-post rack","4-post rack","Cabinet","Open frame","Wall mount"];
+/* the type choices: defaults + any type used on an earlier rack job, so new ones stick around */
+function rackTypeChoices(){const out=RACK_TYPES_DEFAULT.slice();(S.jobs||[]).filter(isRackJob).forEach(j=>cablesOf(j).forEach(c=>{if(c.type&&!out.some(x=>x.toLowerCase()===c.type.toLowerCase()))out.push(c.type);}));return out;}
+const rackTypeIn=(R,v)=>{v=String(v||"").trim().toLowerCase();return v?R.types.find(t=>t.toLowerCase()===v)||"":"";};
 function rackRowsAuto(R){const rows=[];const n=Math.max(1,R.rowN|0),per=Math.max(0,R.perRow|0);
-  for(let i=0;i<n;i++){const old=R.rows[i];rows.push({name:(R.prefix||"")+(Number(R.startNo||1)+i),n:per||(old?old.n:0)});}
+  for(let i=0;i<n;i++){const old=R.rows[i];rows.push({name:(R.prefix||"")+(Number(R.startNo||1)+i),n:per||(old?old.n:0),type:old?old.type:(R.types[0]||""),each:old?old.each:null});}
   /* no racks-per-row yet: split the total evenly */
   if(!per&&R.count){const base=Math.floor(R.count/n),extra=R.count%n;rows.forEach((r,i)=>r.n=base+(i<extra?1:0));}
   R.rows=rows;}
 /* rack list in row order: labels fill row by row in the order they were loaded; empty slots get a placeholder name */
 function rackPlan(R){const out=[];let k=0;R.rows.forEach(r=>{for(let i=0;i<(r.n|0);i++){const lb=R.labels[k++];
-    out.push({name:lb?lb.name:r.name.trim()+" · Rack "+(i+1),note:lb?lb.note:"",row:r.name.trim(),pos:i+1,placeholder:!lb});}});
+    const fromLab=lb?(String(lb.type||"").split("\n").map(v=>rackTypeIn(R,v)).find(Boolean)||""):"";
+    out.push({name:lb?lb.name:r.name.trim()+" · Rack "+(i+1),note:lb?lb.note:"",row:r.name.trim(),pos:i+1,placeholder:!lb,
+      type:(r.type==="*"&&r.each&&r.each[i])||fromLab||(r.type==="*"?R.types[0]||"":r.type)||R.types[0]||""});}});
   return {racks:out,extra:R.labels.slice(k)};}
 function rackScreen(scr,W,body_,u){let body;const R=W.rk,{q,nav,next,draw}=u;
   body={append:(...k)=>body_.append(...k.filter(x=>x!=null&&x!==false))};
@@ -5039,6 +5045,16 @@ function rackScreen(scr,W,body_,u){let body;const R=W.rk,{q,nav,next,draw}=u;
       h("div",{class:"field"},h("label",{for:"rkCount"},"How many racks?"),cnt),
       nav("Next",()=>{if(!R.zone.trim()){toast("Type the zone");zoneIn.focus();return false;}if(!R.count){toast("How many racks?");cnt.focus();return false;}}));
     drawLoc();setTimeout(()=>zoneIn.focus(),30);return;}
+  if(scr==="rkTypes"){const ch=rackTypeChoices();R.types.forEach(t=>{if(!ch.includes(t))ch.push(t);});
+    const box=h("div",{class:"chips",style:"gap:8px"});
+    const drawC=()=>{box.textContent="";ch.forEach(t=>{const on=R.types.includes(t);box.append(h("button",{type:"button",class:"chipbtn","aria-pressed":String(on),style:"padding:10px 14px;font-size:1rem",
+        onclick:()=>{if(on)R.types=R.types.filter(x=>x!==t);else R.types.push(t);R.rows.forEach(r=>{if(r.type&&r.type!=="*"&&!R.types.includes(r.type))r.type=R.types[0]||"";if(!r.type)r.type=R.types[0]||"";});drawC();}},(on?"✓ ":"")+t));});};
+    const add=h("input",{id:"rkTypeAdd",placeholder:"Another type, e.g. 52U Cabinet",autocomplete:"off"});
+    const addT=()=>{const v=add.value.trim();if(!v)return;const ex=ch.find(x=>x.toLowerCase()===v.toLowerCase());const t=ex||v;if(!ex)ch.push(t);if(!R.types.includes(t))R.types.push(t);add.value="";drawC();};
+    add.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();addT();}});
+    body.append(...q("What type of racks?","Tap every type on this job. You'll say which row gets which on the rows step. If your label sheet has a column with the type, it's matched automatically."),
+      box,h("div",{style:"display:flex;gap:6px"},add,h("button",{type:"button",class:"btn ghost small",onclick:addT},"Add")),
+      nav("Next",()=>{if(add.value.trim())addT();if(!R.types.length){toast("Pick at least one rack type");return false;}}));drawC();return;}
   if(scr==="rkPrints"){const file=h("input",{type:"file",id:"rkPrintFile",multiple:true,accept:"application/pdf,.pdf,image/*"}),list=h("div",{class:"stack",style:"gap:4px"});
     const show=()=>{list.textContent="";R.prints.forEach((f,i)=>list.append(h("div",{class:"chip",style:"justify-self:start"},"📄 "+f.name,h("button",{type:"button",class:"iconbtn","aria-label":"Remove "+f.name,onclick:()=>{R.prints.splice(i,1);show();}},"✕"))));
       if(!R.prints.length)list.append(h("span",{class:"status"},"No prints yet"));};
@@ -5075,6 +5091,7 @@ function rackScreen(scr,W,body_,u){let body;const R=W.rk,{q,nav,next,draw}=u;
     const fld=(id,l,el)=>h("div",{class:"field"},h("label",{for:id},l),el);
     function drawSum(){sumBox.textContent="";const tot=R.rows.reduce((a,r)=>a+(r.n|0),0),pl=rackPlan(R);
       sumBox.append(h("p",{style:"margin:0;font-weight:600;color:"+(R.count&&tot!==R.count?"var(--over)":"var(--ok)")},tot+" rack"+(tot===1?"":"s")+" in "+R.rows.length+" row"+(R.rows.length===1?"":"s")+(R.count?(tot===R.count?" ✓":" · you said "+R.count):"")));
+      if(R.types.length>1){const by={};pl.racks.forEach(x=>by[x.type]=(by[x.type]||0)+1);sumBox.append(h("p",{class:"status",style:"margin:0"},Object.entries(by).map(([t,n])=>n+" "+t).join(" · ")));}
       if(R.labels.length&&pl.extra.length)sumBox.append(h("p",{class:"status",style:"color:var(--over);margin:0"},"⚠ "+pl.extra.length+" label"+(pl.extra.length>1?"s":"")+" left over: "+pl.extra.slice(0,4).map(x=>x.name).join(", ")+(pl.extra.length>4?"…":"")));
       const unl=pl.racks.filter(x=>x.placeholder).length;if(R.labels.length&&unl)sumBox.append(h("p",{class:"status",style:"color:var(--over);margin:0"},"⚠ "+unl+" rack"+(unl>1?"s":"")+" without a label"));}
     function drawRows(){rowsBox.textContent="";const pl=rackPlan(R);
@@ -5083,12 +5100,18 @@ function rackScreen(scr,W,body_,u){let body;const R=W.rk,{q,nav,next,draw}=u;
         const n=h("input",{type:"number",min:"0",max:"999",value:String(r.n|0),"aria-label":r.name+" racks",style:"width:70px",inputmode:"numeric"});
         n.addEventListener("change",()=>{r.n=Math.max(0,parseInt(n.value)||0);R.rowsEdited=true;drawRows();});
         const mine=pl.racks.filter(x=>x.row===r.name.trim());
-        rowsBox.append(h("div",{class:"panel",style:"padding:8px 10px;display:grid;gap:4px"},
+        if(!r.type)r.type=R.types[0]||"";
+        const tSel=R.types.length>1?h("select",{"aria-label":r.name+" rack type",style:"max-width:100%"},R.types.map(t=>h("option",{value:t,selected:r.type===t},t)),h("option",{value:"*",selected:r.type==="*"},"Mixed: pick per rack")):null;
+        if(tSel)tSel.addEventListener("change",()=>{r.type=tSel.value;if(r.type==="*"&&!r.each)r.each={};drawRows();});
+        const each=r.type==="*"&&R.types.length>1?h("div",{class:"stack",style:"gap:4px"},mine.map((x,k)=>{const sel=h("select",{"aria-label":x.name+" type"},R.types.map(t=>h("option",{value:t,selected:x.type===t},t)));
+            sel.addEventListener("change",()=>{r.each=r.each||{};r.each[k]=sel.value;drawRows();});
+            return h("div",{style:"display:flex;gap:8px;align-items:center;justify-content:space-between"},h("span",{style:"font-size:.88rem"},x.name),sel);})):null;
+        rowsBox.append(h("div",{class:"panel",style:"padding:8px 10px;display:grid;gap:4px"},...[
           h("div",{style:"display:flex;gap:8px;align-items:center;flex-wrap:wrap"},nm,n,h("span",{class:"status"},"racks"),
             R.rows.length>1?h("button",{type:"button",class:"iconbtn","aria-label":"Remove "+r.name,style:"margin-left:auto",onclick:()=>{R.rows.splice(i,1);R.rowN=R.rows.length;nRow.value=String(R.rowN);R.rowsEdited=true;drawRows();}},"✕"):null),
-          mine.length?h("div",{class:"status",style:"font-size:.82rem"},mine.length<=8?mine.map(x=>x.name).join(", "):mine.slice(0,3).map(x=>x.name).join(", ")+" … "+mine[mine.length-1].name):null));});
+          tSel,each||(mine.length?h("div",{class:"status",style:"font-size:.82rem"},(mine.length<=8?mine.map(x=>x.name).join(", "):mine.slice(0,3).map(x=>x.name).join(", ")+" … "+mine[mine.length-1].name)+(R.types.length>1&&mine.some(x=>x.type!==r.type)?" · some typed from your label sheet":"")):null)].filter(Boolean)));});
       rowsBox.append(h("button",{type:"button",class:"btn ghost small",style:"justify-self:start",onclick:()=>{const last=R.rows[R.rows.length-1];
-        R.rows.push({name:(R.prefix||"")+(Number(R.startNo||1)+R.rows.length),n:last?last.n:0});R.rowN=R.rows.length;nRow.value=String(R.rowN);R.rowsEdited=true;drawRows();}},"+ Add a row"));
+        R.rows.push({name:(R.prefix||"")+(Number(R.startNo||1)+R.rows.length),n:last?last.n:0,type:last&&last.type!=="*"?last.type:(R.types[0]||"")});R.rowN=R.rows.length;nRow.value=String(R.rowN);R.rowsEdited=true;drawRows();}},"+ Add a row"));
       drawSum();}
     body.append(...q("Set the rows","How many rows and how many racks in each. Change any single row below if they aren't all the same."),
       h("div",{style:"display:flex;gap:12px;flex-wrap:wrap"},fld("rkRowN","Rows",nRow),fld("rkPer","Racks per row",per),fld("rkPre","Row name",pre),fld("rkStart","First row #",st)),
@@ -5106,6 +5129,7 @@ function rackReview(W){const R=W.rk,pl=rackPlan(R),rows=R.rows.filter(r=>r.n>0);
     h("div",{},h("strong",{},W.name)," · starts "+fmtS(W.start)+" · about "+W.weeks+" week"+(W.weeks>1?"s":"")),
     h("div",{},"Zone: "+R.zone+(R.projId&&projById(R.projId)?" · "+projById(R.projId).name:"")),
     h("div",{},pl.racks.length+" racks in "+rows.length+" row"+(rows.length===1?"":"s")+": "+rows.map(r=>r.name.trim()+" ("+r.n+")").join(", ")),
+    (()=>{const by={};pl.racks.forEach(x=>by[x.type||"No type"]=(by[x.type||"No type"]||0)+1);return h("div",{},"Types: "+Object.entries(by).map(([t,n])=>n+" "+t).join(", "));})(),
     h("div",{},R.labels.length?R.labels.length+" labels loaded"+(pl.extra.length?" · "+pl.extra.length+" not used":""):"No labels: racks are named by row"),
     h("div",{},R.prints.length?R.prints.length+" print"+(R.prints.length>1?"s":"")+" → Documents › Prints":"No prints yet (add them under Documents later)"),
     h("div",{},"Each rack → "+R.steps.map(x=>x.name).join(" → ")),
@@ -5116,10 +5140,10 @@ async function rackCreate(W){if(!db)return;const R=W.rk,pl=rackPlan(R);const nid
   try{localStorage.setItem("rackSteps",JSON.stringify(steps.map(x=>x.name)));}catch(e){}
   const ph={id:nid("p"),name:"Set racks",afterPrev:false};
   const tasks=rows.map(rw=>({id:nid("t"),name:rw,phase:ph.id,scope:{rack:rw},doneOn:"",after:[],startedOn:"",crew:[],crewLog:{},addedBy:myId||"",addedAt:Date.now()}));
-  const cables=pl.racks.map(x=>{const o={id:nid("c"),name:x.name,rack:x.row,pos:x.pos};if(x.note)o.note=x.note;return o;});
+  const cables=pl.racks.map(x=>{const o={id:nid("c"),name:x.name,rack:x.row,pos:x.pos};if(x.type)o.type=x.type;if(x.note)o.note=x.note;return o;});
   const p=projById(R.projId),locs=p&&Array.isArray(p.locs)?p.locs:[],loc=R.locIdx!==""&&locs[+R.locIdx]?locs[+R.locIdx]:null;
   const body_={name:W.name.trim(),start:W.start||TODAY(),days:0,weeks:W.weeks,phases:[ph],tasks,crew:[...W.crew],projectId:p?p.id:"",loc,site:loc?locLabel(loc):R.zone.trim(),zone:R.zone.trim(),
-    techs:W.crew.size,scope:"Rack install",conf:"locked",pri:3,notes:"",scanCk:false,kind:"racks",cabinets:rows,cables,steps,createdAt:Date.now(),updatedAt:Date.now(),by:myId||"",addedBy:myId||"",addedAt:Date.now()};
+    techs:W.crew.size,scope:"Rack install",conf:"locked",pri:3,notes:"",scanCk:false,kind:"racks",cabinets:rows,rackTypes:R.types.slice(),sysOrder:R.types.slice(),cables,steps,createdAt:Date.now(),updatedAt:Date.now(),by:myId||"",addedBy:myId||"",addedAt:Date.now()};
   try{const ref=await db.collection("jobs").add(body_);lastNewJob=Object.assign({id:ref.id},body_);
     logEvent("New job: "+body_.name+" ("+cables.length+" racks in "+rows.length+" rows)",{ev:"cables",jobId:ref.id});
     closeSheet();toast("Job created");
