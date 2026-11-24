@@ -8,6 +8,7 @@ Live at https://timrwillis.github.io/crew-lookahead (GitHub Pages from `main` of
 - `firestore.rules` — Firebase security rules. Tim pastes these into Firebase Console → Firestore → Rules by hand after every change. Always tell him when rules changed.
 - `firebase-config.js` — public Firebase web config (project `workflow-98636`).
 - `sw.js` — service worker (notifications, install).
+- `practice.js` — Practice board: loaded only with `?practice=1` (`&as=crew` = tech view). Swaps `window.firebase` for an in-browser fake saved in localStorage `cl_practice_db_v1`, seeded with made-up crew/jobs (public file: never real names or sites). `window.CL_PRACTICE` {reset,exit,switchTo}; notifications and the setup popup are off in practice. Entry: avatar sheet → 🧪 Practice board (managers). If you add Firestore calls the fake doesn't support, add them there.
 - `import-data.json` — only `hoursPlan` now. Never put names or site info here: it's public.
 
 ## App basics

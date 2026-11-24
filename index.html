@@ -17,6 +17,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="firebase-config.js"></script>
+<script>if(/[?&]practice=/.test(location.search))document.write('<script src="practice.js"><\/script>');</script>
 <script>try{var _t=localStorage.getItem("cl_theme");if(_t)document.documentElement.dataset.theme=_t;}catch(e){}</script>
 <style>
 /* Layout: field lookahead binder — sticky tab bar (Dashboard / Board / Jobs / Crew / Messages / Material), one column of panels, forms in a bottom sheet */
@@ -859,6 +860,7 @@ small.needwarn{color:var(--over)!important;font-weight:600}small.needok{color:va
 .qcb.part{border-color:var(--likely)}.qcb.isdone{background:var(--ok);border-color:var(--ok);color:#fff}.qcb.armed{background:var(--over);border-color:var(--over);color:#fff}
 .qcgo{width:100%;min-height:52px;font-size:1.02rem;margin:6px 0}
 .nudge{display:grid;gap:2px;width:100%;text-align:left;padding:14px;border-radius:14px;border:2px solid var(--likely);background:color-mix(in srgb,var(--likely) 14%,var(--panel));color:var(--ink);font:inherit;margin-bottom:10px;cursor:pointer}
+#practiceBar{position:relative;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;padding:6px 10px;background:#f5b301;color:#1a1300;font-size:13px}#practiceBar span{opacity:.85}#practiceBar .pb-btns{margin-left:auto;display:flex;gap:6px;opacity:1}#practiceBar button{border:0;border-radius:6px;padding:4px 8px;background:#1a1300;color:#f5b301;font-weight:600}
 </style>
 </head>
 <body>
@@ -1178,7 +1180,7 @@ const needAlerts=()=>{const st=notifState();return st==="default"||(isIOS()&&!is
 let setupOpen=false,setupDraw=null,setupTried=false;
 function maybeSetup(){if(setupTried||!myId)return;setupTried=true;const p=setupPref();
   if(p.never||(p.until&&p.until>Date.now())||!(needInstall()||needAlerts()))return;
-  setTimeout(()=>{const sc=document.getElementById("scrim");if(sc&&!sc.hidden){setupTried=false;return;}setupSheet(true);},1200);}
+  setTimeout(()=>{const sc=document.getElementById("scrim");if(sc&&!sc.hidden){setupTried=false;return;}if(window.CL_PRACTICE)return;setupSheet(true);},1200);}
 function setupSheet(auto){const box=h("div",{class:"full stack"});setupOpen=true;
   const ios=isIOS(),android=/Android/i.test(navigator.userAgent),safari=ios&&/Safari/i.test(navigator.userAgent)&&!/CriOS|FxiOS|EdgiOS/i.test(navigator.userAgent);
   const step=(n,title,done,body)=>h("div",{class:"panel",style:"padding:12px;display:grid;gap:8px"+(done?";opacity:.8":"")},
@@ -1212,6 +1214,7 @@ function setupSheet(auto){const box=h("div",{class:"full stack"});setupOpen=true
   openView(auto?"Get set up":"Set up this "+(isPhone()?"phone":"device"),[box]);setupDraw();liveSheet=setupDraw;}
 async function showSys(title,body){try{if(notifState()!=="granted")return false;
     const reg=swReg||(navigator.serviceWorker&&await navigator.serviceWorker.getRegistration());
+    if(window.CL_PRACTICE)return false;
     if(reg&&reg.showNotification){await reg.showNotification(title,{body,icon:"icon-192.png",badge:"icon-192.png",tag:String(Date.now()),vibrate:[200,100,200]});return true;}
     new Notification(title,{body,icon:"icon-192.png"});return true;}catch(e){return false;}}
 function notifyMe(title,body){toast(title+": "+body);beep();showSys(title,body);}
@@ -1331,6 +1334,8 @@ function acctSheet(){
     h("button",{type:"button",class:"btn ghost",onclick:()=>{closeSheet();setTimeout(()=>setupSheet(false),60);}},"📲 Set up this "+(isPhone()?"phone":"device")+(needInstall()||needAlerts()?" · not done":"")),
     myTech()||!MGR()?h("button",{type:"button",class:"btn ghost",onclick:()=>{closeSheet();MGR()&&myTech()?techForm(myTech()):profileForm();}},"My profile"):null,
     themePicker(),
+    MGR()&&!window.CL_PRACTICE?h("button",{type:"button",class:"btn ghost",onclick:()=>window.open(location.pathname+"?practice=1","_blank")},"🧪 Practice board · try things with fake data"):null,
+    window.CL_PRACTICE?h("button",{type:"button",class:"btn ghost",onclick:()=>CL_PRACTICE.exit()},"Leave practice board"):
     h("button",{type:"button",class:"btn ghost",onclick:()=>{closeSheet();$("#signOut").click();}},"Sign out"))]);}
 /* One + button: everything you can add, from any screen. */
 function quickAdd(){const can=CAN_POST(),m=MGR(),go=fn=>()=>{closeSheet();setTimeout(fn,60);};
