@@ -17,6 +17,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="firebase-config.js"></script>
+<script>try{var _t=localStorage.getItem("cl_theme");if(_t)document.documentElement.dataset.theme=_t;}catch(e){}</script>
 <style>
 /* Layout: field lookahead binder — sticky tab bar (Dashboard / Board / Jobs / Crew / Messages / Material), one column of panels, forms in a bottom sheet */
 :root{
@@ -675,6 +676,44 @@ input.full-in.mono{font-family:var(--f-mono)}
 .seg button{width:auto;flex:none;border:0;background:var(--panel);color:var(--ink);font:inherit;font-size:.85rem;padding:6px 12px;cursor:pointer}
 .seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
 @media (min-width:640px){.ntiles{grid-template-columns:repeat(auto-fill,minmax(96px,1fr))}}
+
+/* ===== 2026 revamp: 4-tab layout, + button, bigger tap targets, cleaner contrast ===== */
+:root:not([data-theme="dark"]){--bg:#f2f4f7;--ink:#101820;--muted:#4c5866;--line:#d6dce3}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1318;--panel:#171e26;--line:#26303b}}
+:root[data-theme="dark"]{--bg:#0e1318;--panel:#171e26;--line:#26303b}
+.panel,.dpanel,.card,.wcard,.moreitem{box-shadow:0 1px 2px rgba(16,24,40,.05)}
+.panel{border-radius:14px}
+.gtab[hidden],.tab[data-t][hidden]{display:none!important}
+.gstrip{display:flex;gap:2px;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid var(--line);margin:0 0 12px}
+.gstrip::-webkit-scrollbar{display:none}
+.gstrip button{border:0;background:transparent;font:600 .95rem var(--f-body);color:var(--muted);padding:10px 14px 9px;border-bottom:3px solid transparent;margin-bottom:-1px;white-space:nowrap;display:inline-flex;gap:6px;align-items:center;min-height:44px;cursor:pointer}
+.gstrip button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+.avatar{width:36px;height:36px;border-radius:50%;border:0;background:var(--soft);color:var(--accent);font:700 .82rem var(--f-body);display:grid;place-items:center;cursor:pointer;flex:none}
+.avatar[hidden]{display:none}
+.fab{position:fixed;right:20px;bottom:24px;z-index:29;width:58px;height:58px;border-radius:50%;border:0;background:var(--accent);color:var(--accent-ink);font:400 2rem/1 var(--f-body);display:grid;place-items:center;box-shadow:0 6px 16px rgba(16,24,40,.25);cursor:pointer}
+.fab[hidden]{display:none}
+.fab:active{transform:scale(.96)}
+body:has(#scrim:not([hidden])) .fab,body:has(.popwrap) .fab{display:none}
+.qagrid{grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}
+.moreitem .qi{font-size:1.35rem;width:36px;height:36px;border-radius:10px;background:var(--soft);display:grid;place-items:center;line-height:1}
+.subnav button{min-height:36px}
+.ctl{list-style:none;margin:0 12px 10px 34px;padding:0;display:grid;gap:0}
+.ctl li{position:relative;padding:3px 0 3px 18px;display:flex;flex-wrap:wrap;gap:2px 8px;font-size:.84rem;color:var(--muted)}
+.ctl li::before{content:"";position:absolute;left:0;top:8px;width:9px;height:9px;border-radius:50%;border:2px solid var(--line);background:var(--panel)}
+.ctl li:not(:last-child)::after{content:"";position:absolute;left:5px;top:19px;bottom:-5px;width:2px;background:var(--line)}
+.ctl li.on{color:var(--ink)}.ctl li.on::before{background:var(--ok);border-color:var(--ok)}.ctl li.on:not(:last-child)::after{background:var(--ok)}
+.ctl .ctn{font-weight:600;min-width:84px}.ctl .ctw{color:var(--muted)}
+.gstrip~.chatwrap{height:calc(100dvh - 250px)}
+@media (max-width:760px){.gstrip~.chatwrap{height:calc(100dvh - 232px)}}
+@media (min-width:761px){.wrap{padding-bottom:90px}.who-me,#signOut{display:none!important}.gtab[aria-selected="true"]{background:var(--soft);color:var(--accent)}.gtab{padding:8px 14px;font-size:.95rem}}
+@media (max-width:760px){
+  body{padding-bottom:calc(150px + env(safe-area-inset-bottom,0px))}
+  .fab{bottom:calc(84px + env(safe-area-inset-bottom,0px));right:16px}
+  .btn{min-height:44px}.btn.small{min-height:36px}
+  .tab{font-size:.72rem}
+  .tab .badge{left:calc(50% + 6px)}
+  .gstrip{margin:0 -4px 12px;padding:0 4px}
+}
 </style>
 </head>
 <body>
@@ -682,7 +721,7 @@ input.full-in.mono{font-family:var(--f-mono)}
 <div class="wrap">
   <header class="appbar">
     <div class="brand"><span class="logo" aria-hidden="true">CL</span><span class="bname">Crew Lookahead</span><span class="status" id="status">Connecting…</span></div>
-    <div class="hdr-r"><span class="who-me" id="whoMe"></span><button class="npill" id="notifBtn" type="button" hidden aria-label="Notifications"></button><button class="btn ghost small" id="signOut" type="button" hidden>Sign out</button></div>
+    <div class="hdr-r"><span class="who-me" id="whoMe"></span><button class="npill" id="notifBtn" type="button" hidden aria-label="Notifications"></button><button class="btn ghost small" id="signOut" type="button" hidden>Sign out</button><button class="avatar" id="acctBtn" type="button" hidden aria-label="Your account and settings">Me</button></div>
   </header>
   <nav class="tabs" role="tablist" id="tabs" aria-label="Sections">
     <button class="tab" role="tab" data-t="home" id="tab-home"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg><span class="tl">Home</span></button>
@@ -698,6 +737,7 @@ input.full-in.mono{font-family:var(--f-mono)}
   </nav>
   <main id="view"></main>
 </div>
+<button class="fab" id="fab" type="button" hidden aria-label="Add something">+</button>
 
 <div class="scrim" id="scrim" hidden>
   <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
@@ -1048,21 +1088,38 @@ let tabSeen={};try{tabSeen=JSON.parse(localStorage.getItem("cl_tabseen")||"{}");
 function markTabSeen(t){tabSeen[t]=Date.now();try{localStorage.setItem("cl_tabseen",JSON.stringify(tabSeen));}catch(e){}}
 const offAt=o=>+(o.at||o.updatedAt||0);
 function setTab(t,push){if(t==="asks"){msgSeg="asks";t="messages";}t=OLD_TABS[t]||t;tab=TABS.includes(t)?t:"home";if(teamLoaded&&!tabAllowed(tab))tab="home";if(tab==="off")markTabSeen("off");if(push&&location.hash!=="#"+tab)location.hash=tab;render();}
-document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>{if(b.dataset.t==="more"){moreSheet();return;}focusN=null;if(b.dataset.t==="jobs")taskJob="";setTab(b.dataset.t,true);}));
+document.querySelectorAll(".tab[data-t]").forEach(b=>b.addEventListener("click",()=>{if(b.dataset.t==="more"){moreSheet();return;}focusN=null;if(b.dataset.t==="jobs")taskJob="";setTab(b.dataset.t,true);}));
 document.getElementById("notifBtn").addEventListener("click",()=>notifSheet());
+document.getElementById("acctBtn").addEventListener("click",()=>acctSheet());
+document.getElementById("fab").addEventListener("click",()=>quickAdd());
 window.addEventListener("hashchange",()=>setTab(location.hash.slice(1),false));
 const CREW_TABS=["home","off","messages","chat","material"];
 const tabAllowed=t=>MGR()||CREW_TABS.includes(t);
 const MAIN_TABS=()=>MGR()?["home","jobs","board","chat"]:["home","chat","off"];
 const navTab=t=>t==="tasks"?"jobs":t;
+/* Four groups in the bottom bar; every screen lives inside one of them. */
+const NAVGROUPS=()=>(MGR()?[
+  {g:"today",l:"Today",icon:"home",tabs:[["home","Today"]]},
+  {g:"work",l:"Jobs",icon:"jobs",tabs:[["jobs","Jobs"],["tasks","Tasks"],["board","Schedule"],["material","Material"]]},
+  {g:"people",l:"Crew",icon:"crew",tabs:[["crew","Crew"],["off","Time off"]]},
+  {g:"inbox",l:"Inbox",icon:"messages",tabs:[["chat","Chat"],["messages","Notes & asks"]]}]
+ :[
+  {g:"today",l:"My work",icon:"home",tabs:[["home","My work"]]},
+  {g:"off",l:"Time off",icon:"off",tabs:[["off","Time off"]]},
+  {g:"mat",l:"Material",icon:"material",tabs:[["material","Material"]]},
+  {g:"inbox",l:"Inbox",icon:"messages",tabs:[["chat","Chat"],["messages","Notes & asks"]]}])
+  .map(g=>Object.assign(g,{tabs:g.tabs.filter(([t])=>tabAllowed(t))})).filter(g=>g.tabs.length);
+const groupOf=t=>NAVGROUPS().find(g=>g.tabs.some(([x])=>x===t))||NAVGROUPS()[0];
+let lastIn={};try{lastIn=JSON.parse(localStorage.getItem("cl_lastin")||"{}");}catch(e){}
+function goGroup(g){const G=NAVGROUPS().find(x=>x.g===g);if(!G)return;const cur=groupOf(tab);
+  const t=cur.g===g?G.tabs[0][0]:(lastIn[g]&&G.tabs.some(([x])=>x===lastIn[g])?lastIn[g]:G.tabs[0][0]);
+  focusN=null;if(t==="jobs")taskJob="";setTab(t,true);}
 let tabBadges={};
 function renderTabs(){
-  $("#tab-home").querySelector(".tl").textContent=MGR()?"Home":"My Work";
-  const main=MAIN_TABS(),cur=navTab(tab),inMore=!main.includes(cur);
-  document.querySelectorAll(".tab").forEach(b=>{const t=b.dataset.t;b.hidden=t==="more"?false:!(main.includes(t)&&tabAllowed(t));
-    b.setAttribute("aria-selected",String(t==="more"?inMore:t===cur));const old=b.querySelector(".badge");if(old)old.remove();});
+  const nav=$("#tabs");
+  nav.querySelectorAll(".tab[data-t]").forEach(b=>{b.hidden=true;const old=b.querySelector(".badge");if(old)old.remove();});
   tabBadges={};
-  const add=(t,n,calm)=>{if(n>0){tabBadges[t]={n,calm:!!calm};if(main.includes(navTab(t)))$("#tab-"+navTab(t)).append(h("span",{class:"badge"+(calm?" calm":""),text:n}));}};
+  const add=(t,n,calm)=>{if(n>0)tabBadges[t]={n,calm:!!calm};};
   add("home",myAlertFlags().length);
   if(MGR())add("tasks",S.jobs.filter(j=>isQuick(j)&&!doneDate(j)&&!quickActive(j)).length,true);
   if(MGR())add("crew",S.people.filter(p=>p.id!==myId&&roleFor(p.id)==="pending"&&!crewDoc.declined[p.id]).length);
@@ -1070,9 +1127,38 @@ function renderTabs(){
   add("messages",dueRem().length+openAsks().length,!dueRem().length&&!openAsks().some(a=>a.urgent));
   add("material",lowStock().length);
   if(tab!=="chat")add("chat",chatUnread(),true);
-  const mb=Object.entries(tabBadges).filter(([t])=>!main.includes(navTab(t))&&tabAllowed(t)),mn=mb.reduce((a,[,b])=>a+b.n,0);
-  if(mn)$("#tab-more").append(h("span",{class:"badge"+(mb.every(([,b])=>b.calm)?" calm":""),text:mn}));
+  const groups=NAVGROUPS(),cur=groupOf(tab);
+  if(teamLoaded&&myId){lastIn[cur.g]=tab;try{localStorage.setItem("cl_lastin",JSON.stringify(lastIn));}catch(e){}}
+  nav.querySelectorAll(".gtab").forEach(b=>b.remove());
+  groups.forEach(G=>{const bs=G.tabs.map(([t])=>tabBadges[t]).filter(Boolean),n=bs.reduce((a,b)=>a+b.n,0),src=document.querySelector("#tab-"+G.icon+" svg");
+    nav.append(h("button",{type:"button",class:"tab gtab",role:"tab",id:"g-"+G.g,"aria-selected":String(G.g===cur.g),onclick:()=>goGroup(G.g)},
+      src?src.cloneNode(true):null,h("span",{class:"tl"},G.l),n?h("span",{class:"badge"+(bs.every(b=>b.calm)?" calm":""),text:n}):null));});
+  const av=$("#acctBtn");if(av){const nm=myId?(meName()||""):"";av.textContent=nm.split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0].toUpperCase()).join("")||"Me";av.hidden=!myId;}
+  const fab=$("#fab");if(fab)fab.hidden=!myId||!teamLoaded||tab==="chat"||!CAN_POST()||(!isOwner&&myRole()==="pending");
 }
+function groupStrip(){const G=groupOf(tab);if(G.tabs.length<2)return null;
+  return h("div",{class:"gstrip",role:"tablist","aria-label":G.l},G.tabs.map(([t,l])=>{const b=tabBadges[t];
+    return h("button",{type:"button",role:"tab","aria-selected":String(t===tab),onclick:()=>{focusN=null;if(t==="jobs")taskJob="";setTab(t,true);}},l,b?h("span",{class:"badge"+(b.calm?" calm":""),text:b.n}):null);}));}
+function acctSheet(){
+  openView("You",[h("div",{class:"full stack"},h("div",{class:"status"},"Signed in as "+meName()),alertsToggle(),
+    h("button",{type:"button",class:"btn ghost",onclick:()=>{closeSheet();setTimeout(()=>setupSheet(false),60);}},"📲 Set up this "+(isPhone()?"phone":"device")+(needInstall()||needAlerts()?" · not done":"")),
+    myTech()||!MGR()?h("button",{type:"button",class:"btn ghost",onclick:()=>{closeSheet();MGR()&&myTech()?techForm(myTech()):profileForm();}},"My profile"):null,
+    h("button",{type:"button",class:"btn ghost",onclick:()=>{closeSheet();const r=document.documentElement,cur=r.dataset.theme||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"),nx=cur==="dark"?"light":"dark";r.dataset.theme=nx;try{localStorage.setItem("cl_theme",nx);}catch(e){}}},"◐ Switch light / dark"),
+    h("button",{type:"button",class:"btn ghost",onclick:()=>{closeSheet();$("#signOut").click();}},"Sign out"))]);}
+/* One + button: everything you can add, from any screen. */
+function quickAdd(){const can=CAN_POST(),m=MGR(),go=fn=>()=>{closeSheet();setTimeout(fn,60);};
+  const items=[
+    can&&scanJobs().length?["📷","Scan a cable","Fiber scan steps",scanAny]:null,
+    can?["⚑","Flag a problem","Alerts the lead right away",()=>flagForm()]:null,
+    m?["＋","New job","Step-by-step job setup",()=>jobWizard()]:null,
+    m?["⚡","Quick task","One-off ask, not part of a job",()=>quickForm(null)]:null,
+    can?["✎","Note or ask","Note for the crew or ask the boss",()=>{msgSeg="notes";setTab("messages",true);setTimeout(()=>{const t=document.getElementById("msgText");if(t)t.focus();},150);}]:null,
+    can?["☎","Call in","Late, sick, or out today",()=>callInForm()]:null,
+    can?["⏱","Use recharge","Your monthly recharge hours",()=>rechargeForm()]:null,
+    m?["🗓","Time off","Add time off for someone",()=>offForm(null)]:(can?["🗓","Request time off","PTO, classes, advance notice",()=>requestForm()]:null),
+    m?["👷","Add tech","Or a temporary helper",()=>techForm(null)]:null,
+    m?["📦","Material item","Add to stock",()=>matForm(null)]:null].filter(Boolean);
+  openView("Add",[h("div",{class:"full moregrid qagrid"},items.map(([ic,l,sub,fn])=>h("button",{type:"button",class:"moreitem",onclick:go(fn)},h("span",{class:"mi qi","aria-hidden":"true"},ic),h("span",{},h("strong",{},l),h("small",{},sub)))))]);}
 function moreSheet(){const main=MAIN_TABS(),items=[["crew","Crew","Techs, hours, team, reports"],["off","Time off","Call-ins, requests, recharge"],["messages","Messages","Notes, asks, activity, deleted"],["material","Material","Stock and orders"],["board","Board","Week and month planner"],["jobs","Jobs","Jobs and tasks"],["chat","Chat","Crew group chat"]]
   .filter(([t])=>!main.includes(t)&&tabAllowed(t));
   const go=t=>{closeSheet();setTab(t,true);};
@@ -1092,6 +1178,7 @@ function render(){memo={};renderTabs();renderNotifPill();const v=$("#view");
   if(!isOwner&&myRole()==="pending"){tabsEl.hidden=true;renderPending(v);return;}
   if(expiredUid(myId)){tabsEl.hidden=true;const u=accessEnd(myId);v.append(h("div",{class:"empty"},h("strong",{},"Your helper access has ended"),"It ran through "+fmt(new Date(u),{weekday:"short",month:"short",day:"numeric"})+". Thanks for the help! If you're back on the crew, ask Tim or the superintendent to turn it back on."));return;}
   tabsEl.hidden=false;
+  {const gs=groupStrip();if(gs)v.append(gs);}
   if(focusN&&focusN.tab===tab){const fb=focusBar();if(fb)v.append(fb);}
   ({home:renderHome,board:renderBoard,jobs:renderJobs,tasks:renderTasks,crew:renderCrew,off:renderOff,messages:renderMessages,chat:renderChat,material:renderMaterial}[tab])(v);
   window.scrollTo(0,y);}
@@ -4078,8 +4165,8 @@ function cableTracker(jid,q0,f0){
         el.append(steps);
         {const ck=ckOf(j,c.id),sn=ckScanN(ck),inn=ckItemN(ck);
           el.append(h("div",{class:"cdet"},h("button",{type:"button",class:"btn ghost small",onclick:()=>{closeSheet();setTimeout(()=>ckSheet(j.id,c.id,backToCable(j.id,c.id),["serial","qr","src","dst"].filter(k=>!(ck[k]||"").trim())),60);}},"📋 Checklist & scans · "+sn+"/4 scanned · "+inn+"/5 checked"),ckProblems(ck).length?h("span",{style:"color:var(--over);margin-left:6px"},"⚠"):null));}
-        const dated=ss.map(st=>{const m=markOf(j,c.id,st.id);return m&&m.at?st.name+" "+fmt(new Date(m.at),{month:"short",day:"numeric"})+(m.by?" ("+(realName(m.by).split(" ")[0])+")":""):"";}).filter(Boolean);
-        if(dated.length)el.append(h("div",{class:"cdet"},"✓ "+dated.join(" · ")));
+        if(ss.some(st=>markOf(j,c.id,st.id)))el.append(h("ol",{class:"ctl","aria-label":c.name+" history"},ss.map(st=>{const m=markOf(j,c.id,st.id);
+          return h("li",{class:m?"on":""},h("span",{class:"ctn"},st.name),h("span",{class:"ctw"},m?(m.by?realName(m.by)||"Someone":"")+(m.at?" · "+fmt(new Date(m.at),{month:"short",day:"numeric"})+" "+fmtTime(m.at):""):"Not yet"));})));
         issuesOf(j,c.id).forEach(i=>{const ph=(i.photos||[]).map(id=>S.files.find(f=>f.id===id)).filter(Boolean);
           el.append(h("div",{class:"cdet",style:"color:var(--over)"},"⚠ "+issueTxt(j,i)+" · "+(i.techId&&techById(i.techId)?techName(i.techId):realName(i.by))+" "+fmt(new Date(i.at),{month:"short",day:"numeric"}),
             ph.map((f,k)=>h("button",{type:"button",class:"linkbtn",style:"margin-left:6px",onclick:()=>openDoc(f,()=>cableTracker(jid))},"📷"+(ph.length>1?" "+(k+1):"")))));});
