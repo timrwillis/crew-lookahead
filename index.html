@@ -4029,7 +4029,7 @@ function cableTracker(jid,q0,f0){
         can&&!isRackJob(j)?tile(isLaptop()?"⌨":"📷","Scan a cable",()=>scanFindCable(j.id)):null,
         can&&bulkSteps(j).length?tile("✍","Sign off",()=>bulkSignOff(j.id),{tip:"Sign off porting / testing on several cables"}):null,
         tile("📝","Notes",go(()=>notesSheet(j.id,{cab:fCab,sys:fSys})),{badge:nOpen?String(nOpen):"",warn:urg>0})].filter(Boolean);
-      const seeT=[tile("🏷","Labels",go(()=>cableLabels(j.id))),tile("📅","Report",go(()=>cableReport(j.id)),{tip:"Dates & report"}),
+      const seeT=[isRackJob(j)?tile("🔌","Port schedules",go(()=>portList(j.id,fCab||"")),{badge:Object.keys(j.ports||{}).length?String(Object.keys(j.ports||{}).length):""}):null,tile("🏷","Labels",go(()=>cableLabels(j.id))),tile("📅","Report",go(()=>cableReport(j.id)),{tip:"Dates & report"}),
         MGR()&&!isRackJob(j)&&cs.some(c=>c.rack&&c.type)?tile("🧩","Build pulls",go(()=>pullBuilder(j.id))):null,
         MGR()?tile("✏️","Edit "+itemNoun(j),()=>{closeSheet();cableEditor(j);},{tip:"Edit cables & steps"}):null].filter(Boolean);
       box.append(h("div",{class:"ntiles"},doT,seeT));}
@@ -4996,6 +4996,179 @@ function jobWizard(){
       else if(W.kind==="fiber"&&MGR())setTimeout(()=>{const jj=S.jobs.find(x=>x.id===ref.id);if(jj)ensureScanSteps(jj);},800);}
     catch(e){writeErr(e);}}
   openView("New job",[body]);liveSheet=null;{const ac=$("#form .actions");if(ac)ac.hidden=true;}draw();}
+/* ===== PORT SCHEDULES (rack install jobs) =====
+   Per rack (IDF cabinet / 2-post): job.ports[rackId] = {h (rack RU), pSize (ports per panel), sSize (ports per switch),
+     ports:[{k,port,panel,pp,sw,swp,dev,sys,vlan,note}], elev:[{id,name,kind,u}] (top to bottom)}.
+   Loaded from the engineer's Excel (importerBox). Missing switch/switch port → split onto switches by system.
+   Crew check off patching in marks._pp_<rackId>.<k> = {at,by} (crew may only write marks). */
+const PORT_FIELDS=[{k:"port",l:"Panel port / cable ID",re:/panel ?port|jack|outlet|cable|label|^id$|drop|^port$/},
+  {k:"rack",l:"Rack / IDF",re:/\brack\b|\bidf\b|\bmdf\b|cabinet|^cab\b|closet|^tr\b/},
+  {k:"panel",l:"Patch panel",re:/^(patch ?)?panel( ?(name|id|#|no\.?))?$|^pp$/},
+  {k:"pp",l:"Panel port #",re:/^(pp|panel) ?(port)? ?(#|no\.?|num(ber)?)$/},
+  {k:"swp",l:"Switch port",re:/switch ?port|sw ?port|^interface|^int\b|^gi|^ge\b/},
+  {k:"sw",l:"Switch",re:/switch|^sw\b|stack/},
+  {k:"vlan",l:"VLAN",re:/vlan/},
+  {k:"sys",l:"System",re:/system|^sys\b|service|^type$/},
+  {k:"dev",l:"Device",re:/device|desc|^name$|location|room|endpoint/},
+  {k:"note",l:"Notes",re:/note|comment|remark/}];
+const EL_KINDS=[["panel","Patch panel"],["switch","Switch"],["mgr","Cable manager"],["fiber","Fiber enclosure"],["shelf","Shelf"],["pdu","PDU / power"],["ups","UPS"],["blank","Blank"],["other","Other"]];
+const elKindName=k=>(EL_KINDS.find(x=>x[0]===k)||EL_KINDS[8])[1];
+const EL_COL={panel:"var(--locked)",switch:"var(--ok)",mgr:"var(--idea)",fiber:"var(--quick)",shelf:"var(--idea)",pdu:"var(--over)",ups:"var(--over)",blank:"transparent",other:"var(--idea)"};
+const portsOf=(j,rid)=>((j&&j.ports)||{})[rid]||null;
+const patchedOf=(j,rid,k)=>{const m=((j&&j.marks)||{})["_pp_"+rid];return !!(m&&m[k]&&m[k].at);};
+const sysHue=s=>{const i=["BMS","Cameras","WAPs"].indexOf(s);if(i>=0)return ["#1f7a8c","#b5562b","#7b4ac4"][i];let x=0;for(const ch of String(s||""))x=(x*31+ch.charCodeAt(0))%360;return "hsl("+x+" 45% 42%)";};
+/* turn imported rows into a schedule: keep the engineer's panel/switch data; fill in what's missing */
+function buildPorts(recs,old,pSize,sSize,sysOrder){const prev=new Map(((old&&old.ports)||[]).map(p=>[(p.panel||"")+"|"+p.port,p.k]));let kn=0;const usedK=new Set();
+  const newK=()=>{let k;do{k="p"+(kn++).toString(36);}while(usedK.has(k)||[...prev.values()].includes(k));return k;};
+  const ports=recs.map((r,i)=>{const o={port:String(r.port).trim(),panel:String(r.panel||"").trim(),pp:String(r.pp||"").trim(),sw:String(r.sw||"").trim(),swp:String(r.swp||"").trim(),
+      dev:String(r.dev||"").trim(),sys:String(r.sys||"").trim(),vlan:String(r.vlan||"").trim(),note:String(r.note||"").trim()};
+    if(!o.panel){o.panel="PP"+(Math.floor(i/pSize)+1);if(!o.pp)o.pp=String(i%pSize+1);}
+    return o;});
+  /* panel port numbers inside each panel, in file order */
+  const pc={};ports.forEach(p=>{pc[p.panel]=(pc[p.panel]||0)+1;if(!p.pp)p.pp=String(pc[p.panel]);});
+  /* switches by system when the sheet doesn't say */
+  if(ports.some(p=>!p.sw)){const order=[...new Set(ports.filter(p=>!p.sw).map(p=>p.sys||"Other"))].sort((a,b)=>{const ia=sysOrder.indexOf(a),ib=sysOrder.indexOf(b);return (ia<0?99:ia)-(ib<0?99:ib)||natCmp(a,b);});
+    order.forEach(sy=>{let n=0;ports.filter(p=>!p.sw&&(p.sys||"Other")===sy).forEach(p=>{p.sw=sy+" SW"+(Math.floor(n/sSize)+1);p.swp=String(n%sSize+1);p.auto=true;n++;});});}
+  const sc={};ports.forEach(p=>{sc[p.sw]=(sc[p.sw]||0)+1;if(!p.swp)p.swp=String(sc[p.sw]);});
+  ports.forEach(p=>{const pk=prev.get(p.panel+"|"+p.port);p.k=pk&&!usedK.has(pk)?pk:newK();usedK.add(p.k);});
+  return ports;}
+/* rack drawing, top to bottom: each panel followed by a manager, then its switch and a manager */
+function autoElev(ports){const nid=()=>"e"+Math.random().toString(36).slice(2,8);
+  const panels=[...new Set(ports.map(p=>p.panel))],sws=[...new Set(ports.map(p=>p.sw))],out=[];
+  for(let i=0;i<Math.max(panels.length,sws.length);i++){if(panels[i])out.push({id:nid(),name:panels[i],kind:"panel",u:1},{id:nid(),name:"Cable manager",kind:"mgr",u:1});
+    if(sws[i])out.push({id:nid(),name:sws[i],kind:"switch",u:1},{id:nid(),name:"Cable manager",kind:"mgr",u:1});}
+  return out;}
+async function savePorts(j,rid,sch){await db.collection("jobs").doc(j.id).update({["ports."+rid]:sch,updatedAt:Date.now()});}
+/* load the engineer's sheet; rid=null → split rows across racks by the Rack column */
+function portImport(jid,rid){const j=S.jobs.find(x=>x.id===jid);if(!j)return;const racks=cablesOf(j),rk=rid?racks.find(c=>c.id===rid):null;
+  const norm=v=>String(v||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+  const pS=h("input",{id:"psP",type:"number",min:"1",max:"96",value:String((rk&&portsOf(j,rid)||{}).pSize||48),style:"width:80px"}),
+    sS=h("input",{id:"psS",type:"number",min:"1",max:"96",value:String((rk&&portsOf(j,rid)||{}).sSize||48),style:"width:80px"}),out=h("div",{class:"stack"});
+  const apply=async recs=>{const pSize=Math.max(1,parseInt(pS.value)||48),sSize=Math.max(1,parseInt(sS.value)||48),groups=new Map(),miss=new Set();
+    recs.forEach(r=>{let tgt=rk;
+      if(r.rack){const m=racks.find(c=>norm(c.name)===norm(r.rack));if(m)tgt=rk?(m.id===rk.id?rk:null):m;else if(!rk){miss.add(r.rack);tgt=null;}}
+      else if(!rk){miss.add("(no rack)");tgt=null;}
+      if(tgt){if(!groups.has(tgt.id))groups.set(tgt.id,[]);groups.get(tgt.id).push(r);}});
+    if(!groups.size){out.textContent="";out.append(h("p",{class:"err"},rk?"None of these rows are for "+rk.name+". Check the Rack column matches the rack label.":"No rows matched a rack on this job. The Rack / IDF column has to match the rack labels (like "+(racks[0]?racks[0].name:"Z3.A01")+")."));return;}
+    const upd={updatedAt:Date.now()};const jj=S.jobs.find(x=>x.id===jid)||j;
+    groups.forEach((rs,id)=>{const old=portsOf(jj,id),ports=buildPorts(rs,old,pSize,sSize,SYS_ORDER_DEFAULT);
+      upd["ports."+id]={h:(old&&old.h)||42,pSize,sSize,ports,elev:old&&old.elev&&old.elev.length?old.elev:autoElev(ports),at:Date.now(),by:myId||""};});
+    try{await saveVersion(jj,"Before port schedule");await db.collection("jobs").doc(jid).update(upd);
+      const n=[...groups.values()].reduce((a,x)=>a+x.length,0);logEvent("Port schedule loaded: "+n+" ports on "+groups.size+" rack"+(groups.size>1?"s":"")+" · "+j.name,{ev:"cables",jobId:jid});
+      toast(n+" ports loaded"+(miss.size?" · skipped rows for "+[...miss].slice(0,3).join(", "):""));
+      closeSheet();setTimeout(()=>groups.size===1?portSheet(jid,[...groups.keys()][0]):portList(jid),60);}
+    catch(e){writeErr(e);}};
+  openView("Load port schedule"+(rk?" · "+rk.name:""),[h("div",{class:"full stack"},
+    h("p",{class:"status",style:"margin:0"},rk?"The engineer's port schedule for "+rk.name+". If the sheet has a Rack / IDF column, only this rack's rows are used.":"The engineer's port schedule. The Rack / IDF column is matched to the rack labels on this job, so one sheet can fill every rack."),
+    h("p",{class:"status",style:"margin:0"},"No switch columns? Ports are put on switches by system (BMS, Cameras, WAPs…), in order. Loading again keeps what's already been checked off as patched."),
+    h("div",{style:"display:flex;gap:12px;flex-wrap:wrap"},h("div",{class:"field"},h("label",{for:"psP"},"Ports per patch panel"),pS),h("div",{class:"field"},h("label",{for:"psS"},"Ports per switch"),sS)),
+    importerBox(PORT_FIELDS,apply,{go:"Load these ports",noWbHint:true}),out)]);
+  sheetBack=()=>rk?portSheet(jid,rid):portList(jid);}
+/* every rack on the job with its schedule status */
+function portList(jid,row){const box=h("div",{class:"full stack"});
+  const draw=()=>{const j=S.jobs.find(x=>x.id===jid);if(!j){closeSheet();return;}box.textContent="";
+    const racks=cablesOf(j).filter(c=>!row||c.rack===row);
+    if(MGR())box.append(h("div",{style:"display:flex;gap:8px;flex-wrap:wrap"},h("button",{type:"button",class:"btn",onclick:()=>portImport(jid,null)},"Load port schedule (Excel)")));
+    box.append(h("p",{class:"status",style:"margin:0"},"Tap an IDF cabinet or rack to see its elevation, panel → switch map and switch ports."));
+    const withS=racks.filter(c=>portsOf(j,c.id)),without=racks.filter(c=>!portsOf(j,c.id));
+    const item=c=>{const s=portsOf(j,c.id),n=s?s.ports.length:0,done=s?s.ports.filter(p=>patchedOf(j,c.id,p.k)).length:0;
+      return h("button",{type:"button",class:"moreitem",onclick:()=>portSheet(jid,c.id)},h("span",{"aria-hidden":"true"},s?"🔌":"▫️"),
+        h("span",{},h("strong",{},c.name),h("small",{class:"status",style:"display:block"},[c.rack,c.type,s?n+" ports · "+done+" patched":"No port schedule"].filter(Boolean).join(" · "))),
+        h("span",{class:"status",style:done&&done===n?"color:var(--ok)":""},s?(done===n?"✓":Math.round(done*100/(n||1))+"%"):"›"));};
+    box.append(h("div",{class:"stack",style:"gap:6px"},withS.map(item)));
+    if(without.length)box.append(h("details",{open:!withS.length},h("summary",{class:"status",style:"cursor:pointer"},without.length+" rack"+(without.length>1?"s":"")+" without a schedule"),h("div",{class:"stack",style:"gap:6px;margin-top:6px"},without.map(item))));};
+  const j=S.jobs.find(x=>x.id===jid);openView("Port schedules"+(j?" · "+j.name:""),[box]);liveSheet=draw;draw();sheetBack=()=>cableTracker(jid);}
+/* one rack: Ports (panel → switch, check off patched) · Switches (port grid) · Elevation */
+let portTab="ports",elevOpen=false;
+function portSheet(jid,rid){let fSys="",fSw="",q="",openK="";const box=h("div",{class:"full stack"});
+  const qIn=h("input",{type:"search",placeholder:"Find a port, device, VLAN…","aria-label":"Search ports",autocomplete:"off",style:"width:100%"});qIn.addEventListener("input",()=>{q=qIn.value;drawList();});
+  const listBox=h("div",{class:"stack",style:"gap:0"});let list=()=>[];
+  const toggle=async(j,p)=>{if(!CAN_POST())return;const on=!patchedOf(j,rid,p.k);
+    try{await db.collection("jobs").doc(jid).update({["marks._pp_"+rid+"."+p.k]:on?{at:Date.now(),by:myId||""}:null,updatedAt:Date.now()});}catch(e){writeErr(e);}};
+  function drawList(){const j=S.jobs.find(x=>x.id===jid),s=j&&portsOf(j,rid);if(!s)return;listBox.textContent="";
+    const words=q.toLowerCase().split(/\s+/).filter(Boolean);
+    const ps=s.ports.filter(p=>(!fSys||(p.sys||"Other")===fSys)&&(!fSw||p.sw===fSw)&&words.every(w=>[p.port,p.panel,p.pp,p.sw,p.swp,p.dev,p.sys,p.vlan,p.note].join(" ").toLowerCase().includes(w)));
+    let lastPanel=null;
+    ps.forEach(p=>{if(p.panel!==lastPanel){lastPanel=p.panel;listBox.append(h("div",{class:"phasehd",style:"margin-top:8px"},p.panel));}
+      const on=patchedOf(j,rid,p.k);
+      listBox.append(h("div",{style:"display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)"},
+        h("button",{type:"button",class:"iconbtn","aria-pressed":String(on),"aria-label":(on?"Un-check ":"Mark patched: ")+p.port,disabled:!CAN_POST(),
+          style:"width:34px;height:34px;border:2px solid "+(on?"var(--ok)":"var(--line)")+";border-radius:8px;background:"+(on?"var(--ok)":"transparent")+";color:#fff;font-weight:700",onclick:()=>toggle(j,p)},on?"✓":""),
+        h("div",{},h("div",{style:"font-weight:600"},p.port,h("span",{class:"status",style:"font-weight:400"}," · port "+p.pp)),
+          h("div",{style:"font-size:.88rem"},"→ ",h("strong",{},p.sw)," port ",h("strong",{},p.swp),p.vlan?h("span",{class:"status"}," · VLAN "+p.vlan):null),
+          p.dev||p.note?h("div",{class:"status",style:"font-size:.82rem"},[p.dev,p.note].filter(Boolean).join(" · ")):null),
+        h("span",{class:"pill",style:"background:"+sysHue(p.sys||"Other")+";color:#fff;border:0;font-size:.72rem"},p.sys||"Other")));});
+    if(!ps.length)listBox.append(h("p",{class:"status"},"No ports match."));}
+  const draw=()=>{const j=S.jobs.find(x=>x.id===jid);if(!j){closeSheet();return;}const c=cablesOf(j).find(x=>x.id===rid);if(!c){closeSheet();return;}
+    $("#sheetTitle").textContent=c.name+" · port schedule";const s=portsOf(j,rid),sh=$(".sheet"),top=sh?sh.scrollTop:0;
+    if(box.offsetHeight)box.style.minHeight=box.offsetHeight+"px";box.textContent="";requestAnimationFrame(()=>{box.style.minHeight="";if(sh)sh.scrollTop=top;});
+    box.append(h("p",{class:"status",style:"margin:0"},[c.rack,c.type,j.name].filter(Boolean).join(" · ")));
+    if(!s){box.append(h("div",{class:"empty"},h("strong",{},"No port schedule yet"),MGR()?"Load the engineer's port schedule (Excel or CSV).":"A lead needs to load the port schedule."),
+      MGR()?h("button",{type:"button",class:"btn",onclick:()=>portImport(jid,rid)},"Load port schedule"):null);return;}
+    const done=s.ports.filter(p=>patchedOf(j,rid,p.k)).length,pct=Math.round(done*100/(s.ports.length||1));
+    box.append(h("div",{class:"prog"},h("div",{class:"pr"},h("span",{class:"n"},"Patched"),h("span",{class:"bar"},h("i",{style:"width:"+pct+"%"})),h("span",{class:"c"},done+"/"+s.ports.length),h("span"))));
+    const tabs=[["ports","Ports"],["switches","Switches"],["elev","Elevation"]];
+    box.append(h("div",{class:"seg",role:"tablist"},tabs.map(([k,l])=>h("button",{type:"button","aria-pressed":String(portTab===k),onclick:()=>{portTab=k;draw();}},l))));
+    const syss=[...new Set(s.ports.map(p=>p.sys||"Other"))],sws=[...new Set(s.ports.map(p=>p.sw))];
+    if(portTab==="ports"){
+      const cnt=f=>{const l=s.ports.filter(f);return l.filter(p=>patchedOf(j,rid,p.k)).length+"/"+l.length;};
+      const tab=(on,txt,n,fn)=>h("button",{type:"button",class:"ntab","aria-pressed":String(on),onclick:fn},txt,h("span",{class:"nb"},n));
+      if(syss.length>1)box.append(h("div",{class:"ntabs",role:"tablist","aria-label":"System"},h("span",{class:"nlab"},"System"),tab(!fSys,"All",cnt(()=>true),()=>{fSys="";fSw="";draw();}),
+        syss.map(sy=>tab(fSys===sy,sy,cnt(p=>(p.sys||"Other")===sy),()=>{fSys=sy;fSw="";draw();}))));
+      const swL=sws.filter(w=>!fSys||s.ports.some(p=>p.sw===w&&(p.sys||"Other")===fSys));
+      if(swL.length>1)box.append(h("div",{class:"ntabs",role:"tablist","aria-label":"Switch"},h("span",{class:"nlab"},"Switch"),tab(!fSw,"All",cnt(p=>!fSys||(p.sys||"Other")===fSys),()=>{fSw="";draw();}),
+        swL.map(w=>tab(fSw===w,w,cnt(p=>p.sw===w),()=>{fSw=w;draw();}))));
+      box.append(h("div",{class:"nsearch"},h("span",{"aria-hidden":"true"},"🔍"),qIn),listBox);
+      if(CAN_POST())box.append(h("p",{class:"status",style:"margin:0"},"Tap the box when a port is patched to its switch port."));drawList();}
+    if(portTab==="switches"){sws.forEach(w=>{const mine=s.ports.filter(p=>p.sw===w),byP=new Map(mine.map(p=>[String(p.swp).replace(/^.*\//,""),p]));
+        const max=Math.max(s.sSize||48,...mine.map(p=>parseInt(String(p.swp).replace(/^.*\//,""))||0));
+        const cell=n=>{const p=byP.get(String(n)),on=p&&patchedOf(j,rid,p.k);
+          return h("button",{type:"button",title:p?n+": "+p.port+(p.dev?" · "+p.dev:""):n+": open",onclick:()=>{openK=p?(openK===p.k?"":p.k):"";draw();},
+            style:"min-width:0;height:34px;padding:0;border-radius:5px;font:inherit;font-size:.7rem;font-weight:600;cursor:"+(p?"pointer":"default")+";"+
+              (p?"background:"+(on?sysHue(p.sys||"Other"):"transparent")+";color:"+(on?"#fff":sysHue(p.sys||"Other"))+";border:2px solid "+sysHue(p.sys||"Other"):"background:var(--bg);color:var(--muted);border:1px dashed var(--line)")+(p&&openK===p.k?";outline:3px solid var(--ink)":"")},String(n));};
+        const odd=[],even=[];for(let n=1;n<=max;n++)(n%2?odd:even).push(cell(n));
+        const cols=Math.ceil(max/2),sel=mine.find(p=>p.k===openK);
+        box.append(h("div",{class:"panel stack",style:"gap:6px"},h("div",{style:"display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"},h("strong",{},w),h("span",{class:"status"},mine.filter(p=>patchedOf(j,rid,p.k)).length+"/"+mine.length+" patched · "+(max-mine.length)+" open")),
+          h("div",{style:"overflow-x:auto"},h("div",{style:"display:grid;grid-template-columns:repeat("+cols+",minmax(28px,1fr));gap:3px;min-width:"+(cols*30)+"px"},odd,even)),
+          sel?h("div",{style:"display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:.88rem"},h("span",{},"Port "+sel.swp+" ← ",h("strong",{},sel.port)," ("+sel.panel+" port "+sel.pp+")"+[sel.dev,sel.sys,sel.vlan?"VLAN "+sel.vlan:""].filter(Boolean).map(x=>" · "+x).join("")),
+            CAN_POST()?h("button",{type:"button",class:"btn ghost small",onclick:()=>toggle(j,sel)},patchedOf(j,rid,sel.k)?"Un-check":"Mark patched"):null):null));});
+      box.append(h("p",{class:"status",style:"margin:0"},"Filled = patched. Outlined = assigned, not patched yet. Dashed = open port. Tap a port for details."));}
+    if(portTab==="elev")box.append(elevView(j,rid,s));
+    if(MGR())box.append(h("div",{style:"display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"},h("button",{type:"button",class:"btn ghost small",onclick:()=>portImport(jid,rid)},"Load again (Excel)"),
+      h("button",{type:"button",class:"btn ghost small",onclick:()=>confirmBox("Remove the port schedule?","Removes "+c.name+"'s port schedule. Patched check-offs are kept in case you load it again. You can undo from the job's version history.","Remove",async()=>{await saveVersion(j,"Before removing port schedule");await db.collection("jobs").doc(jid).update({["ports."+rid]:firebase.firestore.FieldValue.delete(),updatedAt:Date.now()});})},"Remove schedule")));};
+  openView("Port schedule",[box]);liveSheet=draw;draw();sheetBack=()=>portList(jid);$(".sheet").classList.add("wide");}
+/* rack elevation drawing; leads can reorder, resize, add and remove items */
+function elevView(j,rid,s){const wrap=h("div",{class:"stack",style:"gap:8px"}),ed=MGR();const H=s.h||42,el=(s.elev||[]).slice();
+  let used=0;el.forEach(e=>used+=Math.max(1,e.u|0));
+  const save=async(nel,nh)=>{try{await db.collection("jobs").doc(j.id).update({["ports."+rid+".elev"]:nel,["ports."+rid+".h"]:nh||H,updatedAt:Date.now()});}catch(e){writeErr(e);}};
+  /* drawing: RU numbers counted from the top (RU H at the top) */
+  const draw=h("div",{style:"border:3px solid var(--ink);border-radius:6px;padding:4px;background:var(--bg);max-width:420px"});
+  let ru=H;el.forEach((e,i)=>{const u=Math.max(1,e.u|0),top=ru,bot=ru-u+1;ru-=u;
+    draw.append(h("div",{style:"display:grid;grid-template-columns:3.2em minmax(0,1fr);gap:6px;align-items:stretch;margin:1px 0"},
+      h("span",{class:"status",style:"font-size:.72rem;align-self:center;text-align:right"},u>1?top+"–"+bot:String(top)),
+      h("div",{style:"min-height:"+(u*22)+"px;border-radius:4px;padding:2px 8px;display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:.82rem;font-weight:600;"+
+        (e.kind==="blank"?"border:1px dashed var(--line);color:var(--muted)":"background:"+EL_COL[e.kind||"other"]+";color:#fff")},h("span",{},e.name||elKindName(e.kind)),h("span",{style:"opacity:.8;font-weight:400"},u+"U"))));});
+  if(ru>0)draw.append(h("div",{class:"status",style:"font-size:.78rem;padding:4px 0 0 3.6em"},(ru)+"U open below (RU "+ru+"–1)"));
+  wrap.append(h("p",{class:"status",style:"margin:0"},H+"U rack · "+used+"U used"+(used>H?" · ⚠ over by "+(used-H)+"U":"")),draw);
+  if(!ed)return wrap;
+  const rows=h("div",{class:"stack",style:"gap:4px"});
+  el.forEach((e,i)=>{const nm=h("input",{value:e.name||"","aria-label":"Name",style:"min-width:0;flex:1 1 100%"});nm.addEventListener("change",()=>{el[i]=Object.assign({},e,{name:nm.value});save(el);});
+    const k=h("select",{"aria-label":"Kind"},EL_KINDS.map(([v,l])=>h("option",{value:v,selected:e.kind===v},l)));k.addEventListener("change",()=>{el[i]=Object.assign({},e,{kind:k.value});save(el);});
+    const u=h("input",{type:"number",min:"1",max:"20",value:String(e.u||1),"aria-label":"Height in U",style:"width:56px"});u.addEventListener("change",()=>{el[i]=Object.assign({},e,{u:Math.max(1,parseInt(u.value)||1)});save(el);});
+    rows.append(h("div",{style:"display:flex;gap:4px;align-items:center;flex-wrap:wrap;padding:6px 0;border-top:1px solid var(--line)"},nm,k,u,h("span",{class:"status"},"U"),
+      h("button",{type:"button",class:"iconbtn","aria-label":"Move up",disabled:i===0,onclick:()=>{[el[i-1],el[i]]=[el[i],el[i-1]];save(el);}},"↑"),
+      h("button",{type:"button",class:"iconbtn","aria-label":"Move down",disabled:i===el.length-1,onclick:()=>{[el[i+1],el[i]]=[el[i],el[i+1]];save(el);}},"↓"),
+      h("button",{type:"button",class:"iconbtn","aria-label":"Remove "+(e.name||""),onclick:()=>{el.splice(i,1);save(el);}},"✕")));});
+  const hIn=h("input",{type:"number",min:"4",max:"60",value:String(H),style:"width:70px","aria-label":"Rack height in U"});hIn.addEventListener("change",()=>save(el,Math.max(4,parseInt(hIn.value)||42)));
+  const addSel=h("select",{"aria-label":"Add"},EL_KINDS.map(([v,l])=>h("option",{value:v},l)));
+  const dt=h("details",{open:elevOpen});dt.addEventListener("toggle",()=>{elevOpen=dt.open;});
+  wrap.append(dt);dt.append(h("summary",{style:"cursor:pointer;font-weight:600"},"Edit elevation"),h("div",{class:"stack",style:"gap:8px;margin-top:8px"},
+    h("div",{style:"display:flex;gap:8px;align-items:center"},h("span",{class:"status"},"Rack height"),hIn,h("span",{class:"status"},"U")),
+    h("p",{class:"status",style:"margin:0"},"Top of the rack first."),rows,
+    h("div",{style:"display:flex;gap:6px;align-items:center;flex-wrap:wrap"},addSel,h("button",{type:"button",class:"btn ghost small",onclick:()=>{const kd=addSel.value;el.push({id:"e"+Math.random().toString(36).slice(2,8),name:elKindName(kd),kind:kd,u:kd==="ups"?2:1});save(el);}},"+ Add to bottom"),
+      h("button",{type:"button",class:"linkbtn",onclick:()=>confirmBox("Rebuild the elevation?","Lays it out again from the panels and switches in the port schedule. Your changes to the drawing are replaced.","Rebuild",()=>save(autoElev(s.ports)))},"Rebuild from ports"))));
+  return wrap;}
+
 /* ===== RACK INSTALL TEMPLATE =====
    New job → Rack install: zone + how many racks → name/dates → prints (PDFs go to Documents › Prints)
    → rack labels (Excel/CSV or paste, one per line, in order) → rows (how many, racks per row; each row can differ)
