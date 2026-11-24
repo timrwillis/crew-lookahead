@@ -655,6 +655,26 @@ input.full-in.mono{font-family:var(--f-mono)}
 .frow .fic{font-size:1.35rem}.frow .fnm{font-weight:600;overflow-wrap:anywhere}
 .crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:2px;font-size:.95rem}.crumbs .linkbtn{font-weight:600}
 .pvBtns .btn{white-space:normal;text-align:center;line-height:1.2;width:100%}
+.ntabs{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.ntabs .nlab{font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);flex:none;width:100%}
+.ntab{flex:none;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:999px;padding:8px 14px;font:inherit;font-weight:600;font-size:.95rem;display:flex;gap:6px;align-items:center;cursor:pointer}
+.ntab .nb{font-weight:500;font-size:.75rem;opacity:.7}
+.ntab[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.ntiles{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.ntile{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:74px;padding:8px 4px;border:1px solid var(--line);border-radius:14px;background:var(--panel);color:var(--ink);font:inherit;font-size:.8rem;font-weight:600;line-height:1.15;text-align:center;cursor:pointer}
+.ntile .ic{font-size:1.55rem;line-height:1}
+.ntile:hover{border-color:var(--accent)}
+.ntile.main{background:var(--accent);border-color:var(--accent);color:#fff}
+.ntile.warn{border-color:var(--over);color:var(--over)}
+.ntile .badge{position:absolute;top:6px;right:8px;background:var(--over);color:#fff;border-radius:999px;font-size:.7rem;padding:1px 6px}
+.nfind{position:sticky;top:var(--hdH,46px);z-index:2;background:var(--panel);display:grid;gap:6px;padding:6px 0;border-bottom:1px solid var(--line)}
+.nsearch{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:999px;padding:4px 14px;background:var(--bg)}
+.nsearch input{border:0!important;background:transparent!important;outline:none;box-shadow:none!important;padding:8px 0!important;font-size:1rem}
+.seg{display:inline-flex;flex:none;width:auto;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+.nview select{font-size:.85rem!important;padding:6px 8px!important;width:auto!important}
+.seg button{width:auto;flex:none;border:0;background:var(--panel);color:var(--ink);font:inherit;font-size:.85rem;padding:6px 12px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+@media (min-width:640px){.ntiles{grid-template-columns:repeat(auto-fill,minmax(96px,1fr))}}
 </style>
 </head>
 <body>
@@ -891,7 +911,10 @@ const rawMark=(j,cid,sid)=>((j.marks||{})[cid]||{})[sid]||null;
 const markOf=(j,cid,sid)=>{const m=rawMark(j,cid,sid);return m&&m.done!==false?m:null;};
 const partsOf=(j,cid,sid)=>(rawMark(j,cid,sid)||{}).parts||[];
 const isSplit=st=>!!st&&(st.split!=null?!!st.split:/port|vfl|test|term|splic|certif|otdr/i.test(st.name||""));
-const rowOf=c=>{for(const v of [c.row,c.pull,c.to,c.note,c.rack]){const m=String(v||"").match(/\brow[\s#:-]*(\d+)/i);if(m)return "ROW-"+m[1];}return "";};
+const rowOf=c=>{for(const v of [c.row,c.pull,c.to,c.note,c.rack]){const m=String(v||"").match(/\brow[\s#:-]*(\d+)/i);if(m)return "ROW-"+m[1];}
+  if(c.pull){const p=String(c.pull),i=p.indexOf(" · ");let w=(i>=0?p.slice(i+3):p).trim();let k="",m;while((m=w.match(/^(wall|tray|row|path|other)\s+(.+)$/i))){k=m[1].toLowerCase();w=m[2];}
+    if(k&&!new RegExp("\\b"+k+"\\b","i").test(w))w=w+" ("+k+")";return w?w.charAt(0).toUpperCase()+w.slice(1):"";}
+  return "";};
 const natCmp=(a,b)=>{a=String(a||"");b=String(b||"");if(!a&&b)return 1;if(a&&!b)return -1;return a.localeCompare(b,undefined,{numeric:true,sensitivity:"base"});};
 const cabVal=(c,k)=>k==="row"?rowOf(c):k==="sheet"?String(c.sheet||[c.rack,c.type].filter(Boolean).join(" ")).trim():String(c[k]||"").trim();
 const stepCount=(j,sid)=>cablesOf(j).filter(c=>markOf(j,c.id,sid)).length;
@@ -2938,7 +2961,7 @@ const CABLE_FIELDS=[{k:"name",l:"Cable ID",re:/cable|^id$|label|tag|number|^#|ci
   {k:"len",l:"Length",re:/len|length|feet|ft|meter/},{k:"type",l:"Cable type",re:/type|media|category|^cat\b|spec|part|description/},{k:"from",l:"From",re:/from|a.?end|origin|source|near/},{k:"to",l:"To",re:/^to$|^to |b.?end|dest|far|termination/},{k:"note",l:"Notes",re:/note|comment|remark/}];
 const MAT_FIELDS=[{k:"item",l:"Item",re:/item|desc|description|material|name/},{k:"part",l:"Part #",re:/part|sku|cat.?#|catalog|mfg|model/},{k:"qty",l:"On hand",re:/qty|quantity|on.?hand|count|stock/},{k:"unit",l:"Unit",re:/unit|uom/},
   {k:"per",l:"Feet per unit",re:/per|ft.?\/|feet per|length/},{k:"location",l:"Location",re:/loc|location|where|bin|truck/},{k:"min",l:"Reorder at",re:/min|reorder|par/}];
-const GROUPS={sheet:"Sheet",row:"Row pulled to",rack:"Rack",pull:"Pull",type:"Cable type",len:"Length"};
+const GROUPS={sheet:"Sheet",row:"Row / wall",rack:"Rack",pull:"Pull",type:"Cable type",len:"Length"};
 const SORTS={"":"List order",row:"Row pulled to",rack:"Rack",len:"Length",name:"Cable ID"};
 function parseLen(x){if(x==null)return NaN;const s=String(x).trim().toLowerCase();const n=parseFloat(s.replace(/[^0-9.]/g,""));if(isNaN(n))return NaN;return /m(eter)?s?$/.test(s)&&!/ft|feet|'/.test(s)?n*3.281:n;}
 const fmtFt=n=>Math.round(n).toLocaleString()+" ft";
@@ -3974,7 +3997,7 @@ function cableTracker(jid,q0,f0){
   const saveF=()=>{try{localStorage.setItem("ctCab:"+jid,fCab||"");localStorage.setItem("ctSys:"+jid,fSys||"");}catch(e){}};
   const box=h("div",{class:"full stack"});
   /* kept between redraws so typing isn't interrupted */
-  const qIn=h("input",{type:"search",class:"full-in",placeholder:"Search cables: BLK, rack, PP, from/to, serial…","aria-label":"Search cables",autocomplete:"off",style:"width:100%"});
+  const qIn=h("input",{type:"search",class:"full-in",placeholder:"Find a cable (number, device, row…)","aria-label":"Search cables",autocomplete:"off",style:"width:100%"});
   qIn.addEventListener("input",()=>{trackQ=qIn.value;liveSheet&&liveSheet();});
   const draw=()=>{if(markQ&&markQ.jid===jid)return;const j=S.jobs.find(x=>x.id===jid);if(!j){closeSheet();return;}
     const ow=box.querySelector(".ctwrap"),prevScroll=ow?ow.scrollTop:0,prevLeft=ow?ow.scrollLeft:0,sh=$(".sheet"),shTop=sh?sh.scrollTop:0;
@@ -3989,11 +4012,22 @@ function cableTracker(jid,q0,f0){
     if(fSys&&!sysL.includes(fSys))fSys="";
     const selSt="font:inherit;font-size:.95rem;padding:7px 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);font-weight:600";
     if(cabL.length){const cnt=(cb,sy)=>{const gl=cs.filter(c=>(!cb||c.rack===cb)&&(!sy||c.type===sy));return gl.filter(c=>ss.every(st=>markOf(j,c.id,st.id))).length+"/"+gl.length;};
-      const cSel=h("select",{id:"ctCab","aria-label":"Cabinet",style:selSt},h("option",{value:"",selected:!fCab},"All cabinets ("+cnt("","")+")"),cabL.map(cb=>h("option",{value:cb,selected:fCab===cb},"Cabinet "+cb+" ("+cnt(cb,"")+")")));
-      cSel.addEventListener("change",()=>{fCab=cSel.value;fSys="";saveF();draw();});
-      const sSel=h("select",{id:"ctSys","aria-label":"System",style:selSt},h("option",{value:"",selected:!fSys},"All systems"),sysL.map(sy=>h("option",{value:sy,selected:fSys===sy},sy+" ("+cnt(fCab,sy)+")")));
-      sSel.addEventListener("change",()=>{fSys=sSel.value;saveF();draw();});
-      box.append(h("div",{style:"display:flex;gap:8px;flex-wrap:wrap"},cSel,sysL.length?sSel:null));}
+      const tab=(on,txt,n,fn,id)=>h("button",{type:"button",class:"ntab",id:id||null,"aria-pressed":String(on),onclick:fn},txt,h("span",{class:"nb"},n));
+      box.append(h("div",{class:"ntabs",role:"tablist","aria-label":"Cabinet"},h("span",{class:"nlab"},"Cabinet"),
+          tab(!fCab,"All",cnt("",""),()=>{fCab="";fSys="";saveF();draw();}),cabL.map(cb=>tab(fCab===cb,cb,cnt(cb,""),()=>{fCab=cb;fSys="";saveF();draw();},"ctCab-"+cb))),
+        sysL.length?h("div",{class:"ntabs",role:"tablist","aria-label":"System"},h("span",{class:"nlab"},"System"),
+          tab(!fSys,"All",cnt(fCab,""),()=>{fSys="";saveF();draw();}),sysL.map(sy=>tab(fSys===sy,sy,cnt(fCab,sy),()=>{fSys=sy;saveF();draw();}))):null);}
+    /* big labelled buttons, most used first (like an app home screen) */
+    {const nOpen=openNotesOf(j).length,urg=urgentNotes(j,{cab:fCab||undefined,sys:fSys||undefined}).length,go=fn=>()=>{closeSheet();setTimeout(fn,60);};
+      const tile=(ic,txt,fn,o)=>h("button",{type:"button",class:"ntile"+(o&&o.main?" main":"")+(o&&o.warn?" warn":""),onclick:fn,title:o&&o.tip||txt},h("span",{class:"ic","aria-hidden":"true"},ic),h("span",{},txt),o&&o.badge?h("span",{class:"badge"},o.badge):null);
+      const doT=[cs.some(c=>c.pull)?tile("🧵","Work a row",go(()=>pullView(j.id,{cab:fCab||undefined,sys:fSys||undefined})),{main:true,tip:"Pick the row you're on and check off the whole row"}):null,
+        can?tile(isLaptop()?"⌨":"📷","Scan a cable",()=>scanFindCable(j.id)):null,
+        can&&bulkSteps(j).length?tile("✍","Sign off",()=>bulkSignOff(j.id),{tip:"Sign off porting / testing on several cables"}):null,
+        tile("📝","Notes",go(()=>notesSheet(j.id,{cab:fCab,sys:fSys})),{badge:nOpen?String(nOpen):"",warn:urg>0})].filter(Boolean);
+      const seeT=[tile("🏷","Labels",go(()=>cableLabels(j.id))),tile("📅","Report",go(()=>cableReport(j.id)),{tip:"Dates & report"}),
+        MGR()&&cs.some(c=>c.rack&&c.type)?tile("🧩","Build pulls",go(()=>pullBuilder(j.id))):null,
+        MGR()?tile("✏️","Edit cables",()=>{closeSheet();cableEditor(j);},{tip:"Edit cables & steps"}):null].filter(Boolean);
+      box.append(h("div",{class:"ntiles"},doT,seeT));}
     const inF=c=>(!fCab||c.rack===fCab)&&(!fSys||c.type===fSys);
     const fl=cs.filter(inF),fn=fl.length||1,scanSet=needsScan(j)?scanIdsOf(j):new Set(),isScanSt=id=>scanSet.has(id),bulkSet=new Set(bulkSteps(j).map(x=>x.id)),isBulkSt=id=>bulkSet.has(id);
     const pg={pct:Math.round(fl.reduce((a,c)=>a+ss.filter(st=>markOf(j,c.id,st.id)).length,0)*100/(fn*ss.length))};
@@ -4013,16 +4047,13 @@ function cableTracker(jid,q0,f0){
     const gs=h("select",{id:"ctGroup","aria-label":"Group by",style:"font:inherit;font-size:.85rem;padding:5px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink)"},h("option",{value:""},"No grouping"),have.map(k=>h("option",{value:k,selected:trackGroup===k},"Group by "+GROUPS[k].toLowerCase())));
     gs.addEventListener("change",()=>{trackGroup=gs.value;try{localStorage.setItem("ctGroup",trackGroup);}catch(e){}draw();});
     const rc=h("input",{type:"checkbox",id:"ctRemain",checked:remainingOnly});rc.addEventListener("change",()=>{remainingOnly=rc.checked;draw();});
-    box.append(qIn);
-    box.append(h("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"},
-      h("div",{style:"display:flex;gap:10px;align-items:center;flex-wrap:wrap"},sortSel,have.length?gs:null,h("label",{class:"check",for:"ctRemain",style:"text-transform:none;letter-spacing:0"},rc,"Only unfinished"),h("span",{id:"ctPending",class:"status"})),
-      h("div",{style:"display:flex;gap:6px;flex-wrap:wrap"},can?h("button",{class:"btn ghost small",type:"button",onclick:()=>scanFindCable(j.id)},(isLaptop()?"⌨ Scan a cable":"📷 Scan a cable")):null,
-        can&&bulkSteps(j).length?h("button",{class:"btn small",type:"button",onclick:()=>bulkSignOff(j.id)},"✍ Sign off several"):null,h("button",{class:"btn ghost small",type:"button",onclick:()=>{closeSheet();setTimeout(()=>cableReport(j.id),60);}},"📅 Dates & report"),
-        h("button",{class:"btn ghost small",type:"button",onclick:()=>{closeSheet();setTimeout(()=>cableLabels(j.id),60);}},"🏷 Labels"),
-        h("button",{class:"btn ghost small",type:"button",style:urgentNotes(j,{cab:fCab||undefined,sys:fSys||undefined}).length?"border-color:var(--over);color:var(--over)":"",onclick:()=>{closeSheet();setTimeout(()=>notesSheet(j.id,{cab:fCab,sys:fSys}),60);}},"📝 Notes"+(openNotesOf(j).length?" ("+openNotesOf(j).length+")":"")),
-        cs.some(c=>c.pull)?h("button",{class:"btn small",type:"button",onclick:()=>{closeSheet();setTimeout(()=>pullView(j.id,{cab:fCab||undefined,sys:fSys||undefined}),60);}},"🧵 Work a row"):null,
-        MGR()&&cs.some(c=>c.rack&&c.type)?h("button",{class:"btn ghost small",type:"button",onclick:()=>{closeSheet();setTimeout(()=>pullBuilder(j.id),60);}},"🧩 Build pulls"):null,
-        MGR()?h("button",{class:"btn ghost small",type:"button",onclick:()=>{closeSheet();cableEditor(j);}},"Edit cables & steps"):null)));
+    const findBar=h("div",{class:"nfind"},h("div",{class:"nsearch"},h("span",{"aria-hidden":"true"},"🔍"),qIn));
+    const viewBar=h("div",{class:"nview",style:"display:flex;gap:8px;align-items:center;flex-wrap:wrap"},
+        h("div",{class:"seg",role:"group","aria-label":"Show"},h("button",{type:"button","aria-pressed":String(!remainingOnly),onclick:()=>{remainingOnly=false;draw();}},"All"),h("button",{type:"button","aria-pressed":String(remainingOnly),onclick:()=>{remainingOnly=true;draw();}},"Not done")),
+        have.length?gs:null,sortSel,h("span",{id:"ctPending",class:"status"}));
+    box.append(findBar,viewBar);
+    requestAnimationFrame(()=>{const hd=$(".sheethd");if(hd)findBar.style.top=Math.max(0,hd.offsetHeight-18)+"px";});
+
     const sub=c=>[trackGroup!=="row"&&rowOf(c)&&!/row/i.test((c.pull||"")+(c.to||""))?rowOf(c):"",trackGroup!=="rack"&&c.rack&&!fCab?"Cabinet "+c.rack:"",!fSys&&c.type&&trackGroup!=="type"?c.type:"",c.from&&c.type?c.from:"",trackGroup!=="pull"&&c.pull&&!/row/i.test(c.pull)?"Pull "+c.pull:"",trackGroup!=="len"&&c.len?c.len+(/^\d+(\.\d+)?$/.test(String(c.len).trim())?" m":""):""].filter(Boolean).join(" · ");
     const detail=c=>[c.type,c.from||c.to?[c.from,c.to].filter(Boolean).join(" → "):"",c.note].filter(Boolean).join(" · ");
     const scanIds=needsScan(j)?scanIdsOf(j):new Set();
@@ -4052,12 +4083,12 @@ function cableTracker(jid,q0,f0){
       return el;};
     const visible=c=>(!remainingOnly||ss.some(st=>!markOf(j,c.id,st.id)))&&cableMatch(j,c,trackQ);
     const body=[];
-    if(trackGroup){const order=[],grp={};list.forEach(c=>{const g=cabVal(c,trackGroup)||"(none)";if(!grp[g]){grp[g]=[];order.push(g);}grp[g].push(c);});
-      if(trackGroup==="row"||trackSort===trackGroup)order.sort(natCmp);
+    if(trackGroup){const order=[],grp={};const NONE=trackGroup==="row"||trackGroup==="pull"?"Not in a pull yet":"(none)";list.forEach(c=>{const g=cabVal(c,trackGroup)||NONE;if(!grp[g]){grp[g]=[];order.push(g);}grp[g].push(c);});
+      if(trackGroup==="row"||trackSort===trackGroup)order.sort(natCmp);if(order.includes(NONE))order.push(order.splice(order.indexOf(NONE),1)[0]);
       order.forEach(g=>{const gl=grp[g],shown=gl.filter(visible);if(!shown.length)return;const fin=gl.filter(c=>ss.every(st=>markOf(j,c.id,st.id))).length,gopen=openGrp.has(g);
         const gst=fin===gl.length?"done":gl.some(c=>cabState(j,c,ss)!=="none")?"part":"none";
         const gh=h("div",{class:"cgrp "+gst},h("button",{type:"button",class:"chd","aria-expanded":String(gopen),onclick:()=>{gopen?openGrp.delete(g):openGrp.add(g);draw();}},
-          h("span",{class:"car"},gopen?"▾":"▸"),h("span",{class:"nm"},(trackGroup==="row"?"":GROUPS[trackGroup]+" ")+(trackGroup==="pull"?pullShort({pull:g}):g),trackGroup==="pull"&&urgentNotes(j,{pull:g}).length?h("span",{style:"color:#fff;background:var(--over);border-radius:999px;padding:1px 8px;font-size:.72rem;font-weight:700;margin-left:6px"},"⚠ urgent"):null,h("span",{class:"sub"},gopen?"Mark the whole group, or tap a cable below":"Tap to see its "+gl.length+" cable"+(gl.length===1?"":"s"))),h("span",{class:"ctag"},fin+"/"+gl.length+" done")));
+          h("span",{class:"car"},gopen?"▾":"▸"),h("span",{class:"nm"},(trackGroup==="row"?"":GROUPS[trackGroup]+" ")+(trackGroup==="pull"?pullShort({pull:g}):trackGroup==="row"?g.replace(/^ROW-(\d+)$/,"Row $1"):g),trackGroup==="pull"&&urgentNotes(j,{pull:g}).length?h("span",{style:"color:#fff;background:var(--over);border-radius:999px;padding:1px 8px;font-size:.72rem;font-weight:700;margin-left:6px"},"⚠ urgent"):null,h("span",{class:"sub"},gopen?"Mark the whole group, or tap a cable below":"Tap to see its "+gl.length+" cable"+(gl.length===1?"":"s"))),h("span",{class:"ctag"},fin+"/"+gl.length+" done")));
         if(gopen&&can)gh.append(h("div",{class:"csteps"},ss.map(st=>{const allOn=gl.every(c=>markOf(j,c.id,st.id));
           return h("button",{type:"button",class:"sbtn","aria-pressed":String(allOn),onclick:()=>setMarks(j,gl.filter(c=>!!markOf(j,c.id,st.id)===allOn).map(c=>[c.id,st.id]),!allOn)},(allOn?"✓ ":"")+"All "+(st.name===st.name.toUpperCase()?st.name:st.name.toLowerCase()));})));
         if(gopen&&trackGroup==="pull"){const nl=noteLines(j,pullNotes(j,g),()=>{closeSheet();setTimeout(()=>{notesSheet(j.id,{pull:g,cab:(gl[0]||{}).rack||"",sys:(gl[0]||{}).type||""});sheetBack=()=>cableTracker(j.id);},60);});
@@ -4067,7 +4098,7 @@ function cableTracker(jid,q0,f0){
     const anyOpen=list.some(c=>openCab.has(c.id));
     const nShown=list.filter(visible).length;
     const wrap=h("div",{class:"clist"},h("div",{class:"clhd"},h("span",{},trackQ.trim()?nShown+" of "+list.length+" cables match":trackGroup?"Cables ("+list.length+") · tap a "+(trackGroup==="pull"||trackGroup==="row"?"row":"group")+" to see its cables":"Cables ("+list.length+") · tap one to see its steps"),
-        (()=>{const gks=trackGroup?[...new Set(list.map(c=>cabVal(c,trackGroup)||"(none)"))]:[],gOpen=gks.some(g=>openGrp.has(g)),any=trackGroup?gOpen:anyOpen;
+        (()=>{const gks=trackGroup?[...new Set(list.map(c=>cabVal(c,trackGroup)||(trackGroup==="row"||trackGroup==="pull"?"Not in a pull yet":"(none)")))]:[],gOpen=gks.some(g=>openGrp.has(g)),any=trackGroup?gOpen:anyOpen;
           return h("button",{type:"button",class:"btn ghost small",onclick:()=>{if(trackGroup){if(gOpen)gks.forEach(g=>openGrp.delete(g));else gks.forEach(g=>openGrp.add(g));}else if(anyOpen)openCab.clear();else list.filter(visible).forEach(c=>openCab.add(c.id));draw();}},any?"Close all":"Open all");})()),
       body.length?body:h("div",{class:"status",style:"padding:12px"},trackQ.trim()?"No cable matches \""+trackQ.trim()+"\".":"Every cable is finished."));
     box.append(wrap);
