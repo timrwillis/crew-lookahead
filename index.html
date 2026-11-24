@@ -678,9 +678,10 @@ input.full-in.mono{font-family:var(--f-mono)}
 @media (min-width:640px){.ntiles{grid-template-columns:repeat(auto-fill,minmax(96px,1fr))}}
 
 /* ===== 2026 revamp: 4-tab layout, + button, bigger tap targets, cleaner contrast ===== */
-:root:not([data-theme="dark"]){--bg:#f2f4f7;--ink:#101820;--muted:#4c5866;--line:#d6dce3}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1318;--panel:#171e26;--line:#26303b}}
-:root[data-theme="dark"]{--bg:#0e1318;--panel:#171e26;--line:#26303b}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#f2f4f7;--ink:#101820;--muted:#4c5866;--line:#d6dce3}}
+:root[data-theme="light"]{--bg:#f2f4f7;--ink:#101820;--muted:#4c5866;--line:#d6dce3}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1318;--panel:#171e26;--line:#2c3743;--ink:#eef2f6;--muted:#a9b4c0}}
+:root[data-theme="dark"]{--bg:#0e1318;--panel:#171e26;--line:#2c3743;--ink:#eef2f6;--muted:#a9b4c0}
 .panel,.dpanel,.card,.wcard,.moreitem{box-shadow:0 1px 2px rgba(16,24,40,.05)}
 .panel{border-radius:14px}
 .gtab[hidden],.tab[data-t][hidden]{display:none!important}
@@ -690,6 +691,7 @@ input.full-in.mono{font-family:var(--f-mono)}
 .gstrip button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
 .avatar{width:36px;height:36px;border-radius:50%;border:0;background:var(--soft);color:var(--accent);font:700 .82rem var(--f-body);display:grid;place-items:center;cursor:pointer;flex:none}
 .avatar[hidden]{display:none}
+.themebtn{font-size:1.05rem;background:var(--panel);color:var(--ink);border:1px solid var(--line)}
 .fab{position:fixed;right:20px;bottom:24px;z-index:29;width:58px;height:58px;border-radius:50%;border:0;background:var(--accent);color:var(--accent-ink);font:400 2rem/1 var(--f-body);display:grid;place-items:center;box-shadow:0 6px 16px rgba(16,24,40,.25);cursor:pointer}
 .fab[hidden]{display:none}
 .fab:active{transform:scale(.96)}
@@ -721,7 +723,7 @@ body:has(#scrim:not([hidden])) .fab,body:has(.popwrap) .fab{display:none}
 <div class="wrap">
   <header class="appbar">
     <div class="brand"><span class="logo" aria-hidden="true">CL</span><span class="bname">Crew Lookahead</span><span class="status" id="status">Connecting…</span></div>
-    <div class="hdr-r"><span class="who-me" id="whoMe"></span><button class="npill" id="notifBtn" type="button" hidden aria-label="Notifications"></button><button class="btn ghost small" id="signOut" type="button" hidden>Sign out</button><button class="avatar" id="acctBtn" type="button" hidden aria-label="Your account and settings">Me</button></div>
+    <div class="hdr-r"><span class="who-me" id="whoMe"></span><button class="npill" id="notifBtn" type="button" hidden aria-label="Notifications"></button><button class="btn ghost small" id="signOut" type="button" hidden>Sign out</button><button class="avatar themebtn" id="themeBtn" type="button" aria-label="Switch light or dark screen">☀</button><button class="avatar" id="acctBtn" type="button" hidden aria-label="Your account and settings">Me</button></div>
   </header>
   <nav class="tabs" role="tablist" id="tabs" aria-label="Sections">
     <button class="tab" role="tab" data-t="home" id="tab-home"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg><span class="tl">Home</span></button>
@@ -1091,6 +1093,9 @@ function setTab(t,push){if(t==="asks"){msgSeg="asks";t="messages";}t=OLD_TABS[t]
 document.querySelectorAll(".tab[data-t]").forEach(b=>b.addEventListener("click",()=>{if(b.dataset.t==="more"){moreSheet();return;}focusN=null;if(b.dataset.t==="jobs")taskJob="";setTab(b.dataset.t,true);}));
 document.getElementById("notifBtn").addEventListener("click",()=>notifSheet());
 document.getElementById("acctBtn").addEventListener("click",()=>acctSheet());
+const isDarkNow=()=>{const t=document.documentElement.dataset.theme;return t?t==="dark":matchMedia("(prefers-color-scheme: dark)").matches;};
+const syncThemeBtn=()=>{const b=document.getElementById("themeBtn");if(b){b.textContent=isDarkNow()?"☀":"☾";b.title=isDarkNow()?"Switch to light":"Switch to dark";}};
+document.getElementById("themeBtn").addEventListener("click",()=>{setTheme(isDarkNow()?"light":"dark");syncThemeBtn();});syncThemeBtn();
 document.getElementById("fab").addEventListener("click",()=>quickAdd());
 window.addEventListener("hashchange",()=>setTab(location.hash.slice(1),false));
 const CREW_TABS=["home","off","messages","chat","material"];
@@ -1139,11 +1144,15 @@ function renderTabs(){
 function groupStrip(){const G=groupOf(tab);if(G.tabs.length<2)return null;
   return h("div",{class:"gstrip",role:"tablist","aria-label":G.l},G.tabs.map(([t,l])=>{const b=tabBadges[t];
     return h("button",{type:"button",role:"tab","aria-selected":String(t===tab),onclick:()=>{focusN=null;if(t==="jobs")taskJob="";setTab(t,true);}},l,b?h("span",{class:"badge"+(b.calm?" calm":""),text:b.n}):null);}));}
+function setTheme(t){const r=document.documentElement;if(t==="auto")delete r.dataset.theme;else r.dataset.theme=t;try{t==="auto"?localStorage.removeItem("cl_theme"):localStorage.setItem("cl_theme",t);}catch(e){}const b=document.getElementById("themeBtn");if(b)b.textContent=(t==="dark"||(t==="auto"&&matchMedia("(prefers-color-scheme: dark)").matches))?"☀":"☾";}
+function themePicker(){const cur=document.documentElement.dataset.theme||"auto",box=h("div",{});
+  const draw=c=>{box.textContent="";box.append(h("div",{class:"flabel"},"Screen colors"),h("div",{class:"subnav",role:"group","aria-label":"Screen colors"},[["light","☀ Light"],["dark","☾ Dark"],["auto","Auto (match phone)"]].map(([k,l])=>h("button",{type:"button","aria-pressed":String(c===k),onclick:()=>{setTheme(k);draw(k);}},l))));};
+  draw(cur);return box;}
 function acctSheet(){
   openView("You",[h("div",{class:"full stack"},h("div",{class:"status"},"Signed in as "+meName()),alertsToggle(),
     h("button",{type:"button",class:"btn ghost",onclick:()=>{closeSheet();setTimeout(()=>setupSheet(false),60);}},"📲 Set up this "+(isPhone()?"phone":"device")+(needInstall()||needAlerts()?" · not done":"")),
     myTech()||!MGR()?h("button",{type:"button",class:"btn ghost",onclick:()=>{closeSheet();MGR()&&myTech()?techForm(myTech()):profileForm();}},"My profile"):null,
-    h("button",{type:"button",class:"btn ghost",onclick:()=>{closeSheet();const r=document.documentElement,cur=r.dataset.theme||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"),nx=cur==="dark"?"light":"dark";r.dataset.theme=nx;try{localStorage.setItem("cl_theme",nx);}catch(e){}}},"◐ Switch light / dark"),
+    themePicker(),
     h("button",{type:"button",class:"btn ghost",onclick:()=>{closeSheet();$("#signOut").click();}},"Sign out"))]);}
 /* One + button: everything you can add, from any screen. */
 function quickAdd(){const can=CAN_POST(),m=MGR(),go=fn=>()=>{closeSheet();setTimeout(fn,60);};
