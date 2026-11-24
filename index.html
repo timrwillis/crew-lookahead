@@ -844,6 +844,12 @@ body:has(#scrim:not([hidden])) .fab,body:has(.popwrap) .fab{display:none}
 .stat{padding:10px;border-radius:10px;background:var(--bg);display:grid}.stat b{font-size:1.4rem}.stat span{font-size:.76rem;color:var(--muted)}
 .fcrow{padding:10px;border-radius:10px;background:var(--bg);border:1px solid transparent}.fcrow.late{border-color:var(--over)}
 .arow .rate{font-variant-numeric:tabular-nums;white-space:nowrap}
+
+.needgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px}
+.needrow{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 8px 6px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.needrow.on{border-color:var(--accent);background:var(--soft)}.needrow small{display:block;color:var(--muted);font-size:.72rem}
+.stepper{display:inline-flex;align-items:center;gap:6px}.stepper button{width:34px;height:34px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font:700 1.1rem var(--f-body);cursor:pointer}.stepper b{min-width:18px;text-align:center}
+small.needwarn{color:var(--over)!important;font-weight:600}small.needok{color:var(--ok)!important}
 </style>
 </head>
 <body>
@@ -2351,6 +2357,7 @@ function taskProg(j,t){if(!t)return null;const sc=t.scope||((scopePlan(j)||{task
 function suggestAssign(d){const di=dayInfo(d),tg=liveTargets(d).filter(x=>x.task||!tasksOf(x.job).length),cnt=new Map(tg.map(x=>[x,x.ids.length])),out=[];
   const score=(x,from)=>{const j=x.job,t=x.task,n=cnt.get(x);let s=0;const why=[];
     if(!n){s+=50;why.push("no one on it");}
+    if(t&&needTotal(t)>n){s+=30;if(n)why.push("short "+(needTotal(t)-n)+" of "+needTotal(t));}
     if(from&&from.job===j){s+=12;if(t&&from.task&&t.scope&&from.task.scope&&t.scope.rack===from.task.scope.rack)s+=10;}
     const need=+j.techs||0,have=workingOn(j,d).length;if(need&&have<need){s+=20;why.push("job is short "+(need-have));}
     const p=priOf(j);if(p===1){s+=15;why.push("top priority");}else s+=(5-p)*3;
@@ -2431,7 +2438,7 @@ function renderDay(v){const d=TODAY(),att=ATT[d]||{},hd=att.huddle,wr=att.wrap,r
   if(tg.length)ab.append(h("button",{type:"button",class:"btn",style:"justify-self:start",onclick:()=>autoFillSheet()},"⚡ Auto-fill crew"));
   {const sb=suggBox(d);if(sb)ab.append(sb);}
   if(di.idle.length)ab.append(h("div",{},h("div",{class:"status",style:"margin-bottom:4px"},"Free · tap to put them on a task"),h("div",{class:"tchips"},di.idle.map(t=>h("button",{type:"button",class:"tchip free",onclick:()=>pickTarget(t.id)},t.name+" ＋")))));
-  tg.forEach(x=>ab.append(h("div",{class:"arow"+(x.task&&!x.ids.length?" noone":"")},h("span",{},h("strong",{},x.task?x.task.name:x.job.name+" (whole job)"),h("small",{},(x.task?x.job.name+" · ":"")+(x.ids.length?crewNames(x.ids):"No one on it")),(()=>{const pr=taskProg(x.job,x.task);return pr?h("span",{class:"mbar"},h("span",{class:"bar"},h("i",{style:"width:"+pr.pct+"%"})),h("b",{},pr.pct+"%"+(pr.left?" · "+pr.left+" left":" ✓"))):null;})()),
+  tg.forEach(x=>ab.append(h("div",{class:"arow"+(x.task&&!x.ids.length?" noone":"")},h("span",{},h("strong",{},x.task?x.task.name:x.job.name+" (whole job)"),h("small",{},(x.task?x.job.name+" · ":"")+(x.ids.length?crewNames(x.ids):"No one on it")),x.task&&needTotal(x.task)?(()=>{const g=needGap(x.task,x.ids);return h("small",{class:g.length?"needwarn":"needok"},"👥 "+x.ids.length+"/"+needTotal(x.task)+" · "+needText(x.task)+(g.length?" · ⚠ "+g.join(", "):" ✓"));})():null,(()=>{const pr=taskProg(x.job,x.task);return pr?h("span",{class:"mbar"},h("span",{class:"bar"},h("i",{style:"width:"+pr.pct+"%"})),h("b",{},pr.pct+"%"+(pr.left?" · "+pr.left+" left":" ✓"))):null;})()),
     h("span",{style:"display:flex;gap:6px"},x.ids.length?h("button",{type:"button",class:"btn ghost small",onclick:()=>{const id=x.ids[x.ids.length-1];pickTarget(id);}},"Move"):null,h("button",{type:"button",class:"btn small"+(x.ids.length?" ghost":""),onclick:()=>pickTech(x)},"＋")))));
   if(!tg.length)ab.append(h("div",{class:"status"},"No work on the board today."));
   v.append(flowCard(3,"Assignments · delegate or pivot",outOn_.length||empty.length?"warn":tg.length?"done":"",ab,{chip:(empty.length?empty.length+" need crew":"")+(empty.length&&di.idle.length?" · ":"")+(di.idle.length?di.idle.length+" free":"")||"All set"}));
@@ -2554,7 +2561,7 @@ function positionsFor(d,M){const out=new Map();
   jobsOn(d).forEach(j=>{if(heldOn(j,d))return;const tg=liveTargets(d).filter(x=>x.job===j&&x.task);if(!tg.length)return;
     const rem=tg.map(x=>{const pr=taskProg(j,x.task);return pr?pr.left:(x.ids.length?3:2);});const totRem=rem.reduce((a,b)=>a+b,0);
     const fc=jobForecast(j,M);let slots=+j.techs||0;if(fc&&fc.people)slots=Math.max(slots,Math.min(fc.people,slots?slots*2:fc.people));if(!slots)slots=tg.length;
-    tg.forEach((x,i)=>{if(!rem[i]){out.set(x,0);return;}let n=totRem?Math.round(slots*rem[i]/totRem):1;n=Math.max(1,Math.min(n,Math.ceil(rem[i]/2)||1));out.set(x,n);});});
+    tg.forEach((x,i)=>{if(!rem[i]){out.set(x,0);return;}let n=totRem?Math.round(slots*rem[i]/totRem):1;n=Math.max(1,Math.min(n,Math.ceil(rem[i]/2)||1),needTotal(x.task));out.set(x,n);});});
   return out;}
 function autoFill(d){const M=computeMetrics(45),pos=positionsFor(d,M),tg=[...pos.keys()],avail=activeTechs().filter(t=>!awayOn(t.id,d)&&!isLeadTech(t));
   const seat=new Map(tg.map(x=>[x,[]])),used=new Set(),plan=[];
@@ -2565,9 +2572,12 @@ function autoFill(d){const M=computeMetrics(45),pos=positionsFor(d,M),tg=[...pos
   const fit=(id,x)=>{const sy=x.task&&scopeOfTask(x.job,x.task)?scopeOfTask(x.job,x.task).type:"",rack=x.task&&scopeOfTask(x.job,x.task)?scopeOfTask(x.job,x.task).rack:"";
     const base=sysRate(M,sy)||1,mine=techRate(M,id,sy),o=M.tech[id]||{rack:{}};let s=mine?Math.min(2,mine/base)*30:15;const why=[];
     if(mine&&mine>base*1.15)why.push("fast on "+(sy||"this work"));if(rack&&o.rack[rack]){s+=10;why.push("knows "+rack);}
-    if(x.ids.includes(id)){s+=25;why.push("already on it");}if(!assignOn(id,d)){s+=8;}return [s,why];};
+    if(x.ids.includes(id)){s+=25;why.push("already on it");}if(!assignOn(id,d)){s+=8;}
+    if(x.task){Object.entries(needOf(x.task)).forEach(([k,n])=>{const r=roleOf(k);if(r.skill&&hasSkill(id,r.skill)){const have=(seat.get(x)||[]).filter(q=>hasSkill(q,r.skill)).length;if(have<n){s+=40;why.push(r.k==="lift"?"lift-certified":r.l.toLowerCase());}}});}
+    return [s,why];};
   for(;;){const open=tg.filter(x=>seat.get(x).length<pos.get(x));if(!open.length||avail.every(t=>used.has(t.id)))break;
-    const x=open.sort((a,b)=>(seat.get(a).length/pos.get(a))-(seat.get(b).length/pos.get(b))||urg(a)-urg(b))[0];
+    const req=x=>seat.get(x).length<needTotal(x.task)?0:1;
+    const x=open.sort((a,b)=>req(a)-req(b)||(seat.get(a).length/pos.get(a))-(seat.get(b).length/pos.get(b))||urg(a)-urg(b))[0];
     let best=null;avail.forEach(t=>{if(used.has(t.id))return;const [s,why]=fit(t.id,x);if(!best||s>best.s)best={t,s,why};});if(!best)break;
     seat.get(x).push(best.t.id);used.add(best.t.id);if(!x.ids.includes(best.t.id))plan.push({tc:best.t,x,why:[(x.ids.length?"needs "+pos.get(x)+" people":"no one on it"),...best.why]});}
   // 3) anyone left over goes where work remains most
@@ -2832,6 +2842,7 @@ function renderMyWork(v){const d=TODAY(),me=myTech(),t=today();
     tk&&tk.due&&!tk.doneOn?h("div",{class:"duechip"+(tk.due<=TODAY()?" now":"")},"📅 Due "+(tk.due===TODAY()?"today":tk.due<TODAY()?"overdue ("+fmtS(tk.due)+")":fmtS(tk.due,{weekday:"short",month:"short",day:"numeric"}))):null,
     crew.length?h("div",{class:"status"},"With "+crewNames(crew)):null,
     toolsLine(j,tk),
+    tk&&needTotal(tk)?h("div",{class:"status",style:"color:var(--ink)"},"👥 Crew: "+needText(tk)):null,
     stepBars(j,tk),
     (()=>{const ps=[step?cablePill(j,tk):null,docPill(j,tk||null,false)].filter(Boolean);return ps.length?h("div",{class:"pills"},ps):null;})(),
     step?h("div",{class:"wleft"},h("strong",{},left.length?left.length+" cable"+(left.length>1?"s":"")+" left":"All cables "+step.name.toLowerCase()+" ✓"),left.length?h("div",{class:"status"},left.slice(0,5).map(c=>c.name).join(", ")+(left.length>5?" +"+(left.length-5)+" more":"")):null):null,
@@ -3434,6 +3445,31 @@ async function fixStepTasks(jid){const j=S.jobs.find(x=>x.id===jid);if(!j)return
   try{await saveVersion(j,"Before turning step tasks into cable steps");await db.collection("jobs").doc(j.id).update(upd);
     toast(j.name+": Pull, Dress, Terminate, Label, Test are now steps on every cable"+(rm.size?" (removed "+rm.size+" step tasks)":""));
     logEvent("Step tasks → cable steps: "+j.name,{ev:"cables",jobId:j.id});}catch(e){stepFixBusy.delete(j.id);writeErr(e);}}
+/* ===== CREW NEEDS PER TASK: minimum people by role (lift, spotter, stager…) + reusable crew templates ===== */
+const CREW_ROLES=[{k:"lift",l:"Lift operator",pl:"Lift operators",skill:/lift|mewp/i},{k:"spotter",l:"Spotter",pl:"Spotters"},{k:"puller",l:"Puller",pl:"Pullers"},{k:"stager",l:"Spool / stager",pl:"Spool / stagers"},
+  {k:"laborer",l:"Laborer",pl:"Laborers"},{k:"term",l:"Terminator",pl:"Terminators"},{k:"tester",l:"Tester",pl:"Testers",skill:/fluke|copper cert|otdr|tester/i},{k:"labeler",l:"Labeler",pl:"Labelers"},{k:"fork",l:"Forklift driver",pl:"Forklift drivers",skill:/forklift/i}];
+const roleOf=k=>CREW_ROLES.find(r=>r.k===k)||{k,l:k.replace(/^c:/,""),pl:k.replace(/^c:/,"")};
+const needOf=t=>t&&t.need&&typeof t.need==="object"?t.need:{};
+const needTotal=t=>Object.values(needOf(t)).reduce((a,b)=>a+(+b||0),0);
+const needText=t=>Object.entries(needOf(t)).filter(([,n])=>+n>0).map(([k,n])=>n+" "+(n>1?roleOf(k).pl:roleOf(k).l).toLowerCase()).join(" · ");
+const hasSkill=(tid,re)=>skillsOf(techById(tid)).some(s=>re.test(s));
+/* what's still missing on a task given who's on it */
+function needGap(t,ids){const nd=needOf(t),out=[];if(!needTotal(t))return out;
+  const short=needTotal(t)-ids.length;if(short>0)out.push("short "+short);
+  Object.entries(nd).forEach(([k,n])=>{const r=roleOf(k);if(r.skill&&+n>0){const have=ids.filter(id=>hasSkill(id,r.skill)).length;if(have<n)out.push((n-have)+" more "+(r.k==="lift"?"lift-certified":r.l.toLowerCase()));}});
+  return out;}
+function needEditor(need,onChange){let nd=Object.assign({},need||{});const box=h("div",{class:"stack",style:"gap:8px"});
+  const emit=()=>{Object.keys(nd).forEach(k=>{if(!(+nd[k]>0))delete nd[k];});onChange(Object.assign({},nd));};
+  const draw=()=>{box.textContent="";const kits=Array.isArray(crewDoc.crewKits)?crewDoc.crewKits:[];
+    if(kits.length)box.append(h("div",{class:"tchips"},h("span",{class:"status",style:"align-self:center;font-size:.8rem"},"Templates:"),kits.map(kt=>h("button",{type:"button",class:"tchip dep",onclick:()=>{nd=Object.assign({},kt.need);emit();draw();}},kt.name+" ("+Object.values(kt.need).reduce((a,b)=>a+b,0)+")"))));
+    const keys=[...new Set([...CREW_ROLES.map(r=>r.k),...Object.keys(nd)])];
+    box.append(h("div",{class:"needgrid"},keys.map(k=>{const n=+nd[k]||0,r=roleOf(k);return h("div",{class:"needrow"+(n?" on":"")},h("span",{},r.l,r.skill?h("small",{},"needs cert"):null),
+      h("span",{class:"stepper"},h("button",{type:"button","aria-label":"Fewer "+r.pl,onclick:()=>{nd[k]=Math.max(0,n-1);emit();draw();}},"−"),h("b",{},String(n)),h("button",{type:"button","aria-label":"More "+r.pl,onclick:()=>{nd[k]=n+1;emit();draw();}},"+")));})));
+    const ci=h("input",{type:"text",class:"tl-in",placeholder:"Other role, e.g. Fire watch"});ci.addEventListener("keydown",e=>{if(e.key==="Enter"&&ci.value.trim()){e.preventDefault();nd["c:"+ci.value.trim()]=1;emit();draw();}});
+    const tot=Object.values(nd).reduce((a,b)=>a+(+b||0),0);
+    box.append(h("div",{class:"cgadd"},ci,h("button",{type:"button",class:"btn ghost small",onclick:()=>{if(ci.value.trim()){nd["c:"+ci.value.trim()]=1;emit();draw();}}},"Add role")),
+      tot?h("div",{style:"display:flex;gap:8px;align-items:center;flex-wrap:wrap"},h("strong",{},"Minimum crew: "+tot),MGR()?(()=>{const tn=h("input",{type:"text",class:"tl-in",placeholder:"Save as template, e.g. Lift pull crew",style:"flex:1;min-width:140px"});const sv=()=>{const nm=tn.value.trim();if(!nm)return;saveCrew({crewKits:[...(crewDoc.crewKits||[]).filter(x=>x.name!==nm),{name:nm,need:Object.assign({},nd)}]});toast("Saved template “"+nm+"”");setTimeout(draw,60);};tn.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();sv();}});return h("span",{class:"cgadd",style:"flex:1"},tn,h("button",{type:"button",class:"btn ghost small",onclick:sv},"Save"));})():null):null);};
+  draw();return box;}
 function toolsLine(j,t){const uniq=a=>[...new Map(a.map(x=>[toolKey(x),tidyTool(x)])).values()];
   const st=j&&t?stepForTask(j,t):null;
   const base=uniq([...splitTools(j&&j.tools),...splitTools(t&&t.tools),...(st?stepKit(st.name):[])]);
@@ -3452,7 +3488,7 @@ function jobForm(j,sec){
   const effDefault=j?refDay(j):"";
   const crewSet=new Set(j?crewOn(j,effDefault):[]);
   let phases=phasesOf(j||{}).map(p=>Object.assign({},p));
-  let tasks=(j?tasksOf(j):[]).map(t=>({id:t.id,name:t.name,phase:t.phase||"",doneOn:t.doneOn||"",startedOn:t.startedOn||"",after:Array.isArray(t.after)?t.after.slice():[],tools:t.tools||"",due:t.due||"",open:"",orig:t,set:new Set(crewOn(t,effDefault||TODAY()))}));
+  let tasks=(j?tasksOf(j):[]).map(t=>({id:t.id,name:t.name,phase:t.phase||"",doneOn:t.doneOn||"",startedOn:t.startedOn||"",after:Array.isArray(t.after)?t.after.slice():[],tools:t.tools||"",due:t.due||"",need:Object.assign({},t.need||{}),open:"",orig:t,set:new Set(crewOn(t,effDefault||TODAY()))}));
 
   // project → location
   const projSel=h("select",{id:"fProj",disabled:ro},h("option",{value:""},"No project"),[...S.projects].sort((a,b)=>(a.name||"").localeCompare(b.name||"")).map(p=>h("option",{value:p.id,selected:j?.projectId===p.id},p.name)));
@@ -3496,12 +3532,14 @@ function jobForm(j,sec){
       {const du=h("input",{type:"date",class:"tsel tdue",value:t.due||"",disabled:ro,"aria-label":"Due date for "+(t.name||"task"),title:"Due by"});du.addEventListener("change",()=>{t.due=du.value;});meta.append(h("label",{class:"tdl"},"📅 Due",du));}
       if(others.length)meta.append(h("button",{type:"button",class:"tlink"+(t.after.length?" on":""),"aria-expanded":String(t.open==="wait"),disabled:ro&&!t.after.length,onclick:()=>tog("wait")},
         t.after.length?"⏳ Waits for "+t.after.map(nm).filter(Boolean).join(", "):"▶ Can start anytime"));
+      {const nt=Object.values(t.need||{}).reduce((a,b)=>a+(+b||0),0);meta.append(h("button",{type:"button",class:"tlink"+(nt?" on":""),"aria-expanded":String(t.open==="need"),disabled:ro&&!nt,onclick:()=>tog("need")},nt?"👥 "+needText(t):"👥 Crew needed"));}
       meta.append(h("button",{type:"button",class:"tlink"+(t.tools?" on":""),"aria-expanded":String(t.open==="tools"),disabled:ro&&!t.tools,onclick:()=>tog("tools")},t.tools?"🧰 "+t.tools:"🧰 Add tools"));
       box.append(meta);
       if(t.open==="wait"&&others.length&&!ro){const wf=h("div",{class:"tchips"});
         others.forEach(o=>{const on=t.after.includes(o.id);wf.append(h("button",{type:"button",class:"tchip dep","aria-pressed":String(on),onclick:()=>{t.after=on?t.after.filter(x=>x!==o.id):[...t.after,o.id];drawCrews();}},o.name||"Untitled"));});
         box.append(h("div",{class:"tpanel"},h("div",{class:"status"},"Most tasks can start anytime. Only pick a task here if this one truly can't start until it's done."),wf,
           h("div",{style:"display:flex;gap:8px"},t.after.length?h("button",{type:"button",class:"btn ghost small",onclick:()=>{t.after=[];drawCrews();}},"Can start anytime"):null,h("button",{type:"button",class:"btn small",onclick:()=>tog("wait")},"Done"))));}
+      if(t.open==="need"&&!ro)box.append(h("div",{class:"tpanel"},h("div",{class:"status"},"Minimum people this task needs, by role. Auto-fill fills to this, and the app warns when it's short or missing a lift-certified hand."),needEditor(t.need,v=>{t.need=v;}),h("div",{},h("button",{type:"button",class:"btn small",onclick:()=>tog("need")},"Done"))));
       if(t.open==="tools"&&!ro)box.append(h("div",{class:"tpanel"},toolsEditor(t.tools,v=>{t.tools=v;}),h("div",{style:"display:flex;gap:8px;flex-wrap:wrap"},h("button",{type:"button",class:"btn small",onclick:()=>tog("tools")},"Done"),
         tasks.length>1?h("button",{type:"button",class:"btn ghost small",onclick:()=>{const mine=splitTools(t.tools);tasks.forEach(x=>{if(x!==t){const have=splitTools(x.tools);x.tools=[...have,...mine.filter(m=>!have.some(y=>toolKey(y)===toolKey(m)))].join(", ");}});t.open="";drawCrews();toast("Added to every task. Tap Save to keep it.");}},"Add these to every task"):null)));
       if(t.after.length&&!t.doneOn){const sc=h("input",{type:"checkbox",id:"tks-"+i,checked:!!t.startedOn,disabled:ro});sc.addEventListener("change",()=>{t.startedOn=sc.checked?(t.orig&&t.orig.startedOn||TODAY()):"";});
@@ -3585,7 +3623,7 @@ function jobForm(j,sec){
     const tmp={start,days:body.days,weeks:body.weeks};const endD=jobEnd(tmp);
     const keep=new Set(tasks.filter(t=>(t.name||"").trim()).map(t=>t.id));
     if(!j){body.addedBy=myId||"";body.addedAt=Date.now();}
-    body.tasks=tasks.filter(t=>(t.name||"").trim()).map(t=>{const tid=[...t.set].filter(techById);const base={id:t.id,name:t.name.trim(),phase:phases.some(p=>p.id===t.phase)?t.phase:"",doneOn:t.doneOn||"",after:t.after.filter(x=>keep.has(x)&&x!==t.id),tools:(t.tools||"").trim(),due:t.due||"",startedOn:t.startedOn||"",addedBy:t.orig?(t.orig.addedBy||""):(myId||""),addedAt:t.orig?(t.orig.addedAt||0):Date.now()};
+    body.tasks=tasks.filter(t=>(t.name||"").trim()).map(t=>{const tid=[...t.set].filter(techById);const base={id:t.id,name:t.name.trim(),phase:phases.some(p=>p.id===t.phase)?t.phase:"",doneOn:t.doneOn||"",after:t.after.filter(x=>keep.has(x)&&x!==t.id),tools:(t.tools||"").trim(),due:t.due||"",need:Object.assign({},t.need||{}),startedOn:t.startedOn||"",addedBy:t.orig?(t.orig.addedBy||""):(myId||""),addedAt:t.orig?(t.orig.addedAt||0):Date.now()};
       if(!t.orig){base.crew=tid;base.crewAt=stampAt([],tid);base.crewLog=started?{[start]:[],[eff]:tid}:{};return base;}
       const tHasLog=Object.keys(t.orig.crewLog||{}).length>0;
       const added=tid.filter(x=>!crewOn(t.orig,TODAY()).includes(x));
@@ -6798,7 +6836,7 @@ async function startSession(u){
   const sid=myId,retry=(ref,ok,denied)=>{const go=()=>{if(myId!==sid)return;unsubs.push(ref.onSnapshot(ok,err=>{denied();if(err&&err.code==="permission-denied")setTimeout(go,20000);}));};go();};
   retry(db.doc("team/roles"),s=>{roles=s.exists?((s.data()||{}).roles||{}):{};gotRoles=true;
     if(!s.metadata.fromCache&&isOwner&&!roles[myId])saveRole(myId,{role:"lead",techId:""});ready();},()=>{gotRoles=true;ready();});
-  retry(db.doc("team/crew"),s=>{const d=s.exists?(s.data()||{}):{};crewDoc={members:d.members||{},declined:d.declined||{},hours:d.hours||null,holidays:Array.isArray(d.holidays)?d.holidays:[],hoursPlan:Array.isArray(d.hoursPlan)?d.hoursPlan:[],dismissedPlans:d.dismissedPlans||[],links:d.links||{},rechargeHrs:d.rechargeHrs||2,tools:Array.isArray(d.tools)?d.tools:[],stepTools:d.stepTools&&typeof d.stepTools==="object"?d.stepTools:{},toolsHidden:Array.isArray(d.toolsHidden)?d.toolsHidden:[]};gotCrew=true;ready();},()=>{gotCrew=true;ready();});
+  retry(db.doc("team/crew"),s=>{const d=s.exists?(s.data()||{}):{};crewDoc={members:d.members||{},declined:d.declined||{},hours:d.hours||null,holidays:Array.isArray(d.holidays)?d.holidays:[],hoursPlan:Array.isArray(d.hoursPlan)?d.hoursPlan:[],dismissedPlans:d.dismissedPlans||[],links:d.links||{},rechargeHrs:d.rechargeHrs||2,tools:Array.isArray(d.tools)?d.tools:[],stepTools:d.stepTools&&typeof d.stepTools==="object"?d.stepTools:{},crewKits:Array.isArray(d.crewKits)?d.crewKits:[],toolsHidden:Array.isArray(d.toolsHidden)?d.toolsHidden:[]};gotCrew=true;ready();},()=>{gotCrew=true;ready();});
   unsubs.push(pr.onSnapshot(s=>{me_=s.exists?(s.data()||{}):{};if(me_.name)$("#whoMe").textContent=me_.name;schedule();},()=>{}));
 }
 
