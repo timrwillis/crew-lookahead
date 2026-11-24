@@ -812,6 +812,8 @@ body:has(#scrim:not([hidden])) .fab,body:has(.popwrap) .fab{display:none}
 .tool.miss{background:var(--over-soft);color:var(--over)}
 .prep{display:grid;gap:6px;padding:10px;border-radius:10px;background:var(--bg)}
 .rl{display:grid;gap:6px}
+.wrap{grid-template-columns:minmax(0,1fr)}#view{min-width:0}
+@media (max-width:760px){.subnav{flex-wrap:nowrap;overflow-x:auto;max-width:100%;scrollbar-width:none}.subnav::-webkit-scrollbar{display:none}.subnav button{flex:none}}
 .sugg{display:grid;gap:6px;padding:10px;border-radius:12px;border:1px solid color-mix(in srgb,var(--accent) 50%,var(--line));background:color-mix(in srgb,var(--accent) 8%,var(--panel))}
 .tdl{text-transform:none;letter-spacing:0;display:inline-flex;align-items:center;gap:6px;font-size:.82rem;color:var(--muted);font-weight:600}
 .tdue{padding:4px 8px!important}
@@ -819,6 +821,18 @@ body:has(#scrim:not([hidden])) .fab,body:has(.popwrap) .fab{display:none}
 .duechip.now{background:var(--over-soft);color:var(--over)}
 .rlrow{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)}
 .rln{display:grid;min-width:0}.rln small{color:var(--muted);font-size:.78rem}
+
+.calg{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.calh{text-align:center;font:700 .72rem var(--f-body);color:var(--muted);padding:2px 0}
+.calc{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:10px;min-height:52px;display:grid;align-content:space-between;justify-items:center;padding:6px 2px;cursor:pointer;font:inherit}
+.calc.sun{opacity:.55}.calc.today{border-color:var(--accent)}.calc.today .cdn{color:var(--accent);font-weight:800}
+.calc.sel{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}.calc.sel .cdn{color:var(--accent-ink)}.calc.sel .dot{box-shadow:0 0 0 1.5px #fff}
+.cdn{font-weight:600;font-size:.9rem}
+.cdots{display:flex;gap:3px;min-height:7px}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--muted)}
+.d-meeting{background:#5b9bf2}.d-due,.d-task,.d-end{background:#ef6a5e}.d-reminder{background:#e7ad3c}.d-start{background:#5cc28a}.d-off,.d-holiday{background:#b896f0}
+.callegend{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:.78rem;color:var(--muted)}.callegend span{display:inline-flex;gap:5px;align-items:center}
+.arow.isdone{opacity:.55}.arow.isdone strong{text-decoration:line-through}
 </style>
 </head>
 <body>
@@ -1183,7 +1197,7 @@ function checkAlerts(){if(!myId||!asksLoaded||!msgsLoaded||!teamLoaded||expiredU
   const notes=myNotices().map(m=>({k:"e:"+m.id,t:m.title||"Update",b:m.text}));
   const watching=tab==="chat"&&!document.hidden,cut=Date.now()-6*36e5;
   const chats=chatAlerts?S.messages.filter(m=>isChat(m)&&m.by!==myId&&m.at>cut).map(m=>({k:"c:"+m.id,t:chatName(m.by)+" in chat",b:m.text||"Sent a photo",quiet:watching})):[];
-  const timed=S.messages.filter(m=>isNote(m)&&!m.done&&m.remindOn===TODAY()&&m.remindAt&&m.remindAt<=nowHM()&&(m.by===myId||(m.to||[]).includes(myId))).map(m=>({k:"r:"+m.id,t:m.kind==="meeting"?"Meeting now":"Reminder",b:m.text}));
+  const timed=S.messages.filter(m=>isNote(m)&&!m.done&&m.remindOn===TODAY()&&m.remindAt&&m.remindAt<=nowHM()&&(()=>{const [a,b]=m.remindAt.split(":").map(Number),n=new Date();return n.getHours()*60+n.getMinutes()-(a*60+b)<=60;})()&&(m.by===myId||(m.to||[]).includes(myId))).map(m=>({k:"r:"+m.id,t:m.kind==="meeting"?"Meeting now":"Reminder",b:m.text}));
   const all=[...mine,...own,...notes,...chats,...timed];
   if(seenAlerts)all.forEach(a=>{if(!seenAlerts.has(a.k)&&!a.quiet)notifyMe(a.t,a.b);});
   seenAlerts=new Set(all.map(a=>a.k));}
@@ -2296,17 +2310,22 @@ function huddleCard(d){const att=ATT[d]||{},hd=att.huddle,boss=myRole()==="boss"
   if(boss)return flowCard(1,"Morning huddle","",h("div",{class:"status"},"Your lead runs this at start of shift. Their plan and board photo show here when it's done."),{chip:"Lead"});
   return flowCard(1,"Morning huddle","",h("div",{class:"stack",style:"gap:6px"},h("div",{class:"status"},late?"Start of shift has passed. You can still log today's plan or the board photo.":"Roll call, snap the PTP/ORM board, and tell the crew what's on today and what's due."),
     h("button",{type:"button",class:"btn"+(late?" ghost small":""),style:"justify-self:start",onclick:()=>huddleSheet(d)},late?"Log it anyway":"Start huddle")),{chip:late?"Optional now":"Start of shift"});}
-function remForm(kind,pre){pre=pre||{};const isMeet=kind==="meeting";
+function remForm(kind,pre){pre=pre||{};const isMeet=kind==="meeting",isDue=kind==="due";
   const jobSel=h("select",{id:"rmJob"},h("option",{value:""},"No job"),S.jobs.filter(j=>!j.doneOn).sort(byPri).map(j=>h("option",{value:j.id,selected:pre.jobId===j.id},j.name)));
-  openSheet(isMeet?"New meeting":"New reminder",[
-    field({id:"rmText",label:isMeet?"Meeting":"Remind me to…",value:pre.text||"",full:true,placeholder:isMeet?"e.g. GC coordination meeting":"e.g. Order more Cat6 for 1.17"}),
-    field({id:"rmDate",label:"Day",type:"date",value:pre.date||TODAY()}),
-    field({id:"rmTime",label:"Time",type:"time",value:pre.time||(isMeet?"":"")}),
+  const durSel=h("select",{id:"rmDur"},[[15,"15 min"],[30,"30 min"],[45,"45 min"],[60,"1 hour"],[90,"1.5 hours"],[120,"2 hours"],[240,"Half day"]].map(([v,l])=>h("option",{value:String(v),selected:v===60},l)));
+  openSheet(isMeet?"New meeting":isDue?"New due date":"New reminder",[
+    field({id:"rmText",label:isMeet?"Meeting":isDue?"What's due?":"Remind me to…",value:pre.text||"",full:true,placeholder:isMeet?"e.g. GC coordination meeting":isDue?"e.g. 1.16 BMS terminated for inspection":"e.g. Order more Cat6 for 1.17"}),
+    field({id:"rmDate",label:isDue?"Due":"Day",type:"date",value:pre.date||TODAY()}),
+    field({id:"rmTime",label:isDue?"Time (optional)":"Time",type:"time",value:pre.time||""}),
+    isMeet?h("div",{class:"field"},h("label",{for:"rmDur"},"How long"),durSel):null,
     h("div",{class:"field full"},h("label",{for:"rmJob"},"Job (optional)"),jobSel),
-    isMeet?field({id:"rmWhere",label:"Where / who",value:"",full:true,placeholder:"Trailer, Teams, GC office…"}):null].filter(Boolean),
-    async()=>{const text=val("rmText");if(!text){formErr(isMeet?"Name the meeting.":"What should we remind you about?");return false;}
-      const where=isMeet?val("rmWhere"):"";
-      try{await db.collection("messages").add({text:(isMeet?"📅 ":"")+text+(where?" · "+where:""),kind:isMeet?"meeting":"reminder",to:[],by:myId||"",at:Date.now(),jobId:val("rmJob"),remindOn:val("rmDate")||TODAY(),remindAt:val("rmTime")||"",done:false});toast(isMeet?"Meeting added":"Reminder set");}catch(e){writeErr(e);return false;}});}
+    isMeet?field({id:"rmWhere",label:"Where / who",value:"",full:true,placeholder:"Trailer, Teams, GC office…"}):null,
+    h("label",{class:"check full",for:"rmIcs"},h("input",{type:"checkbox",id:"rmIcs",checked:isMeet||isDue}),"Also add it to my Outlook / phone calendar")].filter(Boolean),
+    async()=>{const text=val("rmText");if(!text){formErr(isMeet?"Name the meeting.":isDue?"What's due?":"What should we remind you about?");return false;}
+      const where=isMeet?val("rmWhere"):"",date=val("rmDate")||TODAY(),at=val("rmTime")||"",dur=isMeet?+val("rmDur")||60:0,full=(isMeet?"📅 ":"")+text+(where?" · "+where:"");
+      try{const ref=await db.collection("messages").add({text:full,kind:isMeet?"meeting":isDue?"due":"reminder",to:[],by:myId||"",at:Date.now(),jobId:val("rmJob"),remindOn:date,remindAt:at,dur,done:false});
+        toast(isMeet?"Meeting added":isDue?"Due date added":"Reminder set");
+        if(val("rmIcs"))sendICS([icsEvent({id:ref.id,k:isMeet?"meeting":isDue?"due":"reminder",t:text+(where?" · "+where:""),at,dur,job:val("rmJob")},date)],text);}catch(e){writeErr(e);return false;}});}
 function suggestAssign(d){const di=dayInfo(d),tg=liveTargets(d).filter(x=>x.task||!tasksOf(x.job).length),cnt=new Map(tg.map(x=>[x,x.ids.length])),out=[];
   const score=x=>{const j=x.job,t=x.task,n=cnt.get(x);let s=0;const why=[];
     if(!n){s+=50;why.push("no one on it");}
@@ -2380,7 +2399,7 @@ function renderDay(v){const d=TODAY(),att=ATT[d]||{},hd=att.huddle,wr=att.wrap,r
       h("span",{},h("strong",{},m.text),h("small",{},(m.remindOn<d?"From "+fmtS(m.remindOn):m.remindAt?fmtHM(m.remindAt):"Today")+(m.jobId&&jobName(m.jobId)?" · "+jobName(m.jobId):""))))));});
   if(!late.length&&!rs.length)mb.append(h("div",{class:"status"},"Nothing scheduled today."));
   const up=S.messages.filter(m=>isNote(m)&&m.remindOn>d&&m.remindOn<=iso(addDays(parseD(d),7))&&!m.done).length;
-  mb.append(h("div",{style:"display:flex;gap:6px;flex-wrap:wrap"},h("button",{type:"button",class:"btn ghost small",onclick:()=>remForm("meeting")},"＋ Meeting"),h("button",{type:"button",class:"btn ghost small",onclick:()=>remForm("reminder")},"＋ Reminder"),up?h("button",{type:"button",class:"linkbtn",onclick:()=>{msgSeg="notes";setTab("messages",true);}},up+" coming up this week ›"):null));
+  mb.append(h("div",{style:"display:flex;gap:6px;flex-wrap:wrap"},h("button",{type:"button",class:"btn ghost small",onclick:()=>remForm("meeting")},"＋ Meeting"),h("button",{type:"button",class:"btn ghost small",onclick:()=>remForm("reminder")},"＋ Reminder"),h("button",{type:"button",class:"btn ghost small",onclick:()=>remForm("due")},"＋ Due date"),h("button",{type:"button",class:"linkbtn",onclick:()=>{homeSeg="cal";render();}},"Calendar ›"),up?h("button",{type:"button",class:"linkbtn",onclick:()=>{msgSeg="notes";setTab("messages",true);}},up+" coming up this week ›"):null));
   v.append(flowCard(4,"Meetings & reminders","",mb,{chip:(rs.length+late.length)?String(rs.length+late.length)+" today":"Clear"}));
   // 5 plan ahead
   const nd=nextWorkDay(d),ndi=dayInfo(nd),soon=S.jobs.filter(j=>!j.doneOn&&!isQuick(j)&&j.start&&j.start>d&&j.start<=iso(addDays(parseD(d),14))).sort((a,b)=>a.start<b.start?-1:1);
@@ -2398,11 +2417,62 @@ function renderDay(v){const d=TODAY(),att=ATT[d]||{},hd=att.huddle,wr=att.wrap,r
     sum.length?h("div",{class:"stack",style:"gap:2px"},sum.map(x=>h("div",{class:"status"},h("strong",{style:"color:var(--ink)"},x.job.name+": "),[...x.parts,...x.tasks.map(t=>"✓ "+t)].join(" · ")))):h("div",{class:"status"},"Cables checked off today show up here."),
     wr?h("div",{class:"status"},"Wrapped up "+fmtTime(wr.at)+(wr.tomorrow?" · Tomorrow: "+wr.tomorrow:"")):null,
     h("button",{type:"button",class:"btn"+(wr?" ghost":"")+" small",style:"justify-self:start",onclick:()=>wrapSheet(d)},wr?"Edit wrap-up":"Wrap up & share")),{chip:wr?fmtTime(wr.at):"End of day"}));}
+/* ===== CALENDAR (leads / supers): meetings, reminders, due dates, job starts/ends, time off · "Add to Outlook" via .ics ===== */
+let calMonth=null,calSel=null;
+const KIND_IC={meeting:"📅",reminder:"🔔",due:"⏰",start:"🚀",end:"🏁",off:"🌴",holiday:"🎉",task:"⏰"};
+function calItems(d){const out=[];
+  S.messages.filter(m=>isNote(m)&&m.remindOn===d).forEach(m=>out.push({k:m.kind==="meeting"?"meeting":m.kind==="due"?"due":"reminder",t:m.text.replace(/^📅 /,""),at:m.remindAt||"",dur:+m.dur||0,job:m.jobId,done:!!m.done,id:m.id,msg:m}));
+  S.jobs.forEach(j=>{if(j.doneOn)return;tasksOf(j).forEach(t=>{if(t.due===d&&!t.doneOn)out.push({k:"task",t:t.name+" due",sub:j.name,job:j.id});});
+    if(!isQuick(j)&&j.start===d)out.push({k:"start",t:j.name+" starts",job:j.id});
+    if(!isQuick(j)&&j.start&&jobEnd(j)===d)out.push({k:"end",t:j.name+" due",sub:jobPct(j)!=null?jobPct(j)+"% done":"",job:j.id});});
+  const off=offOn(d);if(off.length)out.push({k:"off",t:off.length+" off",sub:off.map(o=>techName(o.techId)+" ("+o.type+")").join(", ")});
+  const hd=holidayOn(d);if(hd)out.push({k:"holiday",t:hd.name});
+  return out.sort((a,b)=>(a.at||"99")<(b.at||"99")?-1:(a.at||"99")>(b.at||"99")?1:0);}
+/* .ics for Outlook / Google / phone calendars */
+const icsEsc=s=>String(s||"").replace(/\\/g,"\\\\").replace(/;/g,"\\;").replace(/,/g,"\\,").replace(/\r?\n/g,"\\n");
+const icsD=d=>d.replace(/-/g,"");
+function icsEvent(it,d){const L=["BEGIN:VEVENT","UID:"+(it.id||it.k+"-"+d+"-"+Math.random().toString(36).slice(2,8))+"@crew-lookahead","DTSTAMP:"+new Date().toISOString().replace(/[-:]/g,"").replace(/\.\d+/,"")];
+  if(it.at){const s=icsD(d)+"T"+it.at.replace(":","")+"00",m=it.at.split(":").map(Number),e=new Date(2000,0,1,m[0],m[1]+(it.dur||(it.k==="meeting"?60:15)));
+    L.push("DTSTART:"+s,"DTEND:"+icsD(d)+"T"+String(e.getHours()).padStart(2,"0")+String(e.getMinutes()).padStart(2,"0")+"00");}
+  else{const n=iso(addDays(parseD(d),1));L.push("DTSTART;VALUE=DATE:"+icsD(d),"DTEND;VALUE=DATE:"+icsD(n));}
+  L.push("SUMMARY:"+icsEsc((KIND_IC[it.k]||"")+" "+it.t),"DESCRIPTION:"+icsEsc([it.sub,it.job&&jobName(it.job)?"Job: "+jobName(it.job):"","From Crew Lookahead"].filter(Boolean).join("\n")));
+  L.push("BEGIN:VALARM","ACTION:DISPLAY","DESCRIPTION:"+icsEsc(it.t),"TRIGGER:"+(it.at?"-PT15M":"-PT15H"),"END:VALARM","END:VEVENT");return L;}
+async function sendICS(evs,name){const body=["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Crew Lookahead//EN","CALSCALE:GREGORIAN","METHOD:PUBLISH",...evs.flat(),"END:VCALENDAR"].join("\r\n");
+  const f=new File([body],(name||"crew-lookahead").replace(/[^\w\- ]+/g,"").slice(0,40)+".ics",{type:"text/calendar"});
+  try{if(navigator.canShare&&navigator.canShare({files:[f]})&&isPhone()){await navigator.share({files:[f],title:name});return;}}catch(e){if(e&&e.name==="AbortError")return;}
+  const u=URL.createObjectURL(f),a=h("a",{href:u,download:f.name});document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),5000);toast("Calendar file ready. Open it to add to Outlook.");}
+function calRow(it,d){return h("div",{class:"arow cal-"+it.k+(it.done?" isdone":"")},
+  h("span",{},h("strong",{},(KIND_IC[it.k]||"")+" "+(it.at?fmtHM(it.at)+" · ":"")+it.t),it.sub||it.job?h("small",{},[it.sub,it.k!=="start"&&it.k!=="end"&&it.k!=="task"&&it.job?jobName(it.job):""].filter(Boolean).join(" · ")):null),
+  h("span",{style:"display:flex;gap:6px"},it.msg&&!it.done?h("button",{type:"button",class:"btn ghost small",title:"Mark done",onclick:async()=>{try{await db.collection("messages").doc(it.id).update({done:true,doneBy:myId||"",doneAt:Date.now()});}catch(e){writeErr(e);}}},"✓"):null,
+    it.k!=="off"&&it.k!=="holiday"?h("button",{type:"button",class:"btn ghost small",title:"Add to Outlook / phone calendar",onclick:()=>sendICS([icsEvent(it,d)],it.t)},"＋ Outlook"):null));}
+function renderCal(v){const d=TODAY();if(!calMonth)calMonth=d.slice(0,7)+"-01";if(!calSel)calSel=d;
+  const m0=parseD(calMonth),y=m0.getFullYear(),mo=m0.getMonth();
+  const nav=h("div",{class:"nav"},h("button",{class:"iconbtn",type:"button","aria-label":"Previous month",onclick:()=>{calMonth=iso(new Date(y,mo-1,1));render();}},"‹"),h("span",{class:"lbl"},fmt(m0,{month:"long",year:"numeric"})),
+    h("button",{class:"iconbtn",type:"button","aria-label":"Next month",onclick:()=>{calMonth=iso(new Date(y,mo+1,1));render();}},"›"),h("button",{class:"btn ghost small",type:"button",onclick:()=>{calMonth=d.slice(0,7)+"-01";calSel=d;render();}},"Today"));
+  const add=h("div",{style:"display:flex;gap:6px;flex-wrap:wrap"},h("button",{type:"button",class:"btn small",onclick:()=>remForm("meeting",{date:calSel})},"＋ Meeting"),h("button",{type:"button",class:"btn ghost small",onclick:()=>remForm("due",{date:calSel})},"＋ Due date"),h("button",{type:"button",class:"btn ghost small",onclick:()=>remForm("reminder",{date:calSel})},"＋ Reminder"));
+  v.append(h("div",{class:"sechead"},nav,add));
+  const grid=h("div",{class:"calg"});["S","M","T","W","T","F","S"].forEach(x=>grid.append(h("span",{class:"calh"},x)));
+  const first=new Date(y,mo,1);for(let i=0;i<first.getDay();i++)grid.append(h("span"));
+  for(let x=new Date(first);x.getMonth()===mo;x=addDays(x,1)){const s=iso(x),its=calItems(s),kinds=[...new Set(its.map(i=>i.k))];
+    grid.append(h("button",{type:"button",class:"calc"+(s===d?" today":"")+(s===calSel?" sel":"")+(x.getDay()===0?" sun":""),onclick:()=>{calSel=s;render();}},h("span",{class:"cdn"},String(x.getDate())),
+      h("span",{class:"cdots"},kinds.slice(0,4).map(k=>h("i",{class:"dot d-"+k})))));}
+  v.append(h("div",{class:"panel",style:"padding:10px"},grid,h("div",{class:"callegend"},[["meeting","Meeting"],["due","Due"],["reminder","Reminder"],["start","Job start"],["off","Time off"]].map(([k,l])=>h("span",{},h("i",{class:"dot d-"+k}),l)))));
+  const its=calItems(calSel);
+  v.append(h("div",{class:"panel",style:"margin-top:10px;display:grid;gap:8px"},h("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:8px"},h("strong",{},fmtS(calSel,{weekday:"long",month:"short",day:"numeric"})),
+      its.filter(i=>i.k!=="off"&&i.k!=="holiday").length?h("button",{type:"button",class:"linkbtn",onclick:()=>sendICS(its.filter(i=>i.k!=="off"&&i.k!=="holiday").map(i=>icsEvent(i,calSel)),"Crew "+calSel)},"＋ All to Outlook"):null),
+    its.length?its.map(i=>calRow(i,calSel)):h("div",{class:"status"},"Nothing on this day.")));
+  // next 14 days agenda
+  const ag=h("div",{class:"panel",style:"margin-top:10px;display:grid;gap:8px"}),all=[];
+  for(let i=1;i<=14;i++){const s=iso(addDays(parseD(d),i));calItems(s).filter(x=>x.k!=="off"&&x.k!=="holiday").forEach(x=>all.push([s,x]));}
+  ag.append(h("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:8px"},h("strong",{},"Next 2 weeks"),all.length?h("button",{type:"button",class:"linkbtn",onclick:()=>sendICS(all.map(([s,x])=>icsEvent(x,s)),"Crew next 2 weeks")},"＋ Export all to Outlook"):null));
+  let last="";all.forEach(([s,x])=>{if(s!==last){ag.append(h("div",{class:"status",style:"margin-top:4px;font-weight:700"},fmtS(s,{weekday:"short",month:"short",day:"numeric"})));last=s;}ag.append(calRow(x,s));});
+  if(!all.length)ag.append(h("div",{class:"status"},"Nothing coming up."));
+  v.append(ag);}
 let homeSeg="";
 function renderHome(v){if(!MGR()){renderMyDay(v);return;}
   const rk=isOwner?"lead":myRole();if(!homeSeg)homeSeg="day";
-  v.append(h("div",{style:"margin-bottom:10px"},subnav(homeSeg,[["day","My day"],["dash","Dashboard"],["crew","Manpower",offOn(TODAY()).filter(o=>o.type==="Call-in"||o.type==="Sick").length],["progress","Progress"]],k=>homeSeg=k)));
-  if(homeSeg==="day")renderDay(v);else if(homeSeg==="dash")renderDashboard(v);else if(homeSeg==="progress")renderSuperDay(v);else renderLeadDay(v);}
+  v.append(h("div",{style:"margin-bottom:10px"},subnav(homeSeg,[["day","My day"],["cal","Calendar"],["dash","Dashboard"],["crew","Manpower",offOn(TODAY()).filter(o=>o.type==="Call-in"||o.type==="Sick").length],["progress","Progress"]],k=>homeSeg=k)));
+  if(homeSeg==="day")renderDay(v);else if(homeSeg==="cal")renderCal(v);else if(homeSeg==="dash")renderDashboard(v);else if(homeSeg==="progress")renderSuperDay(v);else renderLeadDay(v);}
 function dayHead(v){const t=today();v.append(h("div",{class:"dayline"},h("strong",{},fmt(t,{weekday:"long",month:"short",day:"numeric"})),h("span",{class:"status"},hoursTxt(TODAY())+(holidayOn(TODAY())?" · "+holidayOn(TODAY()).name:"")),notifState()==="default"?h("button",{type:"button",class:"linkbtn",onclick:()=>enableAlerts()},"Turn on alerts"):null));}
 function flagPanel(v){const mine=myAlertFlags();if(mine.length)v.append(panel((isOwner?"lead":myRole())==="boss"?"Escalated to you":"Flags",null,h("div",{class:"stack"},mine.map(flagCard)),{full:true,badge:mine.length,cls:"alertp"}));}
 function techToday(tc,d){const o=offOn(d).filter(x=>x.techId===tc.id),full=o.find(x=>!isPart(x)),part=o.find(isPart);
