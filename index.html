@@ -5389,7 +5389,11 @@ function cableEditor(j){
   function drawSys(){sysBox.textContent="";sysOrder.forEach((x,i)=>sysBox.append(h("span",{class:"chip"},(i+1)+". "+x,
       h("button",{type:"button",class:"iconbtn","aria-label":"Pull "+x+" earlier",disabled:i===0,onclick:()=>{[sysOrder[i-1],sysOrder[i]]=[sysOrder[i],sysOrder[i-1]];drawSys();}},"↑"),
       h("button",{type:"button",class:"iconbtn","aria-label":"Remove "+x,onclick:()=>{sysOrder.splice(i,1);drawSys();}},"✕"))));
-    const add=h("input",{placeholder:"+ system",style:"width:110px","aria-label":"Add a system"});add.addEventListener("change",()=>{const v=sysName(add.value);if(v&&!sysOrder.includes(v))sysOrder.push(v);drawSys();});sysBox.append(add);}
+    const add=h("input",{placeholder:"New system, e.g. Fire alarm",style:"width:190px","aria-label":"Add a system",enterkeyhint:"done"});
+    const doAdd=()=>{const v=sysName(add.value);if(!v)return;if(sysOrder.includes(v)){toast(v+" is already on the list");return;}sysOrder.push(v);drawSys();
+      const nc=cabsOf(j).length;toast(nc?v+" will be added to all "+nc+" cabinet"+(nc>1?"s":"")+" when you tap Save":v+" added. Tap Save to keep it");};
+    add.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();doAdd();}});
+    sysBox.append(add,h("button",{type:"button",class:"btn small",onclick:doAdd},"+ Add system"));}
   const profBox=h("div",{class:"bulk"});
   function drawProf(){profBox.textContent="";const ps=profilesCache||[];
     const sel=h("select",{id:"cbProf","aria-label":"Job profile"},h("option",{value:""},ps.length?"Pick a saved profile…":"No saved profiles yet"),ps.map(p=>h("option",{value:p.id},p.name)));
@@ -5418,7 +5422,14 @@ function cableEditor(j){
     h("div",{class:"field full"},h("span",{class:"flabel"},"Material check (from your Material list)"),matBox)],
     async()=>{const ss=steps.filter(x=>(x.name||"").trim()).map(x=>({id:x.id,name:x.name.trim(),split:isSplit(x)}));
       const cc=cables.filter(x=>(x.name||"").trim()).map(x=>{const o={id:x.id,name:x.name.trim()};["rack","pull","len","type","from","to","note","sheet","tag"].forEach(k=>{if(x[k])o[k]=String(x[k]).trim();});if(Array.isArray(x.label)&&x.label.some(Boolean))o.label=x.label;return o;});
-      await saveVersion(j,"Before cable edit");await db.collection("jobs").doc(j.id).update({steps:ss,cables:cc,typeMat,slack,sysOrder:sysOrder.filter(Boolean),updatedAt:Date.now()});
+      /* a new system goes into every cabinet: one task per cabinet, like the others */
+      const upd={steps:ss,cables:cc,typeMat,slack,sysOrder:sysOrder.filter(Boolean),updatedAt:Date.now()};
+      {const was=sysOrderOf(j),fresh=sysOrder.filter(x=>x&&!was.includes(x)),ph=phasesOf(j).filter(p=>p.cab);
+        if(fresh.length&&ph.length){const tk=tasksOf(j).slice();let n=0;
+          ph.forEach(p=>fresh.forEach(sy=>{if(tk.some(t=>t.scope&&t.scope.rack===p.cab&&t.scope.type===sy))return;
+            tk.push({id:nid("t"),name:sy,phase:p.id,scope:{rack:p.cab,type:sy},doneOn:"",after:[],startedOn:"",crew:[],crewLog:{},addedBy:myId||"",addedAt:Date.now()});n++;}));
+          if(n)upd.tasks=tk;}}
+      await saveVersion(j,"Before cable edit");await db.collection("jobs").doc(j.id).update(upd);
       logEvent("Cables updated: "+j.name+" ("+cc.length+" cables, "+ss.map(x=>x.name).join(" → ")+")",{ev:"cables",jobId:j.id});});
   $(".sheet").classList.add("wide");
 }
@@ -5428,7 +5439,7 @@ function cableEditor(j){
    Cabinet goes in c.rack, system in c.type, device in c.from. A pull is c.pull = "1.14 BMS · Rows 1-19". */
 const SYS_ORDER_DEFAULT=["BMS","Cameras","WAPs"];
 const LABEL_RE=/^\d+(\.\d+)*-\d+(\.\d+)+$/;
-function sysName(raw){const t=String(raw||"").trim();if(/bms/i.test(t))return "BMS";if(/cam/i.test(t))return "Cameras";if(/wap|\bap\b|access/i.test(t))return "WAPs";return t;}
+function sysName(raw){const t=String(raw||"").trim();if(/bms/i.test(t))return "BMS";if(/cam/i.test(t))return "Cameras";if(/wap|\bap\b|access/i.test(t))return "WAPs";return t.charAt(0).toUpperCase()+t.slice(1);}
 function sysOrderOf(j){return Array.isArray(j&&j.sysOrder)&&j.sysOrder.length?j.sysOrder:SYS_ORDER_DEFAULT;}
 const sysRank=(j,s)=>{const o=sysOrderOf(j),i=o.indexOf(s);return i<0?99:i;};
 const labelNum=n=>{const m=String(n||"").match(/(\d+)\s*$/);return m?parseInt(m[1],10):NaN;};
@@ -6335,7 +6346,7 @@ function cabSysPlan(cabs,syss){const phases=[],tasks=[];const nid=p=>p+Date.now(
   cabs.forEach(cb=>{const p={id:nid("p"),name:cb,cab:cb,afterPrev:false};phases.push(p);
     (syss[cb]||[]).forEach(sy=>tasks.push({id:nid("t"),name:sy,phase:p.id,scope:{rack:cb,type:sy},doneOn:"",after:[],startedOn:"",crew:[],crewLog:{},addedBy:myId||"",addedAt:Date.now()}));});
   return {phases,tasks};}
-function systemsByCab(j,cabs){const out={};cabs.forEach(cb=>{const s=[...new Set(cablesOf(j).filter(c=>c.rack===cb).map(c=>c.type).filter(Boolean))].sort((a,b)=>sysRank(j,a)-sysRank(j,b)||natCmp(a,b));
+function systemsByCab(j,cabs){const out={};cabs.forEach(cb=>{const s=[...new Set([...cablesOf(j).filter(c=>c.rack===cb).map(c=>c.type),...tasksOf(j).filter(t=>t.scope&&t.scope.rack===cb).map(t=>t.scope.type)].filter(Boolean))].sort((a,b)=>sysRank(j,a)-sysRank(j,b)||natCmp(a,b));
   out[cb]=s.length?s:sysOrderOf(j).slice();});return out;}
 function stepListEditor(list,suggest){/* list of {id?,name}; keeps ids so checked-off cables stay checked */
   const box=h("div",{class:"stack",style:"gap:6px"}),chips=h("div",{class:"chips",style:"gap:6px"}),inp=h("input",{id:"stAdd",placeholder:"Add a step, then Enter",autocomplete:"off"});
