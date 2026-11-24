@@ -812,6 +812,11 @@ body:has(#scrim:not([hidden])) .fab,body:has(.popwrap) .fab{display:none}
 .tool.miss{background:var(--over-soft);color:var(--over)}
 .prep{display:grid;gap:6px;padding:10px;border-radius:10px;background:var(--bg)}
 .rl{display:grid;gap:6px}
+.sugg{display:grid;gap:6px;padding:10px;border-radius:12px;border:1px solid color-mix(in srgb,var(--accent) 50%,var(--line));background:color-mix(in srgb,var(--accent) 8%,var(--panel))}
+.tdl{text-transform:none;letter-spacing:0;display:inline-flex;align-items:center;gap:6px;font-size:.82rem;color:var(--muted);font-weight:600}
+.tdue{padding:4px 8px!important}
+.duechip{justify-self:start;display:inline-block;margin:4px 0;padding:4px 12px;border-radius:999px;background:var(--soft);color:var(--ink);font-weight:700;font-size:.88rem}
+.duechip.now{background:var(--over-soft);color:var(--over)}
 .rlrow{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)}
 .rln{display:grid;min-width:0}.rln small{color:var(--muted);font-size:.78rem}
 </style>
@@ -1086,13 +1091,15 @@ async function setCrew(j,d,ids,just,taskId){
   await db.collection("jobs").doc(j.id).update({tasks,updatedAt:Date.now()});
 }
 const sameSet=(a,b)=>a.length===b.length&&a.every(x=>b.includes(x));
+/* Leads/foremen and supers run the crew: never "free", never suggested for a task */
+function isLeadTech(t){if(!t)return false;if(/superintendent|super\b|lead|foreman/i.test(t.role||""))return true;const u=t.uid||(typeof uidOf==="function"?uidOf(t.id):"");return !!u&&(u===ownerUid||["boss","lead"].includes(roleFor(u)));}
 function dayInfo(d){
   const jobs=jobsOn(d),techs=activeTechs();
   const off=techs.filter(t=>awayOn(t.id,d));
   const avail=techs.length-off.length;
   const need=jobs.reduce((a,j)=>a+(+j.techs||0),0);
   const firm=jobs.filter(j=>j.conf!=="idea").reduce((a,j)=>a+(+j.techs||0),0);
-  const idle=techs.filter(t=>!awayOn(t.id,d)&&!assignOn(t.id,d));
+  const idle=techs.filter(t=>!awayOn(t.id,d)&&!assignOn(t.id,d)&&!isLeadTech(t));
   const short=techs.length>0&&isWeekday(d)&&firm>avail;
   return {jobs,off,avail,need,firm,idle,short,working:avail-idle.length,hasRoster:techs.length>0};
 }
@@ -2228,7 +2235,6 @@ function resolveForm(f){openSheet("Mark resolved",[field({id:"rsNote",label:"Wha
 
 /* ===== HOME: Dashboard (leads/super) and My Day (crew) ===== */
 /* ===== MY DAY (leads / supers): huddle → roll call → assignments → meetings & reminders → plan ahead → wrap up ===== */
-const HUDDLE_TOPICS=["Ladder safety","Lifts / MEWP","Housekeeping","PPE","Cutting / sharps","Line of fire","Material handling","Heat / cold stress","Silica / dust","Lockout / tagout","Overhead work","Slips, trips, falls"];
 const nowHM=()=>{const n=new Date();return String(n.getHours()).padStart(2,"0")+":"+String(n.getMinutes()).padStart(2,"0");};
 const fmtHM=t=>{if(!t)return"";const [hh,mm]=t.split(":").map(Number);const d=new Date();d.setHours(hh,mm,0,0);return fmtTime(d.getTime());};
 const nextWorkDay=d=>{let n=addDays(parseD(d),1);while(n.getDay()===0)n=addDays(n,1);return iso(n);};
@@ -2243,18 +2249,53 @@ function rollList(d,onlyOpen){const box=h("div",{class:"rl"});
           h("button",{type:"button",class:"attb out","aria-pressed":String(st==="out"),onclick:async()=>{await setAtt(t.id,d,st==="out"?null:"out");draw();}},"✗ Out"))));});
     if(r.off.length)box.append(h("div",{class:"status"},"Off today: "+r.off.map(t=>t.name).join(", ")));};
   draw();return box;}
-function huddleSheet(d){const hd=(ATT[d]||{}).huddle||{};let topics=new Set(hd.topics||[]);
-  const tBox=h("div",{class:"tchips"});const drawT=()=>{tBox.textContent="";HUDDLE_TOPICS.forEach(x=>tBox.append(h("button",{type:"button",class:"tchip dep","aria-pressed":String(topics.has(x)),onclick:()=>{topics.has(x)?topics.delete(x):topics.add(x);drawT();}},x)));};drawT();
-  const ck=(id,l,v)=>h("label",{class:"check",for:id},h("input",{type:"checkbox",id,checked:!!v}),l);
-  openSheet("Morning huddle · "+fmtS(d,{weekday:"short",month:"short",day:"numeric"}),[
-    h("div",{class:"field full"},h("span",{class:"flabel"},"1. Roll call"),rollList(d,false)),
-    h("div",{class:"field full"},h("span",{class:"flabel"},"2. Safety topics covered"),tBox),
-    field({id:"hzHaz",label:"3. Today's hazards and how we control them (PTP)",type:"textarea",value:hd.hazards||"",full:true,placeholder:"e.g. Working off 8' ladders in 1.16 – 3 points of contact, spotter. Lift in row 40s – harness, barricade."}),
-    h("div",{class:"field full"},h("span",{class:"flabel"},"4. Sign-off"),h("div",{class:"stack",style:"gap:6px"},ck("hzPtp","PTP reviewed with the crew",hd.ptp),ck("hzOrm","ORM done",hd.orm),ck("hzSign","Everyone signed the sheet",hd.signed))),
-    field({id:"hzNotes",label:"Plan / notes for the crew",type:"textarea",value:hd.notes||"",full:true,placeholder:"Who's where today, deliveries, inspections…"})],
-    async()=>{const r=rollCall(d);const ok=await saveDay(d,{huddle:{at:hd.at||Date.now(),by:hd.by||myId||"",topics:[...topics],hazards:val("hzHaz"),ptp:!!val("hzPtp"),orm:!!val("hzOrm"),signed:!!val("hzSign"),notes:val("hzNotes"),here:r.here.length,updatedAt:Date.now()}});
-      if(ok&&!hd.at)logEvent("Morning huddle done · "+r.here.length+" here"+(topics.size?" · "+[...topics].join(", "):""),{ev:"attend"});if(!ok)return false;});
+function crewBrief(d){const r=rollCall(d),lines=[],dd=(a,b)=>Math.round((parseD(b)-parseD(a))/864e5),wk=iso(addDays(parseD(d),7));
+  lines.push(fmtS(d,{weekday:"long",month:"short",day:"numeric"})+" · "+hoursTxt(d)+" · "+r.here.length+" here");
+  const tg=liveTargets(d).filter(x=>x.ids.length);
+  if(tg.length){lines.push("","WHO'S ON WHAT");tg.forEach(x=>{const t=x.task,due=t&&t.due?" (due "+fmtS(t.due,{weekday:"short",month:"short",day:"numeric"})+")":"";lines.push("• "+(t?t.name+" · "+x.job.name:x.job.name)+due+": "+crewNames(x.ids));});}
+  const dueT=[];jobsOn(d).forEach(j=>tasksOf(j).forEach(t=>{if(t.due&&!t.doneOn&&t.due<=wk)dueT.push([t.due,t.name+" · "+j.name]);}));
+  const dueJ=S.jobs.filter(j=>!j.doneOn&&!isQuick(j)&&j.start&&j.start<=d&&jobEnd(j)<=iso(addDays(parseD(d),21))).map(j=>[jobEnd(j),j.name+(jobPct(j)!=null?" · "+jobPct(j)+"% done":"")]);
+  const dues=[...dueT,...dueJ].sort((a,b)=>a[0]<b[0]?-1:1);
+  if(dues.length){lines.push("","DUE");dues.forEach(([dt,l])=>{const n=dd(d,dt);lines.push("• "+l+" – "+(n<0?"overdue":n===0?"today":n===1?"tomorrow":fmtS(dt,{weekday:"short",month:"short",day:"numeric"})+" ("+n+" days)"));});}
+  const up=[];remsOn(d).forEach(m=>up.push((m.remindAt?fmtHM(m.remindAt)+" ":"Today ")+m.text));
+  S.jobs.filter(j=>!j.doneOn&&!isQuick(j)&&j.start>d&&j.start<=wk).sort((a,b)=>a.start<b.start?-1:1).forEach(j=>up.push(j.name+" starts "+fmtS(j.start,{weekday:"short",month:"short",day:"numeric"})));
+  if(up.length){lines.push("","COMING UP");up.forEach(x=>lines.push("• "+x));}
+  if(r.out.length||r.off.length)lines.push("","Out: "+[...r.out,...r.off].map(t=>t.name).join(", "));
+  return lines.join("\n");}
+let boardFile=null;
+async function shareBoard(d){const hd=(ATT[d]||{}).huddle||{},txt="PTP / ORM · "+fmtS(d,{weekday:"short",month:"short",day:"numeric"})+" · "+(hd.here||rollCall(d).here.length)+" on site";
+  try{let f=boardFile;if(!f&&hd.photo){const fd=S.files.find(x=>x.id===hd.photo);if(fd){const u=await fileURL(fd);const b=await (await fetch(u)).blob();f=new File([b],fd.name||"ptp.jpg",{type:b.type||"image/jpeg"});}}
+    if(f&&navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],text:txt});return;}
+    if(hd.photo){const fd=S.files.find(x=>x.id===hd.photo);if(fd)openDoc(fd);toast("Use Download, then attach it to your email or text to safety.");}}catch(e){}}
+function huddleSheet(d){const hd=(ATT[d]||{}).huddle||{};let photo=hd.photo||"";
+  const ph=h("div",{class:"stack",style:"gap:6px"});
+  const drawPh=()=>{ph.textContent="";const fd=photo?S.files.find(x=>x.id===photo):null;
+    ph.append(h("div",{style:"display:flex;gap:8px;flex-wrap:wrap;align-items:center"},
+      h("button",{type:"button",class:"btn"+(photo?" ghost":""),onclick:()=>{const inp=h("input",{type:"file",accept:"image/*",capture:"environment",style:"display:none"});
+        inp.addEventListener("change",async()=>{const f=inp.files[0];inp.remove();if(!f)return;boardFile=f;const ids=await uploadFiles([f],"",null,{folder:"PTP · ORM",quiet:true});if(ids[0]){photo=ids[0];toast("Board photo saved");drawPh();}});document.body.append(inp);inp.click();}},photo?"📷 Retake":"📷 Snap the whiteboard"),
+      photo?h("button",{type:"button",class:"btn ghost",onclick:()=>shareBoard(d)},"📤 Send to safety"):null,
+      fd?h("button",{type:"button",class:"linkbtn",onclick:()=>openDoc(fd)},"View photo"):photo?h("span",{class:"status"},"Photo saved ✓"):null));};drawPh();
+  const plan=h("textarea",{id:"hzPlan",style:"min-height:220px;font-family:var(--f-mono);font-size:.84rem"});plan.value=hd.plan||crewBrief(d);const auto0=plan.value;
+  openSheet("Morning huddle",[
+    h("div",{class:"field full"},h("span",{class:"flabel"},"Who's here"),rollList(d,false)),
+    h("div",{class:"field full"},h("span",{class:"flabel"},"PTP / ORM whiteboard"),h("p",{class:"status",style:"margin:0"},"Snap the board for the log. Send it to safety from here."),ph),
+    h("div",{class:"field full"},h("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:8px"},h("label",{for:"hzPlan",class:"flabel"},"What we're doing today"),h("button",{type:"button",class:"linkbtn",onclick:()=>{plan.value=crewBrief(d);}},"↻ Refresh")),
+      h("p",{class:"status",style:"margin:0"},"Built from the app: who's on what, what's due and when, what's coming up. Edit anything before you send it."),plan),
+    h("label",{class:"check full",for:"hzChat"},h("input",{type:"checkbox",id:"hzChat",checked:!hd.posted}),"Post this in crew chat so everyone has it")],
+    async()=>{const r=rollCall(d),post=!!val("hzChat"),txt=(plan.value===auto0&&!hd.plan?crewBrief(d):plan.value).trim();
+      const ok=await saveDay(d,{huddle:{at:hd.at||Date.now(),by:hd.by||myId||"",photo,plan:txt,here:r.here.length,posted:hd.posted||post,updatedAt:Date.now()}});if(!ok)return false;
+      if(post&&txt){try{await db.collection("messages").add({kind:"chat",text:"📋 Today's plan\n"+txt,to:[],by:myId||"",at:Date.now()});}catch(e){writeErr(e);}}
+      if(!hd.at)logEvent("Morning huddle · "+r.here.length+" here"+(photo?" · board photo saved":""),{ev:"attend"});toast(post?"Plan sent to crew chat":"Huddle saved");});
   $(".sheet").classList.add("wide");}
+function huddleCard(d){const att=ATT[d]||{},hd=att.huddle,boss=myRole()==="boss",hrs=hoursOn(d);
+  const late=hrs&&nowHM()>((()=>{const [a,b]=hrs[0].split(":").map(Number),m=a*60+b+90;return String(Math.floor(m/60)).padStart(2,"0")+":"+String(m%60).padStart(2,"0");})());
+  if(hd){const fd=hd.photo?S.files.find(x=>x.id===hd.photo):null;
+    return flowCard(1,"Morning huddle","done",h("div",{class:"stack",style:"gap:6px"},h("div",{class:"status"},fmtTime(hd.at)+(hd.by&&hd.by!==myId?" · "+(names[hd.by]||""):"")+" · "+(hd.here||0)+" here"+(hd.posted?" · plan sent to crew":"")),
+      h("div",{style:"display:flex;gap:6px;flex-wrap:wrap"},fd?h("button",{type:"button",class:"btn ghost small",onclick:()=>openDoc(fd)},"📷 Board photo"):null,hd.photo?h("button",{type:"button",class:"btn ghost small",onclick:()=>shareBoard(d)},"📤 Send to safety"):null,
+        boss?h("button",{type:"button",class:"btn ghost small",onclick:()=>remForm("reminder")},"＋ Add something"):h("button",{type:"button",class:"btn ghost small",onclick:()=>huddleSheet(d)},"Open"))),{chip:fmtTime(hd.at)});}
+  if(boss)return flowCard(1,"Morning huddle","",h("div",{class:"status"},"Your lead runs this at start of shift. Their plan and board photo show here when it's done."),{chip:"Lead"});
+  return flowCard(1,"Morning huddle","",h("div",{class:"stack",style:"gap:6px"},h("div",{class:"status"},late?"Start of shift has passed. You can still log today's plan or the board photo.":"Roll call, snap the PTP/ORM board, and tell the crew what's on today and what's due."),
+    h("button",{type:"button",class:"btn"+(late?" ghost small":""),style:"justify-self:start",onclick:()=>huddleSheet(d)},late?"Log it anyway":"Start huddle")),{chip:late?"Optional now":"Start of shift"});}
 function remForm(kind,pre){pre=pre||{};const isMeet=kind==="meeting";
   const jobSel=h("select",{id:"rmJob"},h("option",{value:""},"No job"),S.jobs.filter(j=>!j.doneOn).sort(byPri).map(j=>h("option",{value:j.id,selected:pre.jobId===j.id},j.name)));
   openSheet(isMeet?"New meeting":"New reminder",[
@@ -2266,6 +2307,15 @@ function remForm(kind,pre){pre=pre||{};const isMeet=kind==="meeting";
     async()=>{const text=val("rmText");if(!text){formErr(isMeet?"Name the meeting.":"What should we remind you about?");return false;}
       const where=isMeet?val("rmWhere"):"";
       try{await db.collection("messages").add({text:(isMeet?"📅 ":"")+text+(where?" · "+where:""),kind:isMeet?"meeting":"reminder",to:[],by:myId||"",at:Date.now(),jobId:val("rmJob"),remindOn:val("rmDate")||TODAY(),remindAt:val("rmTime")||"",done:false});toast(isMeet?"Meeting added":"Reminder set");}catch(e){writeErr(e);return false;}});}
+function suggestAssign(d){const di=dayInfo(d),tg=liveTargets(d).filter(x=>x.task||!tasksOf(x.job).length),cnt=new Map(tg.map(x=>[x,x.ids.length])),out=[];
+  const score=x=>{const j=x.job,t=x.task,n=cnt.get(x);let s=0;const why=[];
+    if(!n){s+=50;why.push("no one on it");}
+    const need=+j.techs||0,have=workingOn(j,d).length+out.filter(o=>o.x.job===j).length;if(need&&have<need){s+=20;why.push("job is short "+(need-have));}
+    const p=priOf(j);if(p===1){s+=15;why.push("top priority");}else s+=(5-p)*3;
+    const due=t&&t.due?t.due:jobEnd(j);const days=Math.round((parseD(due)-parseD(d))/864e5);if(days<=14){s+=(14-Math.max(0,days))*3;if(days<=7)why.push(days<=0?"due today":"due "+fmtS(due,{weekday:"short"}));}
+    s-=n*8;return [s,why];};
+  di.idle.forEach(tc=>{let best=null;tg.forEach(x=>{const [sc,why]=score(x);if(!best||sc>best.sc)best={x,sc,why};});if(best){out.push({tc,x:best.x,why:best.why});cnt.set(best.x,cnt.get(best.x)+1);}});
+  return out;}
 function pickTarget(tid){const d=TODAY(),tg=liveTargets(d);
   openView("Put "+techName(tid)+" on…",[h("div",{class:"full moregrid"},tg.map(x=>h("button",{type:"button",class:"moreitem",onclick:async()=>{closeSheet();await moveTech(tid,{job:x.job,task:x.task});toast(techName(tid)+" → "+targetLabel(x.job,x.task));}},
     h("span",{},h("strong",{},x.task?x.task.name:x.job.name),h("small",{},(x.task?x.job.name+" · ":"")+(x.ids.length?x.ids.length+" on it: "+crewNames(x.ids):"No one on it"))),x.ids.length?null:h("span",{class:"badge"},"0")))),
@@ -2306,10 +2356,7 @@ function renderDay(v){const d=TODAY(),att=ATT[d]||{},hd=att.huddle,wr=att.wrap,r
   v.append(h("div",{class:"dayline"},h("strong",{},fmt(t,{weekday:"long",month:"short",day:"numeric"})),h("span",{class:"status"},hoursTxt(d)+(holidayOn(d)?" · "+holidayOn(d).name:""))));
   flagPanel(v);
   // 1 huddle
-  v.append(flowCard(1,"Morning huddle · PTP / ORM",hd?"done":"",hd?h("div",{class:"stack",style:"gap:6px"},h("div",{class:"status"},"Done "+fmtTime(hd.at)+(hd.by&&hd.by!==myId?" by "+(names[hd.by]||""):"")+" · "+(hd.here||0)+" here"+(hd.topics&&hd.topics.length?" · "+hd.topics.join(", "):"")),
-      h("div",{class:"tchips"},[hd.ptp?"PTP ✓":"PTP not checked",hd.orm?"ORM ✓":"ORM not checked",hd.signed?"Signed ✓":"Not signed"].map(x=>h("span",{class:"tool"+(/✓/.test(x)?"":" miss")},x))),
-      h("button",{type:"button",class:"btn ghost small",style:"justify-self:start",onclick:()=>huddleSheet(d)},"Open huddle notes"))
-    :h("div",{class:"stack",style:"gap:6px"},h("div",{class:"status"},"Roll call, safety topics, today's hazards and sign-off in one place."),h("button",{type:"button",class:"btn",style:"justify-self:start",onclick:()=>huddleSheet(d)},"Start huddle")),{chip:hd?fmtTime(hd.at):"Start of day"}));
+  v.append(huddleCard(d));
   // 2 roll call
   const rcDone=!r.unk.length&&(r.here.length||r.out.length);
   v.append(flowCard(2,"Roll call",rcDone?"done":"",h("div",{class:"stack",style:"gap:8px"},rollBar(d),r.unk.length||r.out.length?rollList(d,true):null),{chip:r.here.length+" here · "+(r.out.length+r.off.length)+" out"}));
@@ -2317,6 +2364,9 @@ function renderDay(v){const d=TODAY(),att=ATT[d]||{},hd=att.huddle,wr=att.wrap,r
   const tg=liveTargets(d),empty=tg.filter(x=>x.task&&!x.ids.length),outOn_=r.out.filter(t=>assignOn(t.id,d));
   const ab=h("div",{class:"stack",style:"gap:8px"});
   outOn_.forEach(t=>ab.append(h("div",{class:"arow warn"},h("span",{},h("strong",{},t.name+" is out"),h("small",{},"Was on "+assignLabel(t.id,d))),h("button",{type:"button",class:"btn ghost small",onclick:()=>moveTech(t.id,null).then(()=>toast(t.name+" taken off"))},"Take off"))));
+  {const sg=suggestAssign(d);if(sg.length)ab.append(h("div",{class:"sugg"},h("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:8px"},h("strong",{},"💡 Suggested"),sg.length>1?h("button",{type:"button",class:"btn small",onclick:async e=>{e.target.disabled=true;for(const g of sg){g.x.job=S.jobs.find(x=>x.id===g.x.job.id)||g.x.job;if(g.x.task)g.x.task=tasksOf(g.x.job).find(x=>x.id===g.x.task.id)||g.x.task;await moveTech(g.tc.id,{job:g.x.job,task:g.x.task});for(let k=0;k<30;k++){memo={};const j=S.jobs.find(x=>x.id===g.x.job.id),t=g.x.task&&j?tasksOf(j).find(x=>x.id===g.x.task.id):null;if(t?crewOn(t,d).includes(g.tc.id):assignOn(g.tc.id,d))break;await new Promise(r=>setTimeout(r,100));}}toast("Put "+sg.length+" people to work");}},"Do all "+sg.length):null),
+    sg.map(g=>h("div",{class:"arow"},h("span",{},h("strong",{},g.tc.name+" → "+(g.x.task?g.x.task.name:g.x.job.name)),h("small",{},(g.x.task?g.x.job.name+" · ":"")+(g.why.join(", ")||"best fit right now"))),
+      h("span",{style:"display:flex;gap:6px"},h("button",{type:"button",class:"btn small",onclick:async()=>{const jj=S.jobs.find(x=>x.id===g.x.job.id)||g.x.job;await moveTech(g.tc.id,{job:jj,task:g.x.task?tasksOf(jj).find(x=>x.id===g.x.task.id):null});toast(g.tc.name+" → "+targetLabel(g.x.job,g.x.task));}},"Do it"),h("button",{type:"button",class:"btn ghost small",onclick:()=>pickTarget(g.tc.id)},"Other")))) ));}
   if(di.idle.length)ab.append(h("div",{},h("div",{class:"status",style:"margin-bottom:4px"},"Free · tap to put them on a task"),h("div",{class:"tchips"},di.idle.map(t=>h("button",{type:"button",class:"tchip free",onclick:()=>pickTarget(t.id)},t.name+" ＋")))));
   tg.forEach(x=>ab.append(h("div",{class:"arow"+(x.task&&!x.ids.length?" noone":"")},h("span",{},h("strong",{},x.task?x.task.name:x.job.name+" (whole job)"),h("small",{},(x.task?x.job.name+" · ":"")+(x.ids.length?crewNames(x.ids):"No one on it"))),
     h("span",{style:"display:flex;gap:6px"},x.ids.length?h("button",{type:"button",class:"btn ghost small",onclick:()=>{const id=x.ids[x.ids.length-1];pickTarget(id);}},"Move"):null,h("button",{type:"button",class:"btn small"+(x.ids.length?" ghost":""),onclick:()=>pickTech(x)},"＋")))));
@@ -2360,6 +2410,7 @@ function techToday(tc,d){const o=offOn(d).filter(x=>x.techId===tc.id),full=o.fin
   const a=attOf(tc.id,d);if(a&&a.s==="out")return{cls:"out",att:true,txt:"Not here · marked "+fmtTime(a.at)+(a.by&&a.by!==myId&&names[a.by]?" by "+names[a.by].split(" ")[0]:"")};
   const j=assignOn(tc.id,d),tk=j?taskFor(j,tc.id,d):null;
   if(j)return{cls:"",txt:(tk?tk.name+" · ":"")+j.name+(part?" · "+offLabel(part):"")};
+  if(isLeadTech(tc))return{cls:"",txt:(/super/i.test(tc.role||"")||roleFor(tc.uid||"")==="boss"?"Superintendent":"Running the crew")+(part?" · "+offLabel(part):"")};
   return{cls:"free",txt:"Free · not assigned"+(part?" · "+offLabel(part):"")};}
 function attBtns(tc,d){const a=attOf(tc.id,d),st=a?a.s:"";
   return h("span",{class:"attbtns"},
@@ -2578,6 +2629,7 @@ function renderMyWork(v){const d=TODAY(),me=myTech(),t=today();
   const chip=state==="working"?h("span",{class:"wchip work"},"● Working · since "+fmtTime(st.at)):state==="hold"?h("span",{class:"wchip hold"},"⏸ On hold · waiting on your lead"):state==="held"?h("span",{class:"wchip hold"},"⏸ Lead put this on hold"):h("span",{class:"wchip"},"Not started");
   const card=h("div",{class:"wcard main"},h("div",{class:"wlbl"},"Your task"),chip,
     h("div",{class:"wtitle"},tk?tk.name:j.name),h("div",{class:"wsub"},[tk?j.name:"",j.site,j.loc].filter(Boolean).join(" · ")),
+    tk&&tk.due&&!tk.doneOn?h("div",{class:"duechip"+(tk.due<=TODAY()?" now":"")},"📅 Due "+(tk.due===TODAY()?"today":tk.due<TODAY()?"overdue ("+fmtS(tk.due)+")":fmtS(tk.due,{weekday:"short",month:"short",day:"numeric"}))):null,
     crew.length?h("div",{class:"status"},"With "+crewNames(crew)):null,
     toolsLine(j,tk),
     stepBars(j,tk),
@@ -3199,7 +3251,7 @@ function jobForm(j,sec){
   const effDefault=j?refDay(j):"";
   const crewSet=new Set(j?crewOn(j,effDefault):[]);
   let phases=phasesOf(j||{}).map(p=>Object.assign({},p));
-  let tasks=(j?tasksOf(j):[]).map(t=>({id:t.id,name:t.name,phase:t.phase||"",doneOn:t.doneOn||"",startedOn:t.startedOn||"",after:Array.isArray(t.after)?t.after.slice():[],tools:t.tools||"",open:"",orig:t,set:new Set(crewOn(t,effDefault||TODAY()))}));
+  let tasks=(j?tasksOf(j):[]).map(t=>({id:t.id,name:t.name,phase:t.phase||"",doneOn:t.doneOn||"",startedOn:t.startedOn||"",after:Array.isArray(t.after)?t.after.slice():[],tools:t.tools||"",due:t.due||"",open:"",orig:t,set:new Set(crewOn(t,effDefault||TODAY()))}));
 
   // project → location
   const projSel=h("select",{id:"fProj",disabled:ro},h("option",{value:""},"No project"),[...S.projects].sort((a,b)=>(a.name||"").localeCompare(b.name||"")).map(p=>h("option",{value:p.id,selected:j?.projectId===p.id},p.name)));
@@ -3240,6 +3292,7 @@ function jobForm(j,sec){
       const meta=h("div",{class:"tmeta"});
       if(phases.length){const ps=h("select",{id:"tkp-"+i,"aria-label":"Phase",disabled:ro,class:"tsel"},h("option",{value:""},"No phase"),phases.map((p,k)=>h("option",{value:p.id,selected:t.phase===p.id},(k+1)+". "+(p.name||"Phase"))));
         ps.addEventListener("change",()=>{t.phase=ps.value;});meta.append(ps);}
+      {const du=h("input",{type:"date",class:"tsel tdue",value:t.due||"",disabled:ro,"aria-label":"Due date for "+(t.name||"task"),title:"Due by"});du.addEventListener("change",()=>{t.due=du.value;});meta.append(h("label",{class:"tdl"},"📅 Due",du));}
       if(others.length)meta.append(h("button",{type:"button",class:"tlink"+(t.after.length?" on":""),"aria-expanded":String(t.open==="wait"),disabled:ro&&!t.after.length,onclick:()=>tog("wait")},
         t.after.length?"⏳ Waits for "+t.after.map(nm).filter(Boolean).join(", "):"▶ Can start anytime"));
       meta.append(h("button",{type:"button",class:"tlink"+(t.tools?" on":""),"aria-expanded":String(t.open==="tools"),disabled:ro&&!t.tools,onclick:()=>tog("tools")},t.tools?"🧰 "+t.tools:"🧰 Add tools"));
@@ -3331,7 +3384,7 @@ function jobForm(j,sec){
     const tmp={start,days:body.days,weeks:body.weeks};const endD=jobEnd(tmp);
     const keep=new Set(tasks.filter(t=>(t.name||"").trim()).map(t=>t.id));
     if(!j){body.addedBy=myId||"";body.addedAt=Date.now();}
-    body.tasks=tasks.filter(t=>(t.name||"").trim()).map(t=>{const tid=[...t.set].filter(techById);const base={id:t.id,name:t.name.trim(),phase:phases.some(p=>p.id===t.phase)?t.phase:"",doneOn:t.doneOn||"",after:t.after.filter(x=>keep.has(x)&&x!==t.id),tools:(t.tools||"").trim(),startedOn:t.startedOn||"",addedBy:t.orig?(t.orig.addedBy||""):(myId||""),addedAt:t.orig?(t.orig.addedAt||0):Date.now()};
+    body.tasks=tasks.filter(t=>(t.name||"").trim()).map(t=>{const tid=[...t.set].filter(techById);const base={id:t.id,name:t.name.trim(),phase:phases.some(p=>p.id===t.phase)?t.phase:"",doneOn:t.doneOn||"",after:t.after.filter(x=>keep.has(x)&&x!==t.id),tools:(t.tools||"").trim(),due:t.due||"",startedOn:t.startedOn||"",addedBy:t.orig?(t.orig.addedBy||""):(myId||""),addedAt:t.orig?(t.orig.addedAt||0):Date.now()};
       if(!t.orig){base.crew=tid;base.crewAt=stampAt([],tid);base.crewLog=started?{[start]:[],[eff]:tid}:{};return base;}
       const tHasLog=Object.keys(t.orig.crewLog||{}).length>0;
       const added=tid.filter(x=>!crewOn(t.orig,TODAY()).includes(x));
