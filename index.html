@@ -1222,6 +1222,7 @@ function render(){memo={};renderTabs();renderNotifPill();const v=$("#view");
   tabsEl.hidden=false;
   {const gs=groupStrip();if(gs)v.append(gs);}
   if(focusN&&focusN.tab===tab){const fb=focusBar();if(fb)v.append(fb);}
+  if(MGR())S.jobs.forEach(maybeFixStepTasks);
   ({home:renderHome,board:renderBoard,jobs:renderJobs,tasks:renderTasks,crew:renderCrew,off:renderOff,messages:renderMessages,chat:renderChat,material:renderMaterial}[tab])(v);
   window.scrollTo(0,y);}
 
@@ -2962,6 +2963,31 @@ const STEP_ALIAS={pulled:"pull",pulling:"pull",pulls:"pull",dressed:"dress",dres
 const stepKey=n=>{const k=toolKey(n);return STEP_ALIAS[k]||k;};
 const stepKit=n=>splitTools((crewDoc.stepTools||{})[stepKey(n)]);
 const KIT_STEPS=()=>{const m=new Map();[...CAB_STEPS_DEFAULT,"VFL","Port","Certify"].forEach(n=>m.set(stepKey(n),n));S.jobs.forEach(j=>stepsOf(j).forEach(st=>{const k=stepKey(st.name);if(k&&!/^scan/.test(st.id)&&!m.has(k))m.set(k,st.name);}));return [...m.entries()];};
+/* Pull/Dress/Terminate/Label/Test are steps every cable goes through, not tasks: convert old step-tasks into cable steps (managers' apps, once per job) */
+const STEP_TASK_RE=/^(pull|pulls|pulling|dress|dressing|terminate|terminations?|terms?|label|labels|labeling|vfl|test|tests|testing|port|certify)( \d+)?$/i;
+const stepTasksOf=j=>tasksOf(j).filter(t=>STEP_TASK_RE.test((t.name||"").trim()));
+const stepFixBusy=new Set();
+const stdKeyOf=n=>{const k=stepKey(n);return k==="vfl"||k==="certify"?"test":k;};
+function maybeFixStepTasks(j){if(!MGR()||!j||isQuick(j)||isRackJob(j)||j.doneOn||stepFixBusy.has(j.id))return;
+  const st=stepTasksOf(j);if(!st.length||st.length===tasksOf(j).length||!(cablesOf(j).length||isCat6Job(j)))return;
+  stepFixBusy.add(j.id);setTimeout(()=>fixStepTasks(j.id),0);}
+async function fixStepTasks(jid){const j=S.jobs.find(x=>x.id===jid);if(!j)return;
+  const rm=new Set(stepTasksOf(j).map(t=>t.id));
+  const upd={tasks:tasksOf(j).filter(t=>!rm.has(t.id)).map(t=>Object.assign({},t,{after:(t.after||[]).filter(id=>!rm.has(id))})),updatedAt:Date.now()};
+  if(isCat6Job(j)){const old=stepsOf(j),parts=st=>String(st.name||"").split(/&|,|\/|\band\b|\+/i).map(x=>stdKeyOf(x)).filter(Boolean);
+    const std=CAB_STEPS_DEFAULT,used=new Set(),next=[];
+    if(!(old.length===std.length&&old.every((st,i)=>st.name===std[i]))){
+      std.forEach(n=>{const k=stdKeyOf(n),hits=old.filter(st=>parts(st).includes(k));
+        const solo=hits.find(st=>parts(st).length===1&&!used.has(st.id));
+        if(solo){used.add(solo.id);next.push(Object.assign({},solo,{name:n}));return;}
+        const id="s"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);next.push({id,name:n});
+        const src=hits[0];if(src)cablesOf(j).forEach(c=>{const m=rawMark(j,c.id,src.id);if(m)upd["marks."+c.id+"."+id]=m;});});
+      old.forEach(st=>{if(!used.has(st.id)&&!parts(st).some(k=>std.some(n=>stdKeyOf(n)===k)))next.push(st);});
+      upd.steps=next;}}
+  {const kits=Object.assign({},crewDoc.stepTools||{});let ch=false;stepTasksOf(j).forEach(t=>{const k=stdKeyOf(t.name.replace(/ \d+$/,"")),tl=splitTools(t.tools);if(tl.length&&!splitTools(kits[k]).length){kits[k]=tl.join(", ");ch=true;}});if(ch)saveCrew({stepTools:kits});}
+  try{await saveVersion(j,"Before turning step tasks into cable steps");await db.collection("jobs").doc(j.id).update(upd);
+    toast(j.name+": Pull, Dress, Terminate, Label, Test are now steps on every cable"+(rm.size?" (removed "+rm.size+" step tasks)":""));
+    logEvent("Step tasks → cable steps: "+j.name,{ev:"cables",jobId:j.id});}catch(e){stepFixBusy.delete(j.id);writeErr(e);}}
 function toolsLine(j,t){const uniq=a=>[...new Map(a.map(x=>[toolKey(x),tidyTool(x)])).values()];
   const st=j&&t?stepForTask(j,t):null;
   const base=uniq([...splitTools(j&&j.tools),...splitTools(t&&t.tools),...(st?stepKit(st.name):[])]);
@@ -3062,7 +3088,8 @@ function jobForm(j,sec){
   const template=()=>{let p1,p2,p3;if(!phases.length){p1=addPhase("Rough-in");p2=addPhase("Terminate & dress");p3=addPhase("Test & certify");}
     const ph=(t,p)=>{if(p)t.phase=p.id;return t;};
     ph(addTask("Pull"),p1);ph(addTask("Dress"),p2);ph(addTask("Terminate"),p2);ph(addTask("Label"),p2);ph(addTask("Test"),p3);drawCrews();};
-  const presets=ro?null:h("div",{class:"presets"},h("button",{type:"button",class:"btn small",onclick:template},"+ Standard cable run"),TASK_PRESETS.map(n=>h("button",{type:"button",class:"btn ghost small",onclick:()=>addTask(n)},"+ "+n)),h("button",{type:"button",class:"btn ghost small",onclick:()=>addTask("New task")},"+ Other"));
+  const cableJob=!!(j&&(cablesOf(j).length||isCat6Job(j)));
+  const presets=ro?null:cableJob?h("div",{class:"stack",style:"gap:6px"},h("div",{class:"presets"},h("button",{type:"button",class:"btn small",onclick:()=>addTask("New task")},"+ Add task")),h("div",{class:"status"},"Tasks are a cabinet, a pull, or a row. Pull, Dress, Terminate, Label and Test are steps on every cable: change them in Cables & steps.")):h("div",{class:"presets"},h("button",{type:"button",class:"btn small",onclick:template},"+ Standard cable run"),TASK_PRESETS.map(n=>h("button",{type:"button",class:"btn ghost small",onclick:()=>addTask(n)},"+ "+n)),h("button",{type:"button",class:"btn ghost small",onclick:()=>addTask("New task")},"+ Other"));
 
   const S_=(sec2,el)=>{if(el)el.dataset.sec=sec2;return el;};
   const nodes=[
