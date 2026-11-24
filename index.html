@@ -654,6 +654,7 @@ input.full-in.mono{font-family:var(--f-mono)}
 .frow:first-child{border-top:0}.frow:hover{background:var(--soft)}
 .frow .fic{font-size:1.35rem}.frow .fnm{font-weight:600;overflow-wrap:anywhere}
 .crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:2px;font-size:.95rem}.crumbs .linkbtn{font-weight:600}
+.pvBtns .btn{white-space:normal;text-align:center;line-height:1.2;width:100%}
 </style>
 </head>
 <body>
@@ -1235,7 +1236,7 @@ function taskRow(j,t,d){
   const m=MGR(),btn=(l,f,pri)=>h("button",{type:"button",class:"btn "+(pri?"":"ghost ")+"small",onclick:f},l);
   return h("div",{class:"titem"+(st==="done"?" done":"")},
     h("span",{class:"st "+st},lbl),
-    h("span",{class:"nm"},t.name,(()=>{const ps=[t.scope?urgentPill(j,{cab:t.scope.rack,sys:t.scope.type,sysOnly:true}):null,t.scope?scopePill(j,t):step?cablePill(j,t):null,docPill(j,t,false)].filter(Boolean);return ps.length?h("span",{class:"pills"},ps):null;})(),h("small",{},sub)),
+    h("span",{class:"nm"},t.name,(()=>{const ps=[t.scope&&cablesOf(j).some(c=>c.pull&&c.rack===t.scope.rack&&c.type===t.scope.type)?h("button",{type:"button",class:"tpill",style:"background:var(--accent);color:#fff",onclick:e=>{e.stopPropagation();pullView(j.id,{cab:t.scope.rack,sys:t.scope.type});}},"🧵 Rows"):null,t.scope?urgentPill(j,{cab:t.scope.rack,sys:t.scope.type,sysOnly:true}):null,t.scope?scopePill(j,t):step?cablePill(j,t):null,docPill(j,t,false)].filter(Boolean);return ps.length?h("span",{class:"pills"},ps):null;})(),h("small",{},sub)),
     h("span",{class:"ac"},
       m&&st==="hold"&&t.hold?btn("Resume",()=>resumeHold(j,t),true):null,
       m&&st==="wait"?btn("Start now",()=>startEarly(j,t)):null,
@@ -1249,7 +1250,8 @@ function jobPanel(j){
     h("div",{class:"ttl"},h("div",{},h("h3",{},j.name),h("div",{class:"status"},[pj?pj.name:"",j.site,j.scope,fmtS(j.start)+" – "+fmtS(jobEnd(j)),CONF[j.conf||"likely"]].filter(Boolean).join(" · ")),
         (()=>{const on=openNotesOf(j),u=on.filter(x=>x.sev==="urgent").length;
           const np=on.length||CAN_POST()?h("button",{type:"button",class:"tpill "+(on.length?"":"ghost"),style:u?"background:var(--over);color:#fff":on.length?"background:var(--locked);color:#fff":"",title:"Notes for everyone on this job",onclick:e=>{e.stopPropagation();notesSheet(j.id);}},(u?"⚠ "+u+" urgent · ":"")+(on.length?"Notes "+on.length:"+ Note")+(on.some(x=>x.fix&&x.fix.status!=="fixed")?" · 🔧 "+on.filter(x=>x.fix&&x.fix.status!=="fixed").length:"")):null;
-          const ps=[cablePill(j,null),docPill(j,null,false),np].filter(Boolean);return ps.length?h("div",{class:"pills"},ps):null;})()),
+          const wr=cablesOf(j).some(c=>c.pull)?h("button",{type:"button",class:"tpill",style:"background:var(--accent);color:#fff",title:"Pick a system and the row you're on",onclick:e=>{e.stopPropagation();pullView(j.id);}},"🧵 Work a row"):null;
+          const ps=[cablePill(j,null),docPill(j,null,false),np,wr].filter(Boolean);return ps.length?h("div",{class:"pills"},ps):null;})()),
       h("div",{class:"acts"},m&&!j.doneOn?priControl(j):h("span",{class:"pill pri"+priOf(j)},PRI[priOf(j)]+" priority"),heldOn(j,d)?h("span",{class:"pill bad"},"Job on hold"):null,runningLong(j)?h("span",{class:"pill bad"},"Running long"):null)),
     pg?h("button",{type:"button",class:"pr prbtn","aria-expanded":String(openSteps.has(j.id)),title:"Show each step",onclick:()=>{openSteps.has(j.id)?openSteps.delete(j.id):openSteps.add(j.id);render();}},
         h("span",{class:"n"},(openSteps.has(j.id)?"▾ ":"▸ ")+"Progress"),h("span",{class:"bar"},h("i",{style:"width:"+(pct||0)+"%"})),h("span",{class:"c"},pct==null?"—":pct+"%"),h("span"))
@@ -4018,6 +4020,7 @@ function cableTracker(jid,q0,f0){
         can&&bulkSteps(j).length?h("button",{class:"btn small",type:"button",onclick:()=>bulkSignOff(j.id)},"✍ Sign off several"):null,h("button",{class:"btn ghost small",type:"button",onclick:()=>{closeSheet();setTimeout(()=>cableReport(j.id),60);}},"📅 Dates & report"),
         h("button",{class:"btn ghost small",type:"button",onclick:()=>{closeSheet();setTimeout(()=>cableLabels(j.id),60);}},"🏷 Labels"),
         h("button",{class:"btn ghost small",type:"button",style:urgentNotes(j,{cab:fCab||undefined,sys:fSys||undefined}).length?"border-color:var(--over);color:var(--over)":"",onclick:()=>{closeSheet();setTimeout(()=>notesSheet(j.id,{cab:fCab,sys:fSys}),60);}},"📝 Notes"+(openNotesOf(j).length?" ("+openNotesOf(j).length+")":"")),
+        cs.some(c=>c.pull)?h("button",{class:"btn small",type:"button",onclick:()=>{closeSheet();setTimeout(()=>pullView(j.id,{cab:fCab||undefined,sys:fSys||undefined}),60);}},"🧵 Work a row"):null,
         MGR()&&cs.some(c=>c.rack&&c.type)?h("button",{class:"btn ghost small",type:"button",onclick:()=>{closeSheet();setTimeout(()=>pullBuilder(j.id),60);}},"🧩 Build pulls"):null,
         MGR()?h("button",{class:"btn ghost small",type:"button",onclick:()=>{closeSheet();cableEditor(j);}},"Edit cables & steps"):null)));
     const sub=c=>[trackGroup!=="row"&&rowOf(c)&&!/row/i.test((c.pull||"")+(c.to||""))?rowOf(c):"",trackGroup!=="rack"&&c.rack&&!fCab?"Cabinet "+c.rack:"",!fSys&&c.type&&trackGroup!=="type"?c.type:"",c.from&&c.type?c.from:"",trackGroup!=="pull"&&c.pull&&!/row/i.test(c.pull)?"Pull "+c.pull:"",trackGroup!=="len"&&c.len?c.len+(/^\d+(\.\d+)?$/.test(String(c.len).trim())?" m":""):""].filter(Boolean).join(" · ");
@@ -5042,6 +5045,63 @@ function noteLines(j,list,onOpen){if(!list.length)return null;
       h("span",{style:"color:"+col+";font-weight:700"},(n.sev==="urgent"?"⚠ ":"")+(n.fix?"🔧 ":"")+(n.cableName?n.cableName.replace(/^.*-/,"")+": ":"")),
       n.text.length>160?n.text.slice(0,160)+"…":n.text,
       S.files.some(f=>f.noteId===n.id&&!f.noteRec)?h("span",{class:"status"}," 📷"):null);}));}
+/* ===== WORK A ROW (for the techs) =====
+   Pick the system, tap the row (pull) you're on: a compact list of its cables and where they go,
+   the notes for pullers, and one tap per step: All pulled / All terminated / All labeled… */
+function pullView(jid,pre){pre=pre||{};
+  const job=()=>S.jobs.find(x=>x.id===jid);if(!job())return;
+  let cab=pre.cab,sys=pre.sys,pk=pre.pull||"";
+  try{if(cab==null)cab=localStorage.getItem("pvCab:"+jid)||"";if(sys==null)sys=localStorage.getItem("pvSys:"+jid)||"";if(!pk)pk=localStorage.getItem("pvPull:"+jid)||"";}catch(e){}
+  const save=()=>{try{localStorage.setItem("pvCab:"+jid,cab||"");localStorage.setItem("pvSys:"+jid,sys||"");localStorage.setItem("pvPull:"+jid,pk||"");}catch(e){}};
+  const box=h("div",{class:"full stack",style:"gap:10px"});
+  const selSt="font:inherit;font-size:1rem;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);font-weight:600";
+  const short=c=>{const n=labelNum(c.name);return isNaN(n)?c.name:String(n).padStart(3,"0");};
+  function draw(){const j=job();if(!j){closeSheet();return;}box.textContent="";
+    const cs=cablesOf(j).filter(c=>c.pull),ss=stepsOf(j),scan=needsScan(j)?scanIdsOf(j):new Set(),bulk=new Set(bulkSteps(j).map(x=>x.id));
+    if(!cs.length){box.append(h("div",{class:"empty"},h("strong",{},"No pulls yet"),MGR()?"Build the pulls first (Build pulls), then each row shows up here.":"Your lead hasn't built the pulls yet."));return;}
+    const cabs=[...new Set(cs.map(c=>c.rack||""))].sort(natCmp);if(!cabs.includes(cab))cab=cabs[0];
+    const syss=[...new Set(cs.filter(c=>(c.rack||"")===cab).map(c=>c.type||""))].sort((a,b)=>sysRank(j,a)-sysRank(j,b)||natCmp(a,b));if(!syss.includes(sys))sys=syss[0];
+    const inSys=cs.filter(c=>(c.rack||"")===cab&&(c.type||"")===sys),pulls=[...new Set(inSys.map(c=>c.pull))].sort(natCmp);
+    if(pk&&!pulls.includes(pk))pk="";save();
+    const doneC=c=>ss.length&&ss.every(st=>markOf(j,c.id,st.id));
+    /* cabinet + system */
+    const top=h("div",{style:"display:flex;gap:8px;flex-wrap:wrap;align-items:center"});
+    if(cabs.length>1||cabs[0]){const cSel=h("select",{"aria-label":"Cabinet",style:selSt},cabs.map(x=>h("option",{value:x,selected:x===cab},x?"Cabinet "+x:"All")));cSel.addEventListener("change",()=>{cab=cSel.value;pk="";draw();});top.append(cSel);}
+    box.append(top,h("div",{class:"chips",style:"gap:6px"},syss.map(x=>{const gl=cs.filter(c=>(c.rack||"")===cab&&(c.type||"")===x),dn=gl.filter(doneC).length;
+      return h("button",{type:"button",class:"chipbtn","aria-pressed":String(x===sys),style:"font-size:1rem;padding:8px 14px",onclick:()=>{sys=x;pk="";draw();}},(x||"Cables")+" · "+dn+"/"+gl.length);})));
+    /* rows */
+    box.append(h("div",{class:"flabel",style:"margin:0"},"Which row are you on?"),h("div",{class:"chips",style:"gap:6px"},pulls.map(p=>{const gl=inSys.filter(c=>c.pull===p),dn=gl.filter(doneC).length,urg=urgentNotes(j,{pull:p}).length,nn=pullNotes(j,p).length;
+      return h("button",{type:"button",class:"chipbtn","aria-pressed":String(p===pk),style:"font-size:1rem;padding:8px 14px"+(dn===gl.length?";border-color:var(--ok)":"")+(urg?";border-color:var(--over)":""),onclick:()=>{pk=p===pk?"":p;draw();}},
+        pullShort({pull:p})+" · "+(dn===gl.length?"✓":dn+"/"+gl.length)+(urg?" ⚠":nn?" 📝":""));})));
+    if(!pk)return;
+    const gl=inSys.filter(c=>c.pull===pk).sort((a,b)=>labelNum(a.name)-labelNum(b.name)||natCmp(a.name,b.name)),dn=gl.filter(doneC).length,pct=ss.length?Math.round(gl.reduce((a,c)=>a+ss.filter(st=>markOf(j,c.id,st.id)).length,0)*100/(gl.length*ss.length)):0;
+    const card=h("div",{class:"panel stack",style:"gap:10px;padding:12px"});
+    card.append(h("div",{style:"display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap"},h("strong",{style:"font-size:1.2rem"},pullShort({pull:pk})+" · "+gl.length+" cable"+(gl.length>1?"s":"")),h("span",{class:"status"},[cab?"Cabinet "+cab:"",sys].filter(Boolean).join(" · "))),
+      h("div",{class:"stack",style:"gap:2px"},ss.map(st=>{const n=gl.filter(c=>markOf(j,c.id,st.id)).length;return h("div",{class:"pr"},h("span",{class:"n"},st.name),h("span",{class:"bar"},h("i",{style:"width:"+Math.round(n*100/gl.length)+"%"})),h("span",{class:"c"},n+"/"+gl.length),h("span"));})));
+    /* compact cable list: number, device, where it goes */
+    card.append(h("div",{style:"display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:4px"},gl.map(c=>{const n=ss.filter(st=>markOf(j,c.id,st.id)).length,full=n===ss.length&&ss.length;
+      const where=c.from&&c.to?c.from+" → "+c.to:c.from||c.to||"";
+      return h("div",{style:"border:1px solid "+(full?"var(--ok)":"var(--line)")+";border-radius:8px;padding:4px 8px;line-height:1.25"+(full?";background:color-mix(in srgb,var(--ok) 12%,transparent)":"")},
+        h("div",{style:"display:flex;justify-content:space-between;gap:6px"},h("strong",{class:"mono"},short(c)),h("span",{class:"status",style:"margin:0"},full?"✓":n+"/"+ss.length)),
+        where?h("div",{class:"status",style:"margin:0;font-size:.8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap",title:where},where):null);})));
+    /* notes for pullers */
+    {const nl=noteLines(j,pullNotes(j,pk),()=>{closeSheet();setTimeout(()=>{notesSheet(jid,{cab,sys,pull:pk});sheetBack=()=>pullView(jid,{cab,sys,pull:pk});},60);});
+      card.append(h("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:8px"},h("span",{class:"flabel",style:"margin:0"},"Notes"),
+        CAN_POST()?h("button",{type:"button",class:"btn ghost small",onclick:()=>{closeSheet();setTimeout(()=>{notesSheet(jid,{cab,sys,pull:pk});sheetBack=()=>pullView(jid,{cab,sys,pull:pk});},60);}},"📝 Add note"):null),
+        nl||h("p",{class:"status",style:"margin:0"},"No notes for this row."));}
+    /* one tap per step */
+    if(CAN_POST()&&ss.length){const inRow=c=>c.pull===pk&&(c.rack||"")===cab&&(c.type||"")===sys;
+      card.append(h("div",{class:"flabel",style:"margin:0"},"Check off the whole row"),h("div",{class:"pvBtns",style:"display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px"},ss.map(st=>{
+        const n=gl.filter(c=>markOf(j,c.id,st.id)).length,all=n===gl.length,lbl=st.name===st.name.toUpperCase()?st.name:st.name.toLowerCase();
+        if(scan.has(st.id))return h("button",{type:"button",class:"btn ghost",style:"padding:12px",onclick:()=>scanTodoSheet(jid,st.id,inRow)},(all?"✓ ":"📷 ")+st.name+" "+n+"/"+gl.length);
+        if(bulk.has(st.id)&&!all)return h("button",{type:"button",class:"btn",style:"padding:12px",onclick:()=>bulkSignOff(jid,st.id,inRow)},"✍ All "+lbl+" ("+(gl.length-n)+")");
+        return h("button",{type:"button",class:"btn"+(all?" ghost":""),style:"padding:12px"+(all?";border-color:var(--ok);color:var(--ok)":""),onclick:()=>{
+          if(all){confirmBox("Un-check "+st.name+"?","Takes "+st.name.toLowerCase()+" off all "+gl.length+" cables in "+pullShort({pull:pk})+".","Un-check",()=>setMarks(j,gl.map(c=>[c.id,st.id]),false));return;}
+          setMarks(j,gl.filter(c=>!markOf(j,c.id,st.id)).map(c=>[c.id,st.id]),true);toast(pullShort({pull:pk})+": all "+lbl);}},
+          all?"✓ All "+lbl:"All "+lbl+" ("+(gl.length-n)+" left)");})));}
+    card.append(h("button",{type:"button",class:"linkbtn",style:"justify-self:start",onclick:()=>{const p=pk;closeSheet();setTimeout(()=>{trackGroup="pull";try{localStorage.setItem("ctGroup","pull");}catch(e){}openGrp.add(p);cableTracker(jid,"",{cab,sys});},60);}},"Open these cables one by one ›"));
+    box.append(card);}
+  openView("Work a row · "+job().name,[box]);$(".sheet").classList.add("wide");liveSheet=draw;draw();}
 function notesSheet(jid,pre){pre=pre||{};
   const job=()=>S.jobs.find(x=>x.id===jid);if(!job())return;
   let sev="fyi",cab=pre.cab||"",sys=pre.sys||"",pull=pre.pull||"",cable=pre.cable||"",order="sev",view="all",showDone=false,busy=false,editId="",fixOn=false;const pics=[],fixTo=new Set();
