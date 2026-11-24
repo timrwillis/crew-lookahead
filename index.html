@@ -5319,7 +5319,7 @@ function cableEditor(j){
   function grpOf(){const m=new Map();cables.forEach((c,i)=>{const r=(c.rack||"").trim()||NOCAB,t=(c.type||"").trim()||NOSYS;if(!m.has(r))m.set(r,new Map());const g=m.get(r);if(!g.has(t))g.set(t,[]);g.get(t).push(i);});
     return [...m.entries()].sort((a,b)=>a[0]===NOCAB?1:b[0]===NOCAB?-1:natCmp(a[0],b[0])).map(([r,g])=>[r,[...g.entries()].sort((a,b)=>sysRank({sysOrder},a[0])-sysRank({sysOrder},b[0])||natCmp(a[0],b[0]))]);}
   function drawCables(){cabBox.textContent="";cabCount.textContent=cables.length+" cable"+(cables.length===1?"":"s");
-    if(!cables.length){cabBox.append(h("div",{class:"status"},"No cables yet. Import a spreadsheet, paste a list, or make a range below."));return;}
+    if(!cables.length)cabBox.append(h("div",{class:"status"},"No cables yet. Type a cabinet and a system below and tap + Add, or import a spreadsheet, paste a list, or make a range."));
     const groups=grpOf();
     groups.forEach(([r,syss])=>{const n=syss.reduce((a,[,ix])=>a+ix.length,0),open=openCabs.has(r)||groups.length===1;
       const card=h("div",{class:"cgcab"+(open?" open":"")});
@@ -6353,18 +6353,29 @@ function organizeByCabinet(j){
   const syss=systemsByCab(j,cabs);
   const cur=stepsOf(j).map(s=>({id:s.id,name:s.name,split:s.split}));
   const steps=cur.length&&!(cur.length===5&&cur[0].name==="Pulled"&&!cablesOf(j).some(c=>cur.some(s=>markOf(j,c.id,s.id))))?cur:CAB_STEPS_DEFAULT.map(n=>({name:n}));
-  const nT=cabs.reduce((a,c)=>a+syss[c].length,0);
-  openSheet("Set up by cabinet · "+j.name,[
-    h("div",{class:"field full"},h("p",{style:"margin:0"},h("strong",{},cabs.length+" cabinets × their systems = "+nT+" tasks")),
-      h("p",{class:"status",style:"margin:0"},cabs.map(c=>c+": "+syss[c].join(", ")).join(" · "))),
+  /* systems per cabinet: tap ✕ to drop one, type to add one (BMS, Cameras, WAPs…) */
+  const sysBox=h("div",{class:"field full stack",style:"gap:8px"});
+  const sugg=[...new Set([...sysOrderOf(j),"BMS","Cameras","WAPs"])];
+  function drawSys(){sysBox.textContent="";const nT=cabs.reduce((a,c)=>a+syss[c].length,0);
+    sysBox.append(h("p",{style:"margin:0"},h("strong",{},cabs.length+" cabinet"+(cabs.length>1?"s":"")+" × their systems = "+nT+" task"+(nT===1?"":"s"))),
+      h("datalist",{id:"obcSys"},sugg.map(x=>h("option",{value:x}))));
+    cabs.forEach(cb=>{const inp=h("input",{type:"text",placeholder:"+ Add a system",list:"obcSys","aria-label":"Add a system to "+cb,style:"width:150px"});
+      const add=()=>{const v=sysName(inp.value);if(v&&!syss[cb].includes(v))syss[cb].push(v);drawSys();};
+      inp.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();add();}});inp.addEventListener("change",add);
+      sysBox.append(h("div",{style:"display:flex;gap:6px;flex-wrap:wrap;align-items:center"},h("strong",{style:"min-width:64px"},cb),
+        syss[cb].map((x,i)=>h("span",{class:"chip"},x,h("button",{type:"button",class:"iconbtn","aria-label":"Remove "+x+" from "+cb,onclick:()=>{syss[cb].splice(i,1);drawSys();}},"✕"))),
+        sugg.filter(x=>!syss[cb].includes(x)).slice(0,4).map(x=>h("button",{type:"button",class:"chipbtn",onclick:()=>{syss[cb].push(x);drawSys();}},"+ "+x)),inp));});}
+  drawSys();
+  openSheet("Set up by cabinet · "+j.name,[sysBox,
     h("div",{class:"field full"},h("span",{class:"flabel"},"Steps each system goes through"),stepListEditor(steps)),
     h("p",{class:"status full",style:"margin:0"},"This replaces the job's current phases and tasks. Cables, checked-off steps and the job's crew stay. You can undo it from the job's version history.")],
     async()=>{const ss=steps.filter(x=>(x.name||"").trim());if(!ss.length){formErr("Add at least one step.");return false;}
+      if(!cabs.some(c=>syss[c].length)){formErr("Add at least one system to a cabinet.");return false;}
       const nid=p=>p+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
       const st=ss.map(x=>({id:x.id||nid("s"),name:x.name.trim(),split:!!x.split}));
       const plan=cabSysPlan(cabs,syss);
       await saveVersion(j,"Before cabinet setup");
-      await db.collection("jobs").doc(j.id).update({phases:plan.phases,tasks:plan.tasks,steps:st,cabinets:cabs,kind:j.kind||"cat6",updatedAt:Date.now()});
+      await db.collection("jobs").doc(j.id).update({phases:plan.phases,tasks:plan.tasks,steps:st,cabinets:cabs,kind:j.kind||"cat6",sysOrder:[...new Set([...sysOrderOf(j),...cabs.flatMap(c=>syss[c])])],updatedAt:Date.now()});
       logEvent("Set up by cabinet: "+j.name+" ("+plan.tasks.length+" tasks)",{ev:"cables",jobId:j.id});});
   $(".sheet").classList.add("wide");}
 
