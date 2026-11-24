@@ -8,8 +8,15 @@ Live at https://timrwillis.github.io/crew-lookahead (GitHub Pages from `main` of
 - `firestore.rules` — Firebase security rules. Tim pastes these into Firebase Console → Firestore → Rules by hand after every change. Always tell him when rules changed.
 - `firebase-config.js` — public Firebase web config (project `workflow-98636`).
 - `sw.js` — service worker (notifications, install).
-- `practice.js` — Practice board: loaded only with `?practice=1` (`&as=crew` = tech view). Swaps `window.firebase` for an in-browser fake saved in localStorage `cl_practice_db_v1`, seeded with made-up crew/jobs (public file: never real names or sites). `window.CL_PRACTICE` {reset,exit,switchTo}; notifications and the setup popup are off in practice. Entry: avatar sheet → 🧪 Practice board (managers). If you add Firestore calls the fake doesn't support, add them there.
+- `practice.js` — Practice board: loaded only with `?practice=1` (`&as=crew` = tech view, `&as=new` = brand-new user with no company). Swaps `window.firebase` for an in-browser fake saved in localStorage `cl_practice_db_v2`, seeded with a made-up company `po`/crew `pc` and crew/jobs (public file: never real names or sites). `window.CL_PRACTICE` {reset,exit,switchTo}; notifications and the setup popup are off in practice. Entry: avatar sheet → 🧪 Practice board (managers). If you add Firestore calls the fake doesn't support, add them there.
 - `import-data.json` — only `hoursPlan` now. Never put names or site info here: it's public.
+
+## Companies and crews (Nov 2026, for selling)
+- Data layer: `RAWDB` = real Firestore; `db = scopeDb(RAWDB)` prefixes every path with `BASE` (`orgs/<o>/crews/<c>/`, or "" for the original top-level "legacy" board). `feeds` stay global (`GLOBAL_COLS`). Use `RAWDB` only for org/crew/users docs.
+- `orgs/<o>` {name, ownerUid}; `orgs/<o>/crews/<c>` {name, by, moving}; a crew holds a full board (team/config, team/roles, team/crew, people, jobs…). `users/<uid>` {boards:{"o~c":{org,crew,at}}, cur}.
+- `pickBoard()` in `startSession`: `?join=o~c` invite adds the board; else users.cur; else legacy if the top-level board exists and hasn't moved (`team/config.movedTo` → everyone is sent to the new board); else `noBoard` → `renderWelcome` (start a company). `orgOwner` = owner on every crew (`isOwner` includes it).
+- Avatar sheet `boardsBlock()`: switch board (`switchBoard` reloads), `inviteSheet` (link; joiners land in Waiting), `addCrewSheet` (org owner), `moveSheet` (legacy owner copies `MOVE_COLS` + team docs into a new company with crew `moving:true`, then sets `movedTo`). Rules: nested `match /orgs/{o}/crews/{c}` copy of the board rules with `c`-prefixed function names, plus `/{col}/{id}` create while `moving()`.
+- User-facing text says `TIM()` (the board owner's first name, else "your lead"), never a hard-coded "Tim".
 
 ## App basics
 - `h(tag, attrs, ...kids)` builds DOM (no html attr). State in `S` (Firestore onSnapshot per collection). `render()` / `schedule()`; sheets via `openSheet(title, fields, onSave)` / `openView(title, nodes)` / `closeSheet()`; `liveSheet` redraws an open sheet.

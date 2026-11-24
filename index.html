@@ -861,6 +861,7 @@ small.needwarn{color:var(--over)!important;font-weight:600}small.needok{color:va
 .qcgo{width:100%;min-height:52px;font-size:1.02rem;margin:6px 0}
 .nudge{display:grid;gap:2px;width:100%;text-align:left;padding:14px;border-radius:14px;border:2px solid var(--likely);background:color-mix(in srgb,var(--likely) 14%,var(--panel));color:var(--ink);font:inherit;margin-bottom:10px;cursor:pointer}
 #practiceBar{position:relative;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;padding:6px 10px;background:#f5b301;color:#1a1300;font-size:13px}#practiceBar span{opacity:.85}#practiceBar .pb-btns{margin-left:auto;display:flex;gap:6px;opacity:1}#practiceBar button{border:0;border-radius:6px;padding:4px 8px;background:#1a1300;color:#f5b301;font-weight:600}
+.bdblock{padding:10px;border:1px solid var(--line);border-radius:12px}.bdrow{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px;border:1px solid var(--line);border-radius:10px;background:none;color:inherit;text-align:left;font:inherit}.bdrow span:first-child{display:flex;flex-direction:column}.bdrow small{opacity:.7}.bdrow.on{border-color:var(--accent,#2563eb)}.invlink{padding:10px;border-radius:8px;background:var(--soft,rgba(127,127,127,.12));word-break:break-all;font-size:13px}.welcome{max-width:480px;margin:20px auto}
 </style>
 </head>
 <body>
@@ -956,12 +957,107 @@ function confirmBox(title,msg,okLabel,onOk){const wrap=h("div",{class:"popwrap"}
   wrap.append(h("div",{class:"pop stack",role:"alertdialog","aria-modal":"true","aria-label":title,style:"gap:10px"},h("h3",{style:"margin:0"},title),h("p",{style:"margin:0"},msg),
     h("div",{style:"display:flex;justify-content:flex-end;gap:8px"},h("button",{type:"button",class:"btn ghost",onclick:close},"Cancel"),ok)));
   wrap.addEventListener("click",e=>{if(e.target===wrap)close();});document.body.append(wrap);setTimeout(()=>ok.focus(),30);}
-function writeErr(err){const c=err&&err.code;toast(c==="permission-denied"?(isOwner?"Firebase blocked this. Your database rules are out of date: paste the latest firestore.rules into Firebase → Firestore → Rules and tap Publish.":MGR()?"Firebase blocked this. Ask Tim to update the database rules.":"You don't have permission to change that. Ask Tim or the superintendent."):"Couldn't save. Check your connection and try again.");}
+function writeErr(err){const c=err&&err.code;toast(c==="permission-denied"?(isOwner?"Firebase blocked this. Your database rules are out of date: paste the latest firestore.rules into Firebase → Firestore → Rules and tap Publish.":MGR()?"Firebase blocked this. Ask "+TIM()+" to update the database rules.":"You don't have permission to change that. Ask "+TIM()+" or the superintendent."):"Couldn't save. Check your connection and try again.");}
 
 /* ---------- state ---------- */
 const S={jobs:[],projects:[],files:[],trash:[],techs:[],timeoff:[],messages:[],material:[],asks:[],people:[],offreq:[]};
 let ownerUid="",db=null,auth=null,myId=null,canWrite=true,teamLoaded=false,dataOn=false,me_={},unsubs=[],pendingName="",names={},roles={},isOwner=false,crewDoc={members:{},declined:{}};
 function roleFor(id){if(!id)return"pending";const r=(roles[id]||{}).role;if(r==="boss"||r==="lead")return r;if(r==="crew"||crewDoc.members[id])return"crew";return"pending";}
+/* ---------- companies and crews ----------
+   Each company (orgs/<o>) has crews (orgs/<o>/crews/<c>); a crew's whole board lives under that path.
+   users/<uid> = this person's list of boards {boards:{"o~c":{org,crew,at}},cur}. Live Google Sheet feeds stay at the top (random keys).
+   The original board at the top level is the "legacy" board until its owner moves it into a company (team/config.movedTo). */
+let BASE="",RAWDB=null,BOARD=null,noBoard=false,orgDoc=null,myBoards={},orgOwner=false;
+const GLOBAL_COLS=new Set(["feeds"]);
+const pre=p=>GLOBAL_COLS.has(String(p).split("/")[0])?p:BASE+p;
+function scopeDb(r){return{collection:n=>r.collection(pre(n)),doc:p=>r.doc(pre(p)),batch:()=>r.batch(),runTransaction:f=>r.runTransaction(f),enablePersistence:o=>r.enablePersistence(o)};}
+const boardKey=(o,c)=>o+"~"+c;
+const crewBase=(o,c)=>"orgs/"+o+"/crews/"+c+"/";
+const newId=()=>RAWDB.collection("orgs").doc().id;
+async function addBoard(o,c,set){const os=await RAWDB.doc("orgs/"+o).get(),cs=await RAWDB.doc("orgs/"+o+"/crews/"+c).get();
+  if(!os.exists||!cs.exists)throw new Error("That invite link doesn't point to a crew anymore.");
+  const k=boardKey(o,c),b={org:(os.data()||{}).name||"Company",crew:(cs.data()||{}).name||"Crew",at:Date.now()};myBoards[k]=b;
+  await RAWDB.doc("users/"+myId).set(Object.assign({boards:{[k]:b}},set?{cur:k}:{}),{merge:true});return k;}
+/* decide which board to open; returns false when the person has none yet (welcome screen) */
+async function pickBoard(){BASE="";BOARD=null;noBoard=false;orgDoc=null;orgOwner=false;myBoards={};
+  const qs=new URLSearchParams(location.search),join=qs.get("join");let cur="";
+  try{const us=await RAWDB.doc("users/"+myId).get();if(us.exists){myBoards=(us.data()||{}).boards||{};cur=(us.data()||{}).cur||"";}}catch(e){}
+  if(join&&/^[\w-]+~[\w-]+$/.test(join)){try{const [o,c]=join.split("~");cur=await addBoard(o,c,true);toast("You joined "+myBoards[cur].crew+". Fill in your profile so they can approve you.");}catch(e){toast(e.message||"Couldn't open that invite link.");}
+    qs.delete("join");history.replaceState(null,"",location.pathname+(qs.toString()?"?"+qs:"")+location.hash);}
+  if(cur==="legacy"){const lg=await legacyState();if(lg.ok&&!lg.moved)return true;cur="";}
+  if(!cur||!myBoards[cur]){const lg=await legacyState();
+    if(lg.moved&&/^[\w-]+~[\w-]+$/.test(lg.moved)){try{const [o,c]=lg.moved.split("~");cur=await addBoard(o,c,true);}catch(e){}}
+    else if(lg.ok&&!Object.keys(myBoards).length){myBoards.legacy={org:"",crew:"Current board"};return true;}
+    if(!cur||!myBoards[cur])cur=Object.keys(myBoards).find(k=>k!=="legacy")||"";}
+  if(!cur){noBoard=true;return false;}
+  const [o,c]=cur.split("~");BOARD={o,c,key:cur,org:myBoards[cur].org,crew:myBoards[cur].crew};BASE=crewBase(o,c);
+  try{const os=await RAWDB.doc("orgs/"+o).get();orgDoc=os.exists?os.data():null;orgOwner=!!(orgDoc&&orgDoc.ownerUid===myId);
+    const cs=await RAWDB.doc("orgs/"+o+"/crews/"+c).get();if(cs.exists){BOARD.crew=(cs.data()||{}).name||BOARD.crew;}if(orgDoc)BOARD.org=orgDoc.name||BOARD.org;}catch(e){}
+  return true;}
+/* the original top-level board: is this person on it, and has it moved? */
+async function legacyState(){const out={ok:false,moved:""};try{const c=await RAWDB.doc("team/config").get();if(!c.exists)return out;const d=c.data()||{};out.moved=d.movedTo||"";
+  if(d.ownerUid===myId){out.ok=true;return out;}
+  try{const r=await RAWDB.doc("team/roles").get();if(r.exists&&((r.data()||{}).roles||{})[myId])out.ok=true;}catch(e){}
+  if(!out.ok)try{const m=await RAWDB.doc("team/crew").get();if(m.exists&&((m.data()||{}).members||{})[myId])out.ok=true;}catch(e){}
+  if(!out.ok&&!out.moved)out.ok=true;/* not moved yet: keep today's behavior (new people wait for approval) */
+  }catch(e){}return out;}
+function switchBoard(k){RAWDB.doc("users/"+myId).set({cur:k},{merge:true}).then(()=>location.reload()).catch(writeErr);}
+async function createCrew(o,crewName,leadName){const c=newId(),b=crewBase(o,c),now=Date.now(),bt=RAWDB.batch();
+  bt.set(RAWDB.doc("orgs/"+o+"/crews/"+c),{name:crewName,by:myId,createdAt:now});
+  bt.set(RAWDB.doc(b+"team/config"),{ownerUid:myId,createdAt:now});
+  bt.set(RAWDB.doc(b+"team/roles"),{roles:{[myId]:{role:"lead",techId:""}},updatedAt:now});
+  bt.set(RAWDB.doc(b+"team/crew"),{members:{},declined:{},updatedAt:now});
+  bt.set(RAWDB.doc(b+"people/"+myId),{name:leadName||meName(),joinedAt:now},{merge:true});
+  await bt.commit();return c;}
+async function createCompany(orgName,crewName,leadName){const o=newId();
+  await RAWDB.doc("orgs/"+o).set({name:orgName,ownerUid:myId,createdAt:Date.now()});
+  const c=await createCrew(o,crewName,leadName);await addBoard(o,c,true);return {o,c};}
+function renderWelcome(v){
+  const go=async e=>{const b=e.currentTarget;const on=document.getElementById("wOrg").value.trim(),cn=document.getElementById("wCrew").value.trim(),nm=document.getElementById("wName").value.trim();
+    if(!on||!cn||!nm){toast("Fill in all three.");return;}b.disabled=true;try{await createCompany(on,cn,nm);location.reload();}catch(err){b.disabled=false;writeErr(err);}};
+  v.append(h("div",{class:"panel stack welcome"},h("h2",{},"Welcome to Crew Lookahead"),
+    h("p",{class:"status",style:"margin:0"},"Joining a crew? Open the invite link your foreman sent you. It puts you on the right board."),
+    h("h3",{style:"margin:10px 0 0"},"Or start your own"),
+    field({id:"wOrg",label:"Company name",placeholder:"e.g. Acme Electric",full:true}),
+    field({id:"wCrew",label:"Your crew",placeholder:"e.g. Data center crew",full:true}),
+    field({id:"wName",label:"Your name",value:meName()||"",full:true}),
+    h("button",{type:"button",class:"btn",onclick:go},"Start my company")));}
+function inviteLink(){return BOARD?location.origin+location.pathname+"?join="+BOARD.key:"";}
+function inviteSheet(){const link=inviteLink();
+  openView("Invite to "+(BOARD?BOARD.crew:"this crew"),[h("div",{class:"full stack"},
+    h("p",{class:"status",style:"margin:0"},"Send this link to someone on the crew. They sign in, fill in their profile, and show up under Crew → Waiting for you to approve. The link alone doesn't let anyone see the board."),
+    h("div",{class:"invlink"},link),
+    h("div",{style:"display:flex;gap:8px;flex-wrap:wrap"},
+      h("button",{type:"button",class:"btn",onclick:async()=>{try{if(navigator.share&&isPhone()){await navigator.share({title:"Join "+BOARD.crew,text:"Join "+BOARD.crew+" on Crew Lookahead:",url:link});return;}}catch(e){if(e&&e.name==="AbortError")return;}copyText(link,"Link copied. Paste it in a text.");}},"📤 Send link"),
+      h("button",{type:"button",class:"btn ghost",onclick:()=>copyText(link,"Link copied")},"Copy")))]);}
+function boardsBlock(){const ks=Object.keys(myBoards);
+  const rows=ks.map(k=>{const b=myBoards[k],on=BOARD?BOARD.key===k:k==="legacy";return h("button",{type:"button",class:"bdrow"+(on?" on":""),onclick:()=>{if(!on)switchBoard(k);}},h("span",{},h("strong",{},b.crew||"Crew"),b.org?h("small",{},b.org):null),on?h("span",{class:"chip"},"Open"):h("span",{class:"status"},"Switch"));});
+  return h("div",{class:"stack bdblock"},h("div",{class:"lbl"},BOARD?(BOARD.org||"Company"):"Board"),
+    ks.length>1?h("div",{class:"stack"},rows):h("div",{class:"status"},BOARD?BOARD.crew:"Current board"),
+    BOARD&&MGR()?h("button",{type:"button",class:"btn ghost",onclick:()=>{closeSheet();setTimeout(inviteSheet,60);}},"🔗 Invite people to "+BOARD.crew):null,
+    BOARD&&orgOwner?h("button",{type:"button",class:"btn ghost",onclick:()=>{closeSheet();setTimeout(addCrewSheet,60);}},"＋ Add a crew to "+(BOARD.org||"the company")):null,
+    !BOARD&&isOwner&&!window.CL_PRACTICE?h("button",{type:"button",class:"btn ghost",onclick:()=>{closeSheet();setTimeout(moveSheet,60);}},"🏢 Move this board into a company"):null);}
+function addCrewSheet(){openSheet("Add a crew",[field({id:"acName",label:"Crew name",placeholder:"e.g. Building 3 crew",full:true}),
+  h("p",{class:"full status",style:"margin:0"},"You'll be the lead on it. Invite its foreman with the crew's invite link, then make him a Lead under Crew → People.")],
+  async()=>{const n=val("acName");if(!n){formErr("Name the crew.");return false;}const c=await createCrew(BOARD.o,n,meName());await addBoard(BOARD.o,c,true);location.reload();});}
+/* copy the whole top-level board into a new company + crew, then point everyone there */
+const MOVE_COLS=["jobs","projects","files","fileparts","trash","techs","timeoff","messages","material","asks","people","offreq","profiles","attendance"];
+function moveSheet(){openSheet("Move this board into a company",[
+  h("p",{class:"full status",style:"margin:0"},"Copies every job, person, message and file into a company space so you can add more crews and sell the app later. The old copy stays as a backup. Everyone on the crew is moved over automatically next time they open the app. Paste the new database rules first."),
+  field({id:"mvOrg",label:"Company name",full:true}),field({id:"mvCrew",label:"This crew's name",value:"Tim's crew",full:true}),
+  h("div",{class:"full status",id:"mvLog"})],
+  async()=>{const on=val("mvOrg"),cn=val("mvCrew");if(!on||!cn){formErr("Fill in both names.");return false;}
+    const log=t=>{const e=document.getElementById("mvLog");if(e)e.textContent=t;};
+    try{const o=newId(),c=newId(),b=crewBase(o,c),now=Date.now();
+      await RAWDB.doc("orgs/"+o).set({name:on,ownerUid:myId,createdAt:now});
+      await RAWDB.doc("orgs/"+o+"/crews/"+c).set({name:cn,by:myId,createdAt:now,movedFrom:"top",moving:true});
+      for(const t of ["config","roles","crew","hooks"]){try{const s=await RAWDB.doc("team/"+t).get();if(s.exists)await RAWDB.doc(b+"team/"+t).set(Object.assign({},s.data(),t==="config"?{ownerUid:myId,movedTo:null}:{}));}catch(e){}}
+      let n=0;for(const col of MOVE_COLS){let snap;try{snap=await RAWDB.collection(col).get();}catch(e){continue;}
+        for(let i=0;i<snap.docs.length;i+=300){const bt=RAWDB.batch();snap.docs.slice(i,i+300).forEach(d=>bt.set(RAWDB.doc(b+col+"/"+d.id),d.data()));await bt.commit();n+=Math.min(300,snap.docs.length-i);log("Copied "+n+" items…");}}
+      await RAWDB.doc("orgs/"+o+"/crews/"+c).set({moving:false},{merge:true});await addBoard(o,c,true);await RAWDB.doc("team/config").set({movedTo:boardKey(o,c),movedAt:Date.now()},{merge:true});
+      toast("Moved "+n+" items. Opening the new board…");setTimeout(()=>location.reload(),900);}
+    catch(err){writeErr(err);return false;}});}
+const TIM=()=>{const n=(ownerUid&&((typeof techByUid==="function"&&techByUid(ownerUid)||{}).name||names[ownerUid]))||"";return n?n.split(" ")[0]:"your lead";};
 const myRole=()=>isOwner?"lead":roleFor(myId);
 /* temporary helpers: access ends after their last day */
 const endMs=d=>d?new Date(d+"T23:59:59").getTime():0;
@@ -1328,7 +1424,7 @@ function feedbackList(){const box=h("div",{class:"full stack",style:"gap:8px"});
   draw();openView("💬 Feedback",[box]);liveSheet=draw;}
 function acctSheet(){
   const fbN=S.messages.filter(m=>isFeedback(m)&&!m.done).length;
-  openView("You",[h("div",{class:"full stack"},h("div",{class:"status"},"Signed in as "+meName()),alertsToggle(),
+  openView("You",[h("div",{class:"full stack"},h("div",{class:"status"},"Signed in as "+meName()),boardsBlock(),alertsToggle(),
     h("button",{type:"button",class:"btn ghost",onclick:()=>feedbackForm()},"💬 Send feedback"),
     MGR()?h("button",{type:"button",class:"btn ghost",onclick:()=>{closeSheet();setTimeout(feedbackList,60);}},"📥 Crew feedback"+(fbN?" ("+fbN+" new)":"")):null,
     h("button",{type:"button",class:"btn ghost",onclick:()=>{closeSheet();setTimeout(()=>setupSheet(false),60);}},"📲 Set up this "+(isPhone()?"phone":"device")+(needInstall()||needAlerts()?" · not done":"")),
@@ -1369,10 +1465,11 @@ function render(){memo={};renderTabs();renderNotifPill();const v=$("#view");
   if(tab==="chat"&&chatEl&&v.contains(chatEl)&&teamLoaded&&myId&&!expiredUid(myId)){markTabSeen("chat");drawChat();return;}document.querySelector(".wrap").classList.toggle("wide",tab==="home"||tab==="board");const y=window.scrollY;v.textContent="";
   const tabsEl=$("#tabs");
   if(!myId){tabsEl.hidden=true;return;}
+  if(noBoard){tabsEl.hidden=true;renderWelcome(v);return;}
   if(!teamLoaded){tabsEl.hidden=true;v.append(h("div",{class:"empty"},"Loading the board…"));return;}
   if(!expiredUid(myId)&&roleFor(myId)!=="pending")maybeSetup();
   if(!isOwner&&myRole()==="pending"){tabsEl.hidden=true;renderPending(v);return;}
-  if(expiredUid(myId)){tabsEl.hidden=true;const u=accessEnd(myId);v.append(h("div",{class:"empty"},h("strong",{},"Your helper access has ended"),"It ran through "+fmt(new Date(u),{weekday:"short",month:"short",day:"numeric"})+". Thanks for the help! If you're back on the crew, ask Tim or the superintendent to turn it back on."));return;}
+  if(expiredUid(myId)){tabsEl.hidden=true;const u=accessEnd(myId);v.append(h("div",{class:"empty"},h("strong",{},"Your helper access has ended"),"It ran through "+fmt(new Date(u),{weekday:"short",month:"short",day:"numeric"})+". Thanks for the help! If you're back on the crew, ask "+TIM()+" or the superintendent to turn it back on."));return;}
   tabsEl.hidden=false;
   {const gs=groupStrip();if(gs)v.append(gs);}
   if(focusN&&focusN.tab===tab){const fb=focusBar();if(fb)v.append(fb);}
@@ -1659,7 +1756,7 @@ function projectForm(p){
       const clean=locs.map(l=>({customer:(l.customer||"").trim(),site:(l.site||"").trim(),zone:(l.zone||"").trim()})).filter(l=>l.customer||l.site||l.zone);
       const body={name,locs:clean,notes:val("pjNotes"),updatedAt:Date.now()};
       try{if(p)await db.collection("projects").doc(p.id).update(body);else{body.by=myId||"";body.createdAt=Date.now();await db.collection("projects").add(body);}}
-      catch(e){if(e&&e.code==="permission-denied"){formErr("Projects aren't turned on in Firebase yet. Tim needs to update the database rules (see the setup note).");return false;}throw e;}},
+      catch(e){if(e&&e.code==="permission-denied"){formErr("Projects aren't turned on in Firebase yet. "+TIM()+" needs to update the database rules (see the setup note).");return false;}throw e;}},
     p?()=>softDelete("projects",p.id,p.name):null,ro);
 }
 
@@ -2674,7 +2771,7 @@ function attBtns(tc,d){const a=attOf(tc.id,d),st=a?a.s:"";
   return h("span",{class:"attbtns"},
     h("button",{type:"button",class:"attb here","aria-pressed":String(st==="here"),"aria-label":tc.name+" is here",onclick:()=>setAtt(tc.id,d,st==="here"?null:"here")},"✓ Here"),
     h("button",{type:"button",class:"attb out","aria-pressed":String(st==="out"),"aria-label":tc.name+" is not here",onclick:()=>setAtt(tc.id,d,st==="out"?null:"out")},"✗ Out"));}
-function rollBar(d){if(attErr)return h("div",{class:"rollbar"},h("span",{class:"status",style:"color:var(--over)"},isOwner?"Roll call needs the new database rules: paste firestore.rules into Firebase → Firestore → Rules and tap Publish.":"Roll call isn't turned on yet. Ask Tim to update the database rules."));
+function rollBar(d){if(attErr)return h("div",{class:"rollbar"},h("span",{class:"status",style:"color:var(--over)"},isOwner?"Roll call needs the new database rules: paste firestore.rules into Firebase → Firestore → Rules and tap Publish.":"Roll call isn't turned on yet. Ask "+TIM()+" to update the database rules."));
   const r=rollCall(d),n=r.here.length+r.out.length+r.unk.length;
   return h("div",{class:"rollbar"},h("span",{},h("b",{},"Roll call: "),r.here.length+" here"+(r.out.length?" · "+r.out.length+" not here":"")+(r.unk.length?" · "+r.unk.length+" not checked":n?" · all checked":"")),
     h("span",{style:"display:flex;gap:6px;flex-wrap:wrap"},r.unk.length?h("button",{type:"button",class:"btn small",onclick:()=>setAttMany(d,r.unk.map(t=>t.id),"here")},r.unk.length===n?"Everyone's here":"Rest are here"):null,
@@ -3134,7 +3231,7 @@ function renderTeam(v){
   const crewTxt="Crew can see the schedule, post messages and asks, update material counts, edit their own profile and request time off.";
   if(!MGR()){box.append(h("p",{class:"status",style:"margin:0"},myRole()==="crew"?crewTxt:"Once you're approved you can post messages and asks."),
       myTech()?h("div",{},h("button",{class:"btn ghost small",type:"button",onclick:()=>techForm(myTech())},"Edit my profile")):null);v.append(box);return;}
-  box.append(h("p",{class:"status",style:"margin:0"},"New people show up under Waiting after they open the board and fill in their profile. Only you"+(isOwner?" and the superintendent":", Tim and other leads")+" can approve them. "+(isOwner?"Only you can make someone a Superintendent or Lead.":"")));
+  box.append(h("p",{class:"status",style:"margin:0"},"New people show up under Waiting after they open the board and fill in their profile. Only you"+(isOwner?" and the superintendent":", "+TIM()+" and other leads")+" can approve them. "+(isOwner?"Only you can make someone a Superintendent or Lead.":"")));
   const techOf=id=>S.techs.find(x=>x.uid===id);
   const allWaiting=S.people.filter(p=>p.id!==myId&&roleFor(p.id)==="pending").sort((a,b)=>(b.joinedAt||0)-(a.joinedAt||0));
   const waiting=allWaiting.filter(p=>!crewDoc.declined[p.id]||showDeclined),nDec=allWaiting.filter(p=>crewDoc.declined[p.id]).length;
@@ -4706,7 +4803,7 @@ function liveSheetPanel(jid){const box=h("div",{class:"full stack"});
     if(!j.feedId){box.append(h("p",{style:"margin:0"},"Keep a Google Sheet filled with this job's cable data: every cable, its serials and QR codes, each step with the date and who did it, the check list, plus a history and a summary. It refreshes by itself every minute, or within seconds once you add the web app link."),
         h("p",{class:"status",style:"margin:0"},"This makes a private link. Anyone who has it can read this job's cable data (not change it), so share the Google Sheet like you'd share the file itself. You can turn it off or replace the link any time."),
         m?h("button",{type:"button",class:"btn",onclick:async e=>{e.currentTarget.disabled=true;const id=feedKey();
-          try{await db.collection("jobs").doc(j.id).update({feedId:id,updatedAt:Date.now()});j.feedId=id;await writeFeed(Object.assign({},j,{feedId:id}));logEvent(meName()+" turned on the live Google Sheet for "+j.name,{ev:"doc",jobId:j.id});draw();}catch(err){writeErr(err);draw();}}},"Turn on the live Google Sheet"):h("div",{class:"status"},"Ask Tim or the superintendent to turn this on."));return;}
+          try{await db.collection("jobs").doc(j.id).update({feedId:id,updatedAt:Date.now()});j.feedId=id;await writeFeed(Object.assign({},j,{feedId:id}));logEvent(meName()+" turned on the live Google Sheet for "+j.name,{ev:"doc",jobId:j.id});draw();}catch(err){writeErr(err);draw();}}},"Turn on the live Google Sheet"):h("div",{class:"status"},"Ask "+TIM()+" or the superintendent to turn this on."));return;}
     const code=feedScript(j);
     box.append(h("div",{class:"okline"},"✓ Live feed is on for "+j.name+"."),
       h("ol",{class:"steps",style:"margin:0;padding-left:20px;display:grid;gap:8px"},
@@ -6732,7 +6829,7 @@ function rechargeForm(){const ym=TODAY().slice(0,7),me=myTech();
     field({id:"rcNote",label:"Note",value:"",full:true,placeholder:"Optional"}),info];
   openSheet("Use recharge hours",nodes,async()=>{const techId=val("rcTech"),d=val("rcDate"),hrs=hrsVal("rcHrs");if(!techId||!d||!hrs){formErr("Pick who, the day and the hours.");return false;}
     const left=rechargeCap()-rechargeUsed(techId,d.slice(0,7));
-    if(hrs>left&&!MGR()){formErr("That's more than the "+Math.max(0,left)+" hrs left this month. Ask Tim or the superintendent.");return false;}
+    if(hrs>left&&!MGR()){formErr("That's more than the "+Math.max(0,left)+" hrs left this month. Ask "+TIM()+" or the superintendent.");return false;}
     const body={techId,start:d,end:d,type:"Recharge",hours:hrs,when:val("rcWhen")||"",note:val("rcNote")};
     const r=await addSelfOff(body,"Recharge",techName(techId)+" is using "+hrs+" recharge hr"+(hrs===1?"":"s")+" "+(d===TODAY()?"today":fmtS(d))+(body.when?" · "+body.when:""));if(r===false)return false;});
   ["rcTech","rcDate","rcHrs"].forEach(id=>{const e=document.getElementById(id);if(e)e.addEventListener(e.tagName==="SELECT"?"change":"input",upd);});upd();}
@@ -6837,7 +6934,7 @@ function matForm(m){
 function renderPending(v){
   const dec=crewDoc.declined[myId];
   v.append(h("div",{class:"panel stack"},h("h2",{},dec?"Not approved":"Waiting for approval"),
-    h("p",{class:"status",style:"margin:0"},dec?"Your request to join wasn't approved. Talk to Tim or the superintendent.":(me_.profileDone?"Your profile is in. Tim or the superintendent will approve you, and the board opens up as soon as they do.":"Welcome. Fill in your profile so Tim or the superintendent knows who you are.")),
+    h("p",{class:"status",style:"margin:0"},dec?"Your request to join wasn't approved. Talk to "+TIM()+" or the superintendent.":(me_.profileDone?"Your profile is in. "+TIM()+" or the superintendent will approve you, and the board opens up as soon as they do.":"Welcome. Fill in your profile so "+TIM()+" or the superintendent knows who you are.")),
     me_.profileDone?h("div",{class:"status"},[me_.name,me_.trade,me_.phone,(me_.skills||[]).join(", ")].filter(Boolean).join(" · ")):null,
     dec?null:h("div",{},h("button",{class:"btn",type:"button",onclick:pendingProfileForm},me_.profileDone?"Edit my profile":"Set up my profile"))));
 }
@@ -6871,7 +6968,7 @@ async function importOld(btn){btn.disabled=true;btn.textContent="Adding…";
     const hl=(Array.isArray(importData.holidays)?importData.holidays:[]).filter(x=>x.date&&!holidayOn(x.date));
     if(hl.length){hl.forEach(x=>setHoliday(x,true));n+=hl.length;logEvent("Holiday schedule added ("+hl.length+" days)",{ev:"hours"});}
     toast("Added "+n+" item"+(n===1?"":"s"));}
-  catch(e){btn.disabled=false;btn.textContent="Add them";toast(e&&e.code==="permission-denied"?"Only Tim, the superintendent or a lead can do this.":"Couldn't add them. Try again.");}}
+  catch(e){btn.disabled=false;btn.textContent="Add them";toast(e&&e.code==="permission-denied"?"Only "+TIM()+", the superintendent or a lead can do this.":"Couldn't add them. Try again.");}}
 
 /* ---------- names ---------- */
 function resolveNames(){let changed=false;S.people.forEach(p=>{const n=p.id===myId?"You":(p.name||"Someone");if(names[p.id]!==n){names[p.id]=n;changed=true;}});if(changed&&$("#scrim").hidden)render();}
@@ -6890,7 +6987,7 @@ function schedule(){if(pendingRender)return;pendingRender=requestAnimationFrame(
 document.addEventListener("focusout",()=>{if(schedule.later){schedule.later=false;setTimeout(()=>{const a=document.activeElement;if(!(a&&(a.tagName==="TEXTAREA"||a.tagName==="INPUT"))&&$("#scrim").hidden)render();},150);}});
 new MutationObserver(()=>{if($("#scrim").hidden&&schedule.later){schedule.later=false;render();}}).observe($("#scrim"),{attributes:true,attributeFilter:["hidden"]});
 
-function stopAll(){unsubs.forEach(u=>{try{u()}catch(e){}});unsubs=[];seenAlerts=null;asksLoaded=false;msgsLoaded=false;dataOn=false;teamLoaded=false;
+function stopAll(){unsubs.forEach(u=>{try{u()}catch(e){}});unsubs=[];seenAlerts=null;asksLoaded=false;msgsLoaded=false;dataOn=false;teamLoaded=false;noBoard=false;
   Object.keys(S).forEach(k=>S[k]=[]);ATT={};attErr=false;roles={};crewDoc={members:{},declined:{}};names={};me_={};isOwner=false;myId=null;}
 /* every time-off entry carries the person's login id so the database can show it to them and nobody else on the crew */
 const offSyncing=new Set();
@@ -6910,10 +7007,11 @@ async function startSession(u){
   myId=u.uid;canWrite=true;
   const nm=pendingName||u.displayName||(u.email||"").split("@")[0];pendingName="";
   $("#whoMe").textContent=nm;$("#signOut").hidden=false;
+  if(!await pickBoard()){teamLoaded=false;schedule();return;}
   const pr=db.doc("people/"+myId);
   try{const ps=await pr.get();if(!ps.exists)await pr.set({name:nm,email:u.email||"",joinedAt:Date.now()});else if(!ps.data().name)await pr.set({name:nm},{merge:true});}catch(e){}
   const cref=db.doc("team/config");
-  try{let c=await cref.get();if(!c.exists){try{await cref.set({ownerUid:myId,createdAt:Date.now()});}catch(e){}c=await cref.get();}ownerUid=c.exists?c.data().ownerUid||"":"";isOwner=!!(c.exists&&c.data().ownerUid===myId);}catch(e){isOwner=false;}
+  try{let c=await cref.get();if(!c.exists){try{await cref.set({ownerUid:myId,createdAt:Date.now()});}catch(e){}c=await cref.get();}ownerUid=c.exists?c.data().ownerUid||"":"";isOwner=!!(c.exists&&c.data().ownerUid===myId)||orgOwner;}catch(e){isOwner=orgOwner;}
   let gotRoles=false,gotCrew=false;
   const ready=()=>{if(gotRoles&&gotCrew&&!teamLoaded){teamLoaded=true;}startData();schedule();};
   const sid=myId,retry=(ref,ok,denied)=>{const go=()=>{if(myId!==sid)return;unsubs.push(ref.onSnapshot(ok,err=>{denied();if(err&&err.code==="permission-denied")setTimeout(go,20000);}));};go();};
@@ -6943,8 +7041,8 @@ $("#signOut").addEventListener("click",()=>{stopAll();auth.signOut();});
 const cfg=window.FIREBASE_CONFIG;
 if(!window.firebase||!cfg||!cfg.apiKey||/^PASTE/.test(cfg.apiKey)){$("#setup").hidden=false;$("#status").textContent="Not connected";}
 else{
-  firebase.initializeApp(cfg);auth=firebase.auth();db=firebase.firestore();
-  db.enablePersistence({synchronizeTabs:true}).catch(()=>{});
+  firebase.initializeApp(cfg);auth=firebase.auth();RAWDB=firebase.firestore();db=scopeDb(RAWDB);
+  RAWDB.enablePersistence({synchronizeTabs:true}).catch(()=>{});
   auth.getRedirectResult().catch(e=>loginErr(authMsg(e)));
   auth.onAuthStateChanged(u=>{stopAll();
     if(!u){$("#login").hidden=false;$("#signOut").hidden=true;$("#whoMe").textContent="";$("#status").textContent="Signed out";render();return;}

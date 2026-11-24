@@ -2,7 +2,7 @@
    saved in this device's storage only. Made-up crew and jobs; nothing reaches the real board.
    ?practice=1&as=crew shows the app the way a tech sees it. */
 (function(){
-const KEY="cl_practice_db_v1",AS=/[?&]as=crew/.test(location.search)?"crew":"lead";
+const KEY="cl_practice_db_v2",AS=(location.search.match(/[?&]as=(crew|new)/)||[])[1]||"lead";
 const clone=o=>o==null?o:JSON.parse(JSON.stringify(o));
 let DB={};try{DB=JSON.parse(localStorage.getItem(KEY)||"null")||null;}catch(e){DB=null;}
 const iso=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
@@ -27,9 +27,14 @@ function seed(){const T=new Date(),add=n=>{const d=new Date(T);d.setDate(d.getDa
   D["messages/m1"]={text:"📅 GC coordination · Trailer",kind:"meeting",to:[],by:"p-lead",at:now,remindOn:iso(T),remindAt:"09:30",dur:60,done:false};
   D["timeoff/o1"]={techId:"t6",uid:"",type:"PTO",start:add(1),end:add(1),by:"p-lead",at:now};
   D["material/m1"]={item:"Cat6 CMP blue",qty:3,unit:"box",min:5,per:1000};
-  return D;}
+  /* everything lives under a practice company + crew, like a real company board */
+  const B="orgs/po/crews/pc/",O={};Object.keys(D).forEach(k=>O[B+k]=D[k]);
+  O["orgs/po"]={name:"Practice Electric",ownerUid:"p-lead",createdAt:now};O["orgs/po/crews/pc"]={name:"Practice crew",by:"p-lead",createdAt:now};
+  const bd={"po~pc":{org:"Practice Electric",crew:"Practice crew",at:now}};O["users/p-lead"]={boards:bd,cur:"po~pc"};O["users/p-crew"]={boards:bd,cur:"po~pc"};
+  return O;}
 if(!DB){DB=seed();try{localStorage.setItem(KEY,JSON.stringify(DB));}catch(e){}}
-let saveT=null;const save=()=>{clearTimeout(saveT);saveT=setTimeout(()=>{try{localStorage.setItem(KEY,JSON.stringify(DB));}catch(e){}},150);};
+let saveT=null;const flush=()=>{clearTimeout(saveT);saveT=null;try{localStorage.setItem(KEY,JSON.stringify(DB));}catch(e){}};const save=()=>{clearTimeout(saveT);saveT=setTimeout(flush,150);};
+addEventListener("pagehide",()=>{if(saveT)flush();});addEventListener("beforeunload",()=>{if(saveT)flush();});
 const subs=[];const notify=()=>{save();setTimeout(()=>subs.slice().forEach(f=>f()),0);};
 const SENT=v=>v&&typeof v==="object"&&("__del" in v||"__arrU" in v||"__arrR" in v||"__inc" in v||"__ts" in v);
 function apply(cur,v){if(!SENT(v))return clone(v);if("__arrU" in v)return [...new Set([...(Array.isArray(cur)?cur:[]),...v.__arrU])];if("__arrR" in v)return (Array.isArray(cur)?cur:[]).filter(x=>!v.__arrR.includes(x));if("__inc" in v)return (+cur||0)+v.__inc;if("__ts" in v)return Date.now();return v;}
@@ -56,18 +61,18 @@ function colRef(name,filters,ord,lim){filters=filters||[];const q={
     if(ord){const [f,dir]=ord;docs.sort((a,b)=>{const x=(a.data()||{})[f],y=(b.data()||{})[f];return (x>y?1:x<y?-1:0)*(dir==="desc"?-1:1);});}if(lim)docs=docs.slice(0,lim);
     return{docs,size:docs.length,empty:!docs.length,metadata:{fromCache:false,hasPendingWrites:false},forEach:fn=>docs.forEach(fn),docChanges:()=>docs.map(d=>({type:"added",doc:d}))};}
   return q;}
-const fs=()=>({collection:n=>colRef(n),doc:p=>docRef(p),enablePersistence:async()=>{},
+const fs=()=>({collection:n=>colRef(n),doc:p=>docRef(p||("x/"+nid())),enablePersistence:async()=>{},
   batch:()=>{const ops=[];return{set:(r,v,o)=>ops.push(()=>r.set(v,o)),update:(r,v)=>ops.push(()=>r.update(v)),delete:r=>ops.push(()=>r.delete()),commit:async()=>{for(const o of ops)await o();}};},
   runTransaction:async fn=>fn({get:r=>r.get(),set:(r,v,o)=>r.set(v,o),update:(r,v)=>r.update(v),delete:r=>r.delete()})});
 fs.FieldValue={delete:()=>({__del:1}),arrayUnion:(...a)=>({__arrU:a}),arrayRemove:(...a)=>({__arrR:a}),serverTimestamp:()=>({__ts:1}),increment:n=>({__inc:n})};
-const user=AS==="crew"?{uid:"p-crew",displayName:"Alex Rivera",email:"alex@practice"}:{uid:"p-lead",displayName:"You (lead)",email:"lead@practice"};
+const user=AS==="crew"?{uid:"p-crew",displayName:"Alex Rivera",email:"alex@practice"}:AS==="new"?{uid:"p-new",displayName:"New owner",email:"new@practice"}:{uid:"p-lead",displayName:"You (lead)",email:"lead@practice"};
 user.updateProfile=async()=>{};user.getIdToken=async()=>"practice";
 const auth=()=>({currentUser:user,getRedirectResult:async()=>null,onAuthStateChanged:cb=>{setTimeout(()=>cb(user),10);return()=>{};},signOut:async()=>{location.href=location.pathname;},
   signInWithEmailAndPassword:async()=>({user}),createUserWithEmailAndPassword:async()=>({user}),signInWithPopup:async()=>({user}),signInWithRedirect:async()=>{},sendPasswordResetEmail:async()=>{}});
 auth.GoogleAuthProvider=function(){};
 window.firebase={initializeApp:()=>{},auth,firestore:fs,apps:[1]};
 window.FIREBASE_CONFIG=Object.assign({},window.FIREBASE_CONFIG||{},{apiKey:"practice"});
-window.CL_PRACTICE={as:AS,reset(){localStorage.removeItem(KEY);location.reload();},exit(){location.href=location.pathname;},switchTo(a){location.href=location.pathname+"?practice=1"+(a==="crew"?"&as=crew":"");}};
+window.CL_PRACTICE={as:AS,reset(){localStorage.removeItem(KEY);location.reload();},exit(){location.href=location.pathname;},switchTo(a){location.href=location.pathname+"?practice=1"+(a&&a!=="lead"?"&as="+a:"");}};
 const bar=()=>{if(document.getElementById("practiceBar"))return;const b=document.createElement("div");b.id="practiceBar";
   b.innerHTML='<b>🧪 PRACTICE BOARD</b><span>Fake data on this phone only. Your crew can\'t see it.</span><span class="pb-btns"><button type="button" data-a="as">'+(AS==="crew"?"See as lead":"See as a tech")+'</button><button type="button" data-a="reset">Reset</button><button type="button" data-a="exit">Exit</button></span>';
   b.addEventListener("click",e=>{const a=e.target.dataset&&e.target.dataset.a;if(a==="as")CL_PRACTICE.switchTo(AS==="crew"?"lead":"crew");else if(a==="reset"){if(confirm("Start the practice board over with fresh fake data?"))CL_PRACTICE.reset();}else if(a==="exit")CL_PRACTICE.exit();});

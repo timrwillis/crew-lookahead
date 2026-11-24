@@ -1,6 +1,7 @@
 rules_version = '2';
 
 // Crew Lookahead security rules.
+// The original board lives at the top level; company boards live under orgs/<company>/crews/<crew> with the same rules.
 // The first person to sign in becomes the owner (team/config.ownerUid).
 // Only the owner can make someone a Superintendent ("boss") or Lead.
 // Owner, Superintendent and Leads approve new people and manage jobs, techs, time off and material.
@@ -47,6 +48,8 @@ service cloud.firestore {
     match /team/config {
       allow read: if signedIn();
       allow create: if signedIn() && request.resource.data.ownerUid == me();
+      // the owner can point everyone to the board's new company home
+      allow update: if isOwner() && onlyKeys(['movedTo', 'movedAt']);
     }
     match /team/roles {
       allow read: if isMember();
@@ -129,8 +132,8 @@ service cloud.firestore {
     match /feeds/{id} {
       allow get: if true;
       allow list: if isMgr();
-      allow create, update: if isMember();
-      allow delete: if isMgr();
+      allow create, update: if signedIn();
+      allow delete: if signedIn();
     }
     match /fileparts/{id} {
       allow read: if isMember();
@@ -176,6 +179,195 @@ service cloud.firestore {
       allow update: if isMgr();
       allow update: if isMember() && resource.data.by == me() && onlyKeys(['filed', 'updatedAt']);
       allow delete: if isMgr() || (isMember() && resource.data.by == me());
+    }
+
+    // ---------- Companies (orgs) and their crews ----------
+    // Each person's own list of boards they belong to.
+    match /users/{uid} {
+      allow read, write: if signedIn() && uid == me();
+    }
+    // A company: anyone signed in can read its name (needed to open an invite link); only its owner changes it.
+    match /orgs/{o} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.ownerUid == me();
+      allow update: if signedIn() && resource.data.ownerUid == me();
+    }
+    // A crew inside a company has its own full board, with the same rules as the original board.
+    // The company owner is an owner on every crew.
+    match /orgs/{o}/crews/{c} {
+      function orgOwner() {
+        return signedIn() && get(/databases/$(database)/documents/orgs/$(o)).data.get('ownerUid', '') == me();
+      }
+      allow read: if signedIn();
+      allow create, update: if orgOwner();
+
+      // while the company owner moves an existing board in (crew doc moving == true), he can copy any record over
+      function moving() {
+        return orgOwner() && get(/databases/$(database)/documents/orgs/$(o)/crews/$(c)).data.get('moving', false) == true;
+      }
+      match /{col}/{id} {
+        allow create: if moving();
+      }
+
+      function cCfg() { return /databases/$(database)/documents/orgs/$(o)/crews/$(c)/team/config; }
+      function cRoles() { return /databases/$(database)/documents/orgs/$(o)/crews/$(c)/team/roles; }
+      function cCrew() { return /databases/$(database)/documents/orgs/$(o)/crews/$(c)/team/crew; }
+
+      function cOwner() {
+        return orgOwner() || (signedIn() && exists(cCfg()) && get(cCfg()).data.ownerUid == me());
+      }
+      function cRole() {
+        return exists(cRoles())
+          ? get(cRoles()).data.get('roles', {}).get(me(), {}).get('role', '')
+          : '';
+      }
+      function cMgr() {
+        return cOwner() || (signedIn() && cRole() in ['boss', 'lead']);
+      }
+      // approved crew; temporary helpers lose access after members[uid].until (milliseconds)
+      function cMemberOk() {
+        return exists(cCrew())
+          && get(cCrew()).data.get('members', {}).keys().hasAny([me()])
+          && (get(cCrew()).data.members[me()].get('until', 0) == 0
+              || request.time.toMillis() < get(cCrew()).data.members[me()].get('until', 0));
+      }
+      function cMember() {
+        return cMgr() || (signedIn() && (cRole() == 'crew' || cMemberOk()));
+      }
+      function cOnly(keys) {
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+      }
+
+      // Team setup. config only holds who the owner is; the rest is for approved members.
+      match /team/config {
+        allow read: if signedIn();
+        allow create: if orgOwner() && request.resource.data.ownerUid == me();
+        allow update: if cOwner();
+      }
+      match /team/roles {
+        allow read: if cMember();
+        allow write: if cOwner();
+        allow create: if orgOwner();
+      }
+      // Google Chat webhook link: leads and the super only
+      match /team/hooks {
+        allow read, write: if cMgr();
+      }
+      match /team/crew {
+        allow read: if cMember();
+        allow write: if cMgr();
+        allow create: if orgOwner();
+      }
+
+      // Each person's own profile (people waiting for approval fill this in).
+      match /people/{uid} {
+        allow read: if cMember() || (signedIn() && uid == me());
+        allow create, update: if signedIn() && uid == me();
+        allow delete: if cOwner();
+      }
+
+      match /jobs/{id} {
+        allow read: if cMember();
+        allow write: if cMgr();
+        // crew can mark cables off, nothing else on a job
+        allow update: if cMember() && cOnly(['marks', 'updatedAt']);
+      }
+      // saved job setups (steps, system order, material) to start the next job from
+      match /profiles/{id} {
+        allow read: if cMember();
+        allow write: if cMgr();
+      }
+      // daily roll call (one doc per day, id = the date): only leads and the super see or mark it
+      match /attendance/{day} {
+        allow read, write: if cMgr();
+      }
+      match /projects/{id} {
+        allow read: if cMember();
+        allow write: if cMgr();
+      }
+      function cTechUid(tid) {
+        return get(/databases/$(database)/documents/orgs/$(o)/crews/$(c)/techs/$(tid)).data.get('uid', '');
+      }
+      match /timeoff/{id} {
+        // leads and the super see everyone's; crew only their own (uid = their login)
+        allow read: if cMgr() || (cMember() && resource.data.uid == me());
+        allow write: if cMgr();
+        // crew log their own call-ins, sick days and recharge hours right away (no approval needed)
+        allow create: if cMember() && request.resource.data.by == me()
+          && request.resource.data.type in ['Call-in', 'Sick', 'Recharge']
+          && cTechUid(request.resource.data.techId) == me();
+        allow delete: if cMember() && resource.data.by == me()
+          && resource.data.type in ['Call-in', 'Sick', 'Recharge'];
+        // check off your own time off as filed in the Google Form / Workday
+        allow update: if cMember() && cOnly(['filed', 'updatedAt'])
+          && cTechUid(resource.data.techId) == me();
+      }
+
+      match /techs/{id} {
+        allow read: if cMember();
+        allow write: if cMgr();
+        // an approved crew member adds their own profile
+        allow create: if cMember() && request.resource.data.uid == me();
+        // edit your own profile (not your active status)
+        allow update: if signedIn() && resource.data.get('uid', '') == me()
+          && cOnly(['name', 'role', 'phone', 'skills', 'certs', 'notes', 'updatedAt']);
+        // claim an existing crew-list entry that nobody has claimed yet
+        allow update: if cMember() && resource.data.get('uid', '') == ''
+          && request.resource.data.uid == me()
+          && cOnly(['uid', 'name', 'role', 'phone', 'skills', 'notes', 'updatedAt']);
+      }
+
+      // documents: anyone on the crew can add; the person who added it or a lead can change or remove it
+      match /files/{id} {
+        allow read: if cMember();
+        allow create: if cMember() && request.resource.data.by == me();
+        allow update, delete: if cMgr() || (cMember() && resource.data.by == me());
+      }
+      match /fileparts/{id} {
+        allow read: if cMember();
+        allow create: if cMember();
+        allow delete: if cMgr();
+      }
+      // recently deleted: anyone can put something here when they delete it; leads restore or clear it
+      match /trash/{id} {
+        allow read: if cMember();
+        allow create: if cMember() && request.resource.data.by == me();
+        allow update, delete: if cMgr();
+      }
+
+      match /material/{id} {
+        allow read: if cMember();
+        allow write: if cMgr();
+        allow update: if cMember() && cOnly(['qty', 'updatedAt', 'updatedBy']);
+      }
+
+      match /messages/{id} {
+        allow read: if cMember();
+        allow create: if cMember() && request.resource.data.by == me();
+        // mark done, or acknowledge / clear a notification (acks.<uid>)
+        allow update: if cMember() && cOnly(['done', 'doneBy', 'doneAt', 'acks']);
+        allow delete: if cMgr() || (cMember() && resource.data.by == me());
+      }
+
+      match /asks/{id} {
+        allow read: if cMember();
+        allow create: if cMember() && request.resource.data.by == me();
+        allow update: if cMgr()
+          || (cMember() && resource.data.by == me())
+          || (cMember() && cOnly(['reply', 'replyBy', 'replyAt']))
+          || (cMember() && cOnly(['acks']));
+        allow delete: if cMgr() || (cMember() && resource.data.by == me());
+      }
+
+      match /offreq/{id} {
+        // leads and the super see all requests; crew only the ones they filed
+        allow read: if cMgr() || (cMember() && resource.data.by == me());
+        allow create: if cMember() && request.resource.data.by == me()
+          && request.resource.data.status == 'pending';
+        allow update: if cMgr();
+        allow update: if cMember() && resource.data.by == me() && cOnly(['filed', 'updatedAt']);
+        allow delete: if cMgr() || (cMember() && resource.data.by == me());
+      }
     }
   }
 }
