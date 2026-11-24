@@ -770,6 +770,29 @@ body:has(#scrim:not([hidden])) .fab,body:has(.popwrap) .fab{display:none}
 .sbr{display:grid;grid-template-columns:minmax(80px,auto) minmax(0,1fr) 52px;gap:10px;align-items:center;font-size:.9rem}
 .sbn{font-weight:700}.sbc{text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
 .sbr .bar{display:block;height:8px;border-radius:4px;background:var(--line);overflow:hidden}.sbr .bar i{display:block;height:100%;background:var(--ok)}
+
+.sheet .form>.actions{position:sticky;bottom:0;z-index:3;background:var(--panel);padding:10px 0 calc(6px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line);margin-top:4px}
+.cgcab{display:grid;gap:8px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.cghd{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:baseline;border:0;background:transparent;color:var(--ink);font:inherit;text-align:left;padding:2px 0;cursor:pointer}
+.cgchev{color:var(--muted)}
+.cgsys{display:flex;flex-wrap:wrap;gap:6px}
+.cgchip{display:inline-flex;gap:8px;align-items:center;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:999px;padding:8px 8px 8px 14px;font:600 .9rem var(--f-body);cursor:pointer;min-height:40px}
+.cgchip b{background:var(--accent);color:var(--accent-ink);border-radius:999px;padding:2px 9px;font-size:.8rem}
+.cgadd{display:flex;gap:6px;align-items:center}.cgadd input{flex:1;min-width:0}
+.cgpop{width:min(560px,100%);display:flex;flex-direction:column;gap:8px;max-height:92vh;overflow:hidden}
+.cgtop{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.cgtbl{overflow:auto;flex:1;min-height:120px;border:1px solid var(--line);border-radius:10px}
+.cgr{display:grid;grid-template-columns:30px minmax(0,1.5fr) minmax(0,1fr) 52px 30px;gap:4px;align-items:center;padding:3px 6px;border-bottom:1px solid var(--line)}
+.cgr.hd{position:sticky;top:0;background:var(--panel);font:700 .7rem var(--f-body);color:var(--muted);text-transform:uppercase;letter-spacing:.04em;z-index:1}
+.cgr.on{background:var(--soft)}
+.cgr input[type=text]{width:100%;min-width:0;font:inherit;font-size:.86rem;padding:6px 6px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--ink)}
+.cgr input[type=text]:focus{border-color:var(--accent);background:var(--panel);outline:none}
+.cgr input.mono{font-family:var(--f-mono)}
+.cgr input[type=checkbox]{width:18px;height:18px}
+.cgx{border:0;background:transparent;color:var(--muted);font-size:.85rem;cursor:pointer;height:30px}
+.cgfoot{display:grid;gap:6px}
+.cgbulk{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px;border-radius:10px;background:var(--bg)}
+.cgbulk input{flex:1 1 120px;min-width:0}
 </style>
 </head>
 <body>
@@ -4675,15 +4698,56 @@ function cableEditor(j){
         toolsEditor(kit.join(", "),v=>{saveCrew({stepTools:Object.assign({},crewDoc.stepTools||{},{[k]:v})});}),
         h("div",{},h("button",{type:"button",class:"btn small",onclick:()=>{toolOpen.delete(i);drawSteps();}},"Done"))));});
     if(!steps.length)stepBox.append(h("div",{class:"status"},"Add the steps every cable goes through, in the order you do them."));}
-  const SHOW=400;
+  const NOCAB="(no cabinet)",NOSYS="(no system)";
+  const openCabs=new Set();
+  function grpOf(){const m=new Map();cables.forEach((c,i)=>{const r=(c.rack||"").trim()||NOCAB,t=(c.type||"").trim()||NOSYS;if(!m.has(r))m.set(r,new Map());const g=m.get(r);if(!g.has(t))g.set(t,[]);g.get(t).push(i);});
+    return [...m.entries()].sort((a,b)=>a[0]===NOCAB?1:b[0]===NOCAB?-1:natCmp(a[0],b[0])).map(([r,g])=>[r,[...g.entries()].sort((a,b)=>sysRank({sysOrder},a[0])-sysRank({sysOrder},b[0])||natCmp(a[0],b[0]))]);}
   function drawCables(){cabBox.textContent="";cabCount.textContent=cables.length+" cable"+(cables.length===1?"":"s");
-    cabBox.append(h("div",{class:"crow3 hd"},h("span"),h("span",{},"Cable"),h("span",{},"Rack"),h("span",{},"Pull"),h("span",{},"Length"),h("span",{},"Type"),h("span"),h("span")));
-    cables.slice(0,SHOW).forEach((c,i)=>{const inp=(k,ph,cls)=>{const e=h("input",{type:"text",value:c[k]||"",placeholder:ph,"aria-label":ph+" for row "+(i+1),class:cls||null});e.addEventListener("input",()=>{c[k]=e.value;});e.addEventListener("change",()=>{if(k==="type"||k==="len")drawMat();});return e;};
-      cabBox.append(h("div",{class:"crow3"},h("span",{class:"ix"},String(i+1)),inp("name","Cable"),inp("rack","Rack","opt"),inp("pull","Pull","opt"),inp("len","Length","opt"),inp("type","Type","opt"),
-        h("button",{type:"button",class:"iconbtn","aria-label":"Move up",disabled:i===0,onclick:()=>{[cables[i-1],cables[i]]=[cables[i],cables[i-1]];drawCables();}},"↑"),
-        h("button",{type:"button",class:"iconbtn","aria-label":"Remove cable",onclick:()=>{cables.splice(i,1);drawCables();drawMat();}},"✕")));});
-    if(cables.length>SHOW)cabBox.append(h("div",{class:"status"},"Showing the first "+SHOW+". Use bulk set or re-import to change the rest."));
-    if(!cables.length)cabBox.append(h("div",{class:"status"},"No cables yet. Import a spreadsheet, paste a list, or make a range below."));}
+    if(!cables.length){cabBox.append(h("div",{class:"status"},"No cables yet. Import a spreadsheet, paste a list, or make a range below."));return;}
+    const groups=grpOf();
+    groups.forEach(([r,syss])=>{const n=syss.reduce((a,[,ix])=>a+ix.length,0),open=openCabs.has(r)||groups.length===1;
+      const card=h("div",{class:"cgcab"+(open?" open":"")});
+      card.append(h("button",{type:"button",class:"cghd","aria-expanded":String(open),onclick:()=>{open?openCabs.delete(r):openCabs.add(r);drawCables();}},
+        h("strong",{},r===NOCAB?"No cabinet set":"Cabinet "+r),h("span",{class:"status"},n+" cables · "+syss.length+" system"+(syss.length>1?"s":"")),h("span",{class:"cgchev"},open?"▾":"▸")));
+      card.append(h("div",{class:"cgsys"},syss.map(([t,ix])=>h("button",{type:"button",class:"cgchip",onclick:()=>cableGroupSheet(r,t)},h("span",{},t===NOSYS?"No system":t),h("b",{},String(ix.length))))));
+      if(open){const si=h("input",{type:"text",class:"tl-in",placeholder:"+ Add a system here, e.g. Cameras",list:"cgSysList"});si.addEventListener("keydown",e=>{if(e.key==="Enter"&&si.value.trim()){e.preventDefault();cableGroupSheet(r,sysName(si.value),true);}});card.append(h("div",{class:"cgadd"},si,h("button",{type:"button",class:"btn ghost small",onclick:()=>{if(si.value.trim())cableGroupSheet(r,sysName(si.value),true);}},"Open")));}
+      cabBox.append(card);});
+    {const ci=h("input",{type:"text",class:"tl-in",placeholder:"Cabinet (1.18)"}),ti=h("input",{type:"text",class:"tl-in",placeholder:"System (BMS)",list:"cgSysList"});
+      const go=()=>{if(!ci.value.trim()||!ti.value.trim()){toast("Add the cabinet and the system");return;}cableGroupSheet(ci.value.trim(),sysName(ti.value),true);};
+      cabBox.append(h("datalist",{id:"cgSysList"},sysOrder.map(x=>h("option",{value:x}))),h("div",{class:"cgadd"},ci,ti,h("button",{type:"button",class:"btn ghost small",onclick:go},"+ Add")));}}
+  /* compact spreadsheet for one cabinet + system: edit, add, delete, set pull/row for many */
+  function cableGroupSheet(r,t,isNew){
+    const wrap=h("div",{class:"popwrap"}),pop=h("div",{class:"pop cgpop",role:"dialog","aria-modal":"true","aria-label":"Cables in "+r+" "+t});wrap.append(pop);document.body.append(wrap);
+    let q="";const sel=new Set();
+    const close=()=>{wrap.remove();drawCables();drawMat();};
+    wrap.addEventListener("click",e=>{if(e.target===wrap)close();});
+    const idx=()=>cables.map((c,i)=>i).filter(i=>(((cables[i].rack||"").trim()||NOCAB)===r)&&(((cables[i].type||"").trim()||NOSYS)===t));
+    const head=h("div",{class:"cgtop"}),qIn=h("input",{type:"search",class:"tl-in",placeholder:"Find a cable or row…","aria-label":"Search cables"});
+    qIn.addEventListener("input",()=>{q=qIn.value.toLowerCase();drawRows();});
+    const body=h("div",{class:"cgtbl"}),foot=h("div",{class:"cgfoot"});
+    pop.append(head,qIn,body,foot);
+    function drawRows(){head.textContent="";const all=idx();
+      head.append(h("div",{},h("strong",{style:"font-size:1.05rem"},(r===NOCAB?"No cabinet":r)+" · "+(t===NOSYS?"No system":t)),h("div",{class:"status"},all.length+" cables"+(sel.size?" · "+sel.size+" picked":""))),h("button",{type:"button",class:"btn small",onclick:close},"Done"));
+      body.textContent="";body.append(h("div",{class:"cgr hd"},h("span",{},h("input",{type:"checkbox","aria-label":"Pick all",checked:all.length>0&&all.every(i=>sel.has(cables[i].id)),onchange:e=>{all.forEach(i=>e.target.checked?sel.add(cables[i].id):sel.delete(cables[i].id));drawRows();}})),h("span",{},"Cable"),h("span",{},"Pull / row"),h("span",{},"Ft"),h("span")));
+      const show=all.filter(i=>{const c=cables[i];return !q||[c.name,c.pull,c.len,c.from,c.to].some(v=>String(v||"").toLowerCase().includes(q));});
+      show.forEach(i=>{const c=cables[i],inp=(k,ph,cls)=>{const e=h("input",{type:"text",value:c[k]||"",placeholder:ph,class:cls||"","aria-label":ph+" for "+(c.name||"cable")});e.addEventListener("input",()=>{c[k]=e.value;});return e;};
+        body.append(h("div",{class:"cgr"+(sel.has(c.id)?" on":"")},h("span",{},h("input",{type:"checkbox","aria-label":"Pick "+c.name,checked:sel.has(c.id),onchange:e=>{e.target.checked?sel.add(c.id):sel.delete(c.id);drawRows();}})),
+          inp("name","Cable","mono"),inp("pull","Pull"),inp("len","Ft"),h("button",{type:"button",class:"cgx","aria-label":"Remove "+c.name,onclick:()=>{cables.splice(cables.indexOf(c),1);sel.delete(c.id);drawRows();}},"✕")));});
+      if(!show.length)body.append(h("div",{class:"status",style:"padding:10px"},all.length?"No match.":"No cables here yet. Add some below."));
+      foot.textContent="";
+      const addIn=h("input",{type:"text",class:"tl-in mono",placeholder:"New cable, e.g. "+(r!==NOCAB?r+"-1.":"")+"801  (Enter)",autocomplete:"off"});
+      const addOne=()=>{const names=addIn.value.split(/[,\n\t]/).map(x=>x.trim()).filter(Boolean);if(!names.length)return;
+        const last=all.length?all[all.length-1]:cables.length-1;let at=last+1;
+        names.forEach(nm=>{if(cables.some(c=>c.name===nm)){toast(nm+" is already on this job");return;}cables.splice(at++,0,{id:nid("c"),name:nm,rack:r===NOCAB?"":r,type:t===NOSYS?"":t});});addIn.value="";drawRows();addIn.focus();};
+      addIn.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();addOne();}});
+      foot.append(h("div",{class:"cgadd"},addIn,h("button",{type:"button",class:"btn small",onclick:addOne},"Add")));
+      if(sel.size){const pv=h("input",{type:"text",class:"tl-in",placeholder:"Pull / row for picked, e.g. Row 12"}),tv=h("input",{type:"text",class:"tl-in",placeholder:"Move picked to system…"});
+        foot.append(h("div",{class:"cgbulk"},h("span",{class:"status"},sel.size+" picked:"),pv,h("button",{type:"button",class:"btn ghost small",onclick:()=>{cables.forEach(c=>{if(sel.has(c.id))c.pull=pv.value;});drawRows();toast("Set "+sel.size+" cables");}},"Set pull"),
+          tv,h("button",{type:"button",class:"btn ghost small",onclick:()=>{const v=tv.value.trim();if(!v)return;cables.forEach(c=>{if(sel.has(c.id))c.type=v;});toast("Moved "+sel.size+" to "+v);sel.clear();drawRows();}},"Move"),
+          h("button",{type:"button",class:"btn ghost small",style:"color:var(--over)",onclick:()=>{if(!confirmDel.armed){confirmDel.armed=true;toast("Tap Remove again to take "+sel.size+" cables off");setTimeout(()=>confirmDel.armed=false,3000);return;}cables=cables.filter(c=>!sel.has(c.id));sel.clear();drawRows();}},"Remove")));}
+      foot.append(h("p",{class:"status",style:"margin:0"},"Changes save when you tap Save on the job."));}
+    const confirmDel={armed:false};
+    drawRows();if(isNew)setTimeout(()=>{const a=foot.querySelector("input");if(a)a.focus();},50);}
   function drawMat(){matBox.textContent="";const sl=h("input",{type:"number",id:"cbSlack",value:String(slack),min:"0",max:"100",style:"width:70px"});sl.addEventListener("change",()=>{slack=Math.max(0,parseFloat(sl.value)||0);drawMat();});
     const jj=Object.assign({},j,{cables,steps,slack});
     matBox.append(materialTable(materialCheck(jj,typeMat),true,(type,id)=>{typeMat[type]=id;drawMat();}),
