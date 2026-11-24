@@ -793,6 +793,27 @@ body:has(#scrim:not([hidden])) .fab,body:has(.popwrap) .fab{display:none}
 .cgfoot{display:grid;gap:6px}
 .cgbulk{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px;border-radius:10px;background:var(--bg)}
 .cgbulk input{flex:1 1 120px;min-width:0}
+
+.flow{display:grid;gap:10px;padding:14px;border:1px solid var(--line);border-radius:14px;background:var(--panel);margin-bottom:10px;box-shadow:0 1px 2px rgba(16,24,40,.05)}
+.flow.done{border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
+.flow.warn{border-color:color-mix(in srgb,var(--likely) 60%,var(--line))}
+.flowhd{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center}
+.flowhd strong{font-size:1.02rem}
+.flown{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font:700 .85rem var(--f-body);background:var(--soft);color:var(--accent)}
+.flow.done .flown{background:var(--ok);color:#fff}.flow.warn .flown{background:var(--likely);color:#1b1300}
+.flowchip{font-size:.78rem;font-weight:600;color:var(--muted);white-space:nowrap}
+.arow{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:8px 10px;border-radius:10px;background:var(--bg);border:1px solid transparent}
+.arow>span:first-child,.arow label>span{display:grid;min-width:0}
+.arow small{color:var(--muted);font-size:.8rem;overflow:hidden;text-overflow:ellipsis}
+.arow.noone{border-color:color-mix(in srgb,var(--likely) 60%,transparent)}
+.arow.warn{border-color:var(--over);background:var(--over-soft)}
+.arow.meet strong::before{content:""}
+.tchip.free{border-style:solid;border-color:var(--ok);color:var(--ink);font-weight:600}
+.tool.miss{background:var(--over-soft);color:var(--over)}
+.prep{display:grid;gap:6px;padding:10px;border-radius:10px;background:var(--bg)}
+.rl{display:grid;gap:6px}
+.rlrow{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)}
+.rln{display:grid;min-width:0}.rln small{color:var(--muted);font-size:.78rem}
 </style>
 </head>
 <body>
@@ -1085,7 +1106,7 @@ const openFlags=()=>S.asks.filter(a=>isFlag(a)&&a.status!=="done");
 // Leads (and Tim) get new flags; the superintendent gets the ones a lead escalates.
 function myAlertFlags(){if(!MGR())return [];const r=isOwner?"lead":myRole();return openFlags().filter(f=>r==="boss"?f.to==="boss":f.to!=="boss"||isOwner);}
 const lowStock=()=>S.material.filter(m=>m.min!=null&&m.min!==""&&(+m.qty||0)<=+m.min);
-const dueRem=()=>S.messages.filter(m=>isNote(m)&&m.remindOn&&!m.done&&m.remindOn<=TODAY());
+const dueRem=()=>S.messages.filter(m=>isNote(m)&&m.remindOn&&!m.done&&(m.remindOn<TODAY()||(m.remindOn===TODAY()&&(!m.remindAt||m.remindAt<=nowHM()))));
 const fmtTime=ts=>new Date(ts).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});
 const durTxt=ms=>{const m=Math.max(1,Math.round(ms/6e4));if(m<60)return m+" min";const hh=Math.floor(m/60),mm=m%60;return hh+"h"+(mm?" "+mm+"m":"");};
 const targetLabel=(j,t)=>j.name+(t?" · "+t.name:"");
@@ -1155,7 +1176,8 @@ function checkAlerts(){if(!myId||!asksLoaded||!msgsLoaded||!teamLoaded||expiredU
   const notes=myNotices().map(m=>({k:"e:"+m.id,t:m.title||"Update",b:m.text}));
   const watching=tab==="chat"&&!document.hidden,cut=Date.now()-6*36e5;
   const chats=chatAlerts?S.messages.filter(m=>isChat(m)&&m.by!==myId&&m.at>cut).map(m=>({k:"c:"+m.id,t:chatName(m.by)+" in chat",b:m.text||"Sent a photo",quiet:watching})):[];
-  const all=[...mine,...own,...notes,...chats];
+  const timed=S.messages.filter(m=>isNote(m)&&!m.done&&m.remindOn===TODAY()&&m.remindAt&&m.remindAt<=nowHM()&&(m.by===myId||(m.to||[]).includes(myId))).map(m=>({k:"r:"+m.id,t:m.kind==="meeting"?"Meeting now":"Reminder",b:m.text}));
+  const all=[...mine,...own,...notes,...chats,...timed];
   if(seenAlerts)all.forEach(a=>{if(!seenAlerts.has(a.k)&&!a.quiet)notifyMe(a.t,a.b);});
   seenAlerts=new Set(all.map(a=>a.k));}
 
@@ -1174,6 +1196,7 @@ const isDarkNow=()=>{const t=document.documentElement.dataset.theme;return t?t==
 const syncThemeBtn=()=>{const b=document.getElementById("themeBtn");if(b){b.textContent=isDarkNow()?"☀":"☾";b.title=isDarkNow()?"Switch to light":"Switch to dark";}};
 document.getElementById("themeBtn").addEventListener("click",()=>{setTheme(isDarkNow()?"light":"dark");syncThemeBtn();});syncThemeBtn();
 document.getElementById("fab").addEventListener("click",()=>quickAdd());
+setInterval(()=>{try{checkAlerts();if(tab==="home"&&$("#scrim").hidden)schedule();}catch(e){}},60000);
 window.addEventListener("hashchange",()=>setTab(location.hash.slice(1),false));
 const CREW_TABS=["home","off","messages","chat","material"];
 const tabAllowed=t=>MGR()||CREW_TABS.includes(t);
@@ -2204,11 +2227,132 @@ function resolveForm(f){openSheet("Mark resolved",[field({id:"rsNote",label:"Wha
   async()=>{const note=val("rsNote");await db.collection("asks").doc(f.id).update({status:"done",reply:note,replyBy:myId||"",replyAt:Date.now(),doneBy:myId||"",doneAt:Date.now()});logEvent("Resolved: "+(f.reason||"flag")+(note?" — "+note:""),{ev:"resolve",jobId:f.jobId||""});});}
 
 /* ===== HOME: Dashboard (leads/super) and My Day (crew) ===== */
+/* ===== MY DAY (leads / supers): huddle → roll call → assignments → meetings & reminders → plan ahead → wrap up ===== */
+const HUDDLE_TOPICS=["Ladder safety","Lifts / MEWP","Housekeeping","PPE","Cutting / sharps","Line of fire","Material handling","Heat / cold stress","Silica / dust","Lockout / tagout","Overhead work","Slips, trips, falls"];
+const nowHM=()=>{const n=new Date();return String(n.getHours()).padStart(2,"0")+":"+String(n.getMinutes()).padStart(2,"0");};
+const fmtHM=t=>{if(!t)return"";const [hh,mm]=t.split(":").map(Number);const d=new Date();d.setHours(hh,mm,0,0);return fmtTime(d.getTime());};
+const nextWorkDay=d=>{let n=addDays(parseD(d),1);while(n.getDay()===0)n=addDays(n,1);return iso(n);};
+const remsOn=d=>S.messages.filter(m=>isNote(m)&&m.remindOn===d&&!m.done).sort((a,b)=>(a.remindAt||"99")<(b.remindAt||"99")?-1:1);
+async function saveDay(d,patch){try{await db.collection("attendance").doc(d).set(Object.assign({date:d,updatedAt:Date.now()},patch),{merge:true});ATT[d]=Object.assign({},ATT[d]||{},patch);memo={};schedule();return true;}catch(e){writeErr(e);return false;}}
+function rollList(d,onlyOpen){const box=h("div",{class:"rl"});
+  const draw=()=>{box.textContent="";const r=rollCall(d),list=onlyOpen?[...r.unk,...r.out]:[...r.unk,...r.here,...r.out];
+    if(r.unk.length&&!onlyOpen)box.append(h("button",{type:"button",class:"btn small",style:"justify-self:start",onclick:async()=>{await setAttMany(d,r.unk.map(t=>t.id),"here");draw();}},r.unk.length===r.here.length+r.out.length+r.unk.length?"✓ Everyone's here":"✓ Rest are here ("+r.unk.length+")"));
+    list.forEach(t=>{const a=attOf(t.id,d),st=a?a.s:"";
+      box.append(h("div",{class:"rlrow"},h("span",{class:"rln"},t.name,h("small",{},assignLabel(t.id,d)||"Not assigned")),
+        h("span",{class:"attbtns"},h("button",{type:"button",class:"attb here","aria-pressed":String(st==="here"),onclick:async()=>{await setAtt(t.id,d,st==="here"?null:"here");draw();}},"✓ Here"),
+          h("button",{type:"button",class:"attb out","aria-pressed":String(st==="out"),onclick:async()=>{await setAtt(t.id,d,st==="out"?null:"out");draw();}},"✗ Out"))));});
+    if(r.off.length)box.append(h("div",{class:"status"},"Off today: "+r.off.map(t=>t.name).join(", ")));};
+  draw();return box;}
+function huddleSheet(d){const hd=(ATT[d]||{}).huddle||{};let topics=new Set(hd.topics||[]);
+  const tBox=h("div",{class:"tchips"});const drawT=()=>{tBox.textContent="";HUDDLE_TOPICS.forEach(x=>tBox.append(h("button",{type:"button",class:"tchip dep","aria-pressed":String(topics.has(x)),onclick:()=>{topics.has(x)?topics.delete(x):topics.add(x);drawT();}},x)));};drawT();
+  const ck=(id,l,v)=>h("label",{class:"check",for:id},h("input",{type:"checkbox",id,checked:!!v}),l);
+  openSheet("Morning huddle · "+fmtS(d,{weekday:"short",month:"short",day:"numeric"}),[
+    h("div",{class:"field full"},h("span",{class:"flabel"},"1. Roll call"),rollList(d,false)),
+    h("div",{class:"field full"},h("span",{class:"flabel"},"2. Safety topics covered"),tBox),
+    field({id:"hzHaz",label:"3. Today's hazards and how we control them (PTP)",type:"textarea",value:hd.hazards||"",full:true,placeholder:"e.g. Working off 8' ladders in 1.16 – 3 points of contact, spotter. Lift in row 40s – harness, barricade."}),
+    h("div",{class:"field full"},h("span",{class:"flabel"},"4. Sign-off"),h("div",{class:"stack",style:"gap:6px"},ck("hzPtp","PTP reviewed with the crew",hd.ptp),ck("hzOrm","ORM done",hd.orm),ck("hzSign","Everyone signed the sheet",hd.signed))),
+    field({id:"hzNotes",label:"Plan / notes for the crew",type:"textarea",value:hd.notes||"",full:true,placeholder:"Who's where today, deliveries, inspections…"})],
+    async()=>{const r=rollCall(d);const ok=await saveDay(d,{huddle:{at:hd.at||Date.now(),by:hd.by||myId||"",topics:[...topics],hazards:val("hzHaz"),ptp:!!val("hzPtp"),orm:!!val("hzOrm"),signed:!!val("hzSign"),notes:val("hzNotes"),here:r.here.length,updatedAt:Date.now()}});
+      if(ok&&!hd.at)logEvent("Morning huddle done · "+r.here.length+" here"+(topics.size?" · "+[...topics].join(", "):""),{ev:"attend"});if(!ok)return false;});
+  $(".sheet").classList.add("wide");}
+function remForm(kind,pre){pre=pre||{};const isMeet=kind==="meeting";
+  const jobSel=h("select",{id:"rmJob"},h("option",{value:""},"No job"),S.jobs.filter(j=>!j.doneOn).sort(byPri).map(j=>h("option",{value:j.id,selected:pre.jobId===j.id},j.name)));
+  openSheet(isMeet?"New meeting":"New reminder",[
+    field({id:"rmText",label:isMeet?"Meeting":"Remind me to…",value:pre.text||"",full:true,placeholder:isMeet?"e.g. GC coordination meeting":"e.g. Order more Cat6 for 1.17"}),
+    field({id:"rmDate",label:"Day",type:"date",value:pre.date||TODAY()}),
+    field({id:"rmTime",label:"Time",type:"time",value:pre.time||(isMeet?"":"")}),
+    h("div",{class:"field full"},h("label",{for:"rmJob"},"Job (optional)"),jobSel),
+    isMeet?field({id:"rmWhere",label:"Where / who",value:"",full:true,placeholder:"Trailer, Teams, GC office…"}):null].filter(Boolean),
+    async()=>{const text=val("rmText");if(!text){formErr(isMeet?"Name the meeting.":"What should we remind you about?");return false;}
+      const where=isMeet?val("rmWhere"):"";
+      try{await db.collection("messages").add({text:(isMeet?"📅 ":"")+text+(where?" · "+where:""),kind:isMeet?"meeting":"reminder",to:[],by:myId||"",at:Date.now(),jobId:val("rmJob"),remindOn:val("rmDate")||TODAY(),remindAt:val("rmTime")||"",done:false});toast(isMeet?"Meeting added":"Reminder set");}catch(e){writeErr(e);return false;}});}
+function pickTarget(tid){const d=TODAY(),tg=liveTargets(d);
+  openView("Put "+techName(tid)+" on…",[h("div",{class:"full moregrid"},tg.map(x=>h("button",{type:"button",class:"moreitem",onclick:async()=>{closeSheet();await moveTech(tid,{job:x.job,task:x.task});toast(techName(tid)+" → "+targetLabel(x.job,x.task));}},
+    h("span",{},h("strong",{},x.task?x.task.name:x.job.name),h("small",{},(x.task?x.job.name+" · ":"")+(x.ids.length?x.ids.length+" on it: "+crewNames(x.ids):"No one on it"))),x.ids.length?null:h("span",{class:"badge"},"0")))),
+    h("button",{type:"button",class:"btn ghost full",onclick:async()=>{closeSheet();await moveTech(tid,null);toast(techName(tid)+" taken off their task");}},"Take off any task")]);}
+function pickTech(target){const d=TODAY(),di=dayInfo(d),free=new Set(di.idle.map(t=>t.id));const here=activeTechs().filter(t=>!awayOn(t.id,d)&&!target.ids.includes(t.id)).sort((a,b)=>(free.has(b.id)?1:0)-(free.has(a.id)?1:0)||a.name.localeCompare(b.name));
+  openView("Who's going to "+(target.task?target.task.name:target.job.name)+"?",[h("div",{class:"full moregrid"},here.length?here.map(t=>h("button",{type:"button",class:"moreitem",onclick:async()=>{closeSheet();await moveTech(t.id,{job:target.job,task:target.task});toast(t.name+" → "+targetLabel(target.job,target.task));}},
+    h("span",{},h("strong",{},t.name),h("small",{},free.has(t.id)?"Free":"Now on "+assignLabel(t.id,d))),free.has(t.id)?h("span",{class:"pill good"},"Free"):null)):h("div",{class:"status"},"Everyone here is already on it."))]);}
+function daySummary(d){const t0=parseD(d).getTime(),t1=t0+864e5,lines=[];
+  jobsOn(d).forEach(j=>{const ss=stepsOf(j).filter(st=>!/^scan_/.test(st.id)),parts=[];
+    ss.forEach(st=>{const n=cablesOf(j).filter(c=>{const m=markOf(j,c.id,st.id);return m&&m.at>=t0&&m.at<t1;}).length;if(n)parts.push(st.name+" "+n);});
+    const td=tasksOf(j).filter(t=>t.doneOn===d).map(t=>t.name);
+    if(parts.length||td.length)lines.push({job:j,parts,tasks:td});});
+  return lines;}
+function wrapSheet(d){const w=(ATT[d]||{}).wrap||{},sum=daySummary(d),r=rollCall(d),fl=myAlertFlags();
+  const text=()=>["End of day · "+fmtS(d,{weekday:"short",month:"short",day:"numeric"}),r.here.length+" here"+(r.out.length?", "+r.out.length+" out ("+r.out.map(t=>t.name).join(", ")+")":""),
+    ...sum.map(x=>x.job.name+": "+[...x.parts,...x.tasks.map(t=>"✓ "+t)].join(", ")),fl.length?fl.length+" open flag"+(fl.length>1?"s":""):"",val("wrDone")?"Notes: "+val("wrDone"):"",val("wrTom")?"Tomorrow: "+val("wrTom"):""].filter(Boolean).join("\n");
+  openSheet("Wrap up the day",[
+    h("div",{class:"field full"},h("span",{class:"flabel"},"What got done today"),sum.length?h("div",{class:"stack",style:"gap:4px"},sum.map(x=>h("div",{},h("strong",{},x.job.name),h("div",{class:"status"},[...x.parts,...x.tasks.map(t=>"✓ "+t)].join(" · "))))):h("div",{class:"status"},"Nothing checked off in the app today.")),
+    field({id:"wrDone",label:"Notes, issues, delays",type:"textarea",value:w.notes||"",full:true,placeholder:"Waiting on pathway in 1.17, lift down, inspection passed…"}),
+    field({id:"wrTom",label:"Plan for tomorrow",type:"textarea",value:w.tomorrow||"",full:true,placeholder:"Finish 1.14 terms, start 1.15 BMS pulls, 2 guys to 1.17 if trays are in…"}),
+    h("div",{class:"full",style:"display:flex;gap:8px;flex-wrap:wrap"},h("button",{type:"button",class:"btn ghost",onclick:async()=>{const t=text();try{if(navigator.share)await navigator.share({text:t});else{await navigator.clipboard.writeText(t);toast("Copied. Paste it in a text or email.");}}catch(e){}}},"📤 Share summary"))],
+    async()=>{const ok=await saveDay(d,{wrap:{at:Date.now(),by:myId||"",notes:val("wrDone"),tomorrow:val("wrTom")}});if(!ok)return false;
+      if(val("wrTom")){const nd=nextWorkDay(d);try{await db.collection("messages").add({text:"Plan for today (from yesterday): "+val("wrTom"),kind:"reminder",to:[],by:myId||"",at:Date.now(),jobId:"",remindOn:nd,remindAt:"06:00",done:false});}catch(e){}}
+      logEvent("Day wrapped up"+(sum.length?" · "+sum.map(x=>x.job.name+": "+x.parts.join(", ")).join(" | "):""),{ev:"attend"});toast("Day saved."+(val("wrTom")?" Tomorrow's plan will show at 6 AM.":""));});
+  $(".sheet").classList.add("wide");}
+function prepItems(j){const out=[],st=j.start||TODAY();
+  if(j.conf!=="locked")out.push(["Not locked in yet",()=>jobForm(j,"details"),"Details"]);
+  if(!crewOn(j,st).length&&!tasksOf(j).some(t=>crewOn(t,st).length))out.push(["No crew lined up",()=>jobForm(j,"crew"),"Crew"]);
+  if(!isRackJob(j)&&!isQuick(j)&&!cablesOf(j).length)out.push(["No cables loaded",()=>cableEditor(j),"Cables"]);
+  if(cablesOf(j).length&&!stepsOf(j).length)out.push(["No steps set",()=>cableEditor(j),"Steps"]);
+  if(!docsFor(j.id).length)out.push(["No prints or documents",()=>docsGallery(j.id),"Docs"]);
+  const kits=stepsOf(j).some(s=>stepKit(s.name).length);if(!splitTools(j.tools).length&&!kits)out.push(["No tools listed",()=>jobForm(j,"details"),"Tools"]);
+  return out;}
+function flowCard(n,title,state,body,opts){opts=opts||{};
+  return h("section",{class:"flow"+(state==="done"?" done":state==="warn"?" warn":"")},
+    h("div",{class:"flowhd"},h("span",{class:"flown"},state==="done"?"✓":String(n)),h("strong",{},title),opts.chip?h("span",{class:"flowchip"},opts.chip):null),body);}
+function renderDay(v){const d=TODAY(),att=ATT[d]||{},hd=att.huddle,wr=att.wrap,r=rollCall(d),di=dayInfo(d),t=today();
+  v.append(h("div",{class:"dayline"},h("strong",{},fmt(t,{weekday:"long",month:"short",day:"numeric"})),h("span",{class:"status"},hoursTxt(d)+(holidayOn(d)?" · "+holidayOn(d).name:""))));
+  flagPanel(v);
+  // 1 huddle
+  v.append(flowCard(1,"Morning huddle · PTP / ORM",hd?"done":"",hd?h("div",{class:"stack",style:"gap:6px"},h("div",{class:"status"},"Done "+fmtTime(hd.at)+(hd.by&&hd.by!==myId?" by "+(names[hd.by]||""):"")+" · "+(hd.here||0)+" here"+(hd.topics&&hd.topics.length?" · "+hd.topics.join(", "):"")),
+      h("div",{class:"tchips"},[hd.ptp?"PTP ✓":"PTP not checked",hd.orm?"ORM ✓":"ORM not checked",hd.signed?"Signed ✓":"Not signed"].map(x=>h("span",{class:"tool"+(/✓/.test(x)?"":" miss")},x))),
+      h("button",{type:"button",class:"btn ghost small",style:"justify-self:start",onclick:()=>huddleSheet(d)},"Open huddle notes"))
+    :h("div",{class:"stack",style:"gap:6px"},h("div",{class:"status"},"Roll call, safety topics, today's hazards and sign-off in one place."),h("button",{type:"button",class:"btn",style:"justify-self:start",onclick:()=>huddleSheet(d)},"Start huddle")),{chip:hd?fmtTime(hd.at):"Start of day"}));
+  // 2 roll call
+  const rcDone=!r.unk.length&&(r.here.length||r.out.length);
+  v.append(flowCard(2,"Roll call",rcDone?"done":"",h("div",{class:"stack",style:"gap:8px"},rollBar(d),r.unk.length||r.out.length?rollList(d,true):null),{chip:r.here.length+" here · "+(r.out.length+r.off.length)+" out"}));
+  // 3 assignments
+  const tg=liveTargets(d),empty=tg.filter(x=>x.task&&!x.ids.length),outOn_=r.out.filter(t=>assignOn(t.id,d));
+  const ab=h("div",{class:"stack",style:"gap:8px"});
+  outOn_.forEach(t=>ab.append(h("div",{class:"arow warn"},h("span",{},h("strong",{},t.name+" is out"),h("small",{},"Was on "+assignLabel(t.id,d))),h("button",{type:"button",class:"btn ghost small",onclick:()=>moveTech(t.id,null).then(()=>toast(t.name+" taken off"))},"Take off"))));
+  if(di.idle.length)ab.append(h("div",{},h("div",{class:"status",style:"margin-bottom:4px"},"Free · tap to put them on a task"),h("div",{class:"tchips"},di.idle.map(t=>h("button",{type:"button",class:"tchip free",onclick:()=>pickTarget(t.id)},t.name+" ＋")))));
+  tg.forEach(x=>ab.append(h("div",{class:"arow"+(x.task&&!x.ids.length?" noone":"")},h("span",{},h("strong",{},x.task?x.task.name:x.job.name+" (whole job)"),h("small",{},(x.task?x.job.name+" · ":"")+(x.ids.length?crewNames(x.ids):"No one on it"))),
+    h("span",{style:"display:flex;gap:6px"},x.ids.length?h("button",{type:"button",class:"btn ghost small",onclick:()=>{const id=x.ids[x.ids.length-1];pickTarget(id);}},"Move"):null,h("button",{type:"button",class:"btn small"+(x.ids.length?" ghost":""),onclick:()=>pickTech(x)},"＋")))));
+  if(!tg.length)ab.append(h("div",{class:"status"},"No work on the board today."));
+  v.append(flowCard(3,"Assignments · delegate or pivot",outOn_.length||empty.length?"warn":tg.length?"done":"",ab,{chip:(empty.length?empty.length+" need crew":"")+(empty.length&&di.idle.length?" · ":"")+(di.idle.length?di.idle.length+" free":"")||"All set"}));
+  // 4 meetings & reminders
+  const rs=remsOn(d),late=S.messages.filter(m=>isNote(m)&&m.remindOn&&m.remindOn<d&&!m.done);
+  const mb=h("div",{class:"stack",style:"gap:6px"});
+  [...late,...rs].forEach(m=>{const due=m.remindOn<d||!m.remindAt||m.remindAt<=nowHM();
+    mb.append(h("div",{class:"arow"+(m.kind==="meeting"?" meet":"")+(due&&m.remindOn<d?" warn":"")},h("label",{class:"check",style:"align-items:flex-start;gap:10px"},h("input",{type:"checkbox","aria-label":"Done",onchange:async()=>{try{await db.collection("messages").doc(m.id).update({done:true,doneBy:myId||"",doneAt:Date.now()});}catch(e){writeErr(e);}}}),
+      h("span",{},h("strong",{},m.text),h("small",{},(m.remindOn<d?"From "+fmtS(m.remindOn):m.remindAt?fmtHM(m.remindAt):"Today")+(m.jobId&&jobName(m.jobId)?" · "+jobName(m.jobId):""))))));});
+  if(!late.length&&!rs.length)mb.append(h("div",{class:"status"},"Nothing scheduled today."));
+  const up=S.messages.filter(m=>isNote(m)&&m.remindOn>d&&m.remindOn<=iso(addDays(parseD(d),7))&&!m.done).length;
+  mb.append(h("div",{style:"display:flex;gap:6px;flex-wrap:wrap"},h("button",{type:"button",class:"btn ghost small",onclick:()=>remForm("meeting")},"＋ Meeting"),h("button",{type:"button",class:"btn ghost small",onclick:()=>remForm("reminder")},"＋ Reminder"),up?h("button",{type:"button",class:"linkbtn",onclick:()=>{msgSeg="notes";setTab("messages",true);}},up+" coming up this week ›"):null));
+  v.append(flowCard(4,"Meetings & reminders","",mb,{chip:(rs.length+late.length)?String(rs.length+late.length)+" today":"Clear"}));
+  // 5 plan ahead
+  const nd=nextWorkDay(d),ndi=dayInfo(nd),soon=S.jobs.filter(j=>!j.doneOn&&!isQuick(j)&&j.start&&j.start>d&&j.start<=iso(addDays(parseD(d),14))).sort((a,b)=>a.start<b.start?-1:1);
+  const pb=h("div",{class:"stack",style:"gap:8px"});
+  pb.append(h("div",{class:"arow"+(ndi.short?" warn":"")},h("span",{},h("strong",{},fmtS(nd,{weekday:"long"})),h("small",{},ndi.avail+" available · "+ndi.need+" needed"+(ndi.off.length?" · off: "+ndi.off.map(t=>t.name).join(", "):""))),h("button",{type:"button",class:"btn ghost small",onclick:()=>{mode="day";cursor=parseD(nd);setTab("board",true);}},"Plan it")));
+  let open=0;soon.forEach(j=>{const items=prepItems(j);open+=items.length;
+    pb.append(h("div",{class:"prep"},h("div",{style:"display:flex;justify-content:space-between;gap:8px;align-items:baseline"},h("strong",{},j.name),h("span",{class:"status"},"Starts "+fmtS(j.start,{weekday:"short",month:"short",day:"numeric"}))),
+      items.length?h("div",{class:"tchips"},items.map(([l,fn,b])=>h("button",{type:"button",class:"tchip dep",onclick:fn},"⚠ "+l))):h("div",{class:"status",style:"color:var(--ok)"},"Ready ✓"),
+      h("button",{type:"button",class:"linkbtn",style:"justify-self:start",onclick:()=>remForm("reminder",{jobId:j.id,date:iso(addDays(parseD(j.start),-2))})},"＋ Reminder for this job")));});
+  if(!soon.length)pb.append(h("div",{class:"status"},"No new jobs starting in the next 2 weeks."));
+  v.append(flowCard(5,"Plan ahead",open?"warn":"",pb,{chip:open?open+" to prep":"Next 2 weeks"}));
+  // 6 wrap up
+  const sum=daySummary(d);
+  v.append(flowCard(6,"Wrap up the day",wr?"done":"",h("div",{class:"stack",style:"gap:6px"},
+    sum.length?h("div",{class:"stack",style:"gap:2px"},sum.map(x=>h("div",{class:"status"},h("strong",{style:"color:var(--ink)"},x.job.name+": "),[...x.parts,...x.tasks.map(t=>"✓ "+t)].join(" · ")))):h("div",{class:"status"},"Cables checked off today show up here."),
+    wr?h("div",{class:"status"},"Wrapped up "+fmtTime(wr.at)+(wr.tomorrow?" · Tomorrow: "+wr.tomorrow:"")):null,
+    h("button",{type:"button",class:"btn"+(wr?" ghost":"")+" small",style:"justify-self:start",onclick:()=>wrapSheet(d)},wr?"Edit wrap-up":"Wrap up & share")),{chip:wr?fmtTime(wr.at):"End of day"}));}
 let homeSeg="";
 function renderHome(v){if(!MGR()){renderMyDay(v);return;}
-  const rk=isOwner?"lead":myRole();if(!homeSeg)homeSeg="dash";
-  v.append(h("div",{style:"margin-bottom:10px"},subnav(homeSeg,[["dash","Dashboard"],["crew","Manpower",offOn(TODAY()).filter(o=>o.type==="Call-in"||o.type==="Sick").length],["progress","Progress"]],k=>homeSeg=k)));
-  if(homeSeg==="dash")renderDashboard(v);else if(homeSeg==="progress")renderSuperDay(v);else renderLeadDay(v);}
+  const rk=isOwner?"lead":myRole();if(!homeSeg)homeSeg="day";
+  v.append(h("div",{style:"margin-bottom:10px"},subnav(homeSeg,[["day","My day"],["dash","Dashboard"],["crew","Manpower",offOn(TODAY()).filter(o=>o.type==="Call-in"||o.type==="Sick").length],["progress","Progress"]],k=>homeSeg=k)));
+  if(homeSeg==="day")renderDay(v);else if(homeSeg==="dash")renderDashboard(v);else if(homeSeg==="progress")renderSuperDay(v);else renderLeadDay(v);}
 function dayHead(v){const t=today();v.append(h("div",{class:"dayline"},h("strong",{},fmt(t,{weekday:"long",month:"short",day:"numeric"})),h("span",{class:"status"},hoursTxt(TODAY())+(holidayOn(TODAY())?" · "+holidayOn(TODAY()).name:"")),notifState()==="default"?h("button",{type:"button",class:"linkbtn",onclick:()=>enableAlerts()},"Turn on alerts"):null));}
 function flagPanel(v){const mine=myAlertFlags();if(mine.length)v.append(panel((isOwner?"lead":myRole())==="boss"?"Escalated to you":"Flags",null,h("div",{class:"stack"},mine.map(flagCard)),{full:true,badge:mine.length,cls:"alertp"}));}
 function techToday(tc,d){const o=offOn(d).filter(x=>x.techId===tc.id),full=o.find(x=>!isPart(x)),part=o.find(isPart);
