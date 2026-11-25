@@ -2,7 +2,7 @@
    saved in this device's storage only. Made-up crew and jobs; nothing reaches the real board.
    ?practice=1&as=crew shows the app the way a tech sees it. */
 (function(){
-const KEY="cl_practice_db_v2",AS=(location.search.match(/[?&]as=(crew|new)/)||[])[1]||"lead";
+const KEY="cl_practice_db_v3",AS=(location.search.match(/[?&]as=(crew|new)/)||[])[1]||"lead";
 const clone=o=>o==null?o:JSON.parse(JSON.stringify(o));
 let DB={};try{DB=JSON.parse(localStorage.getItem(KEY)||"null")||null;}catch(e){DB=null;}
 const iso=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
@@ -12,7 +12,7 @@ function seed(){const T=new Date(),add=n=>{const d=new Date(T);d.setDate(d.getDa
   crew.forEach(([id,name,uid,role,skills])=>D["techs/"+id]={name,uid,role,skills,active:true});
   D["team/config"]={ownerUid:"p-lead"};
   D["team/roles"]={roles:{"p-lead":{role:"lead",techId:"t1"},"p-crew":{role:"crew",techId:"t2"}}};
-  D["team/crew"]={members:{},stepTools:{pull:"Fish tape, Pull string, Ladder",terminate:"Punch-down tool",label:"Label maker",test:"Fluke"},crewKits:[{name:"Lift pull crew",need:{lift:2,spotter:1,stager:1}}]};
+  D["team/crew"]={members:{},stepTools:{pull:"Fish tape, Pull string, Ladder",terminate:"Punch-down tool",label:"Label maker",test:"Fluke"},crewKits:[{name:"Lift pull crew",need:{lift:2,spotter:1,stager:1}}],gcName:"GC lookahead (sample)",gcSched:[{name:"Level 2 ceiling grid",start:add(-3),end:add(6)},{name:"Drywall close-in L2",start:add(5),end:add(12)},{name:"Owner walkthrough",start:add(14),end:add(14)},{name:"Rack room power on",start:add(9),end:add(9)},{name:"Level 3 ceiling grid",start:add(12),end:add(25)}]};
   D["people/p-lead"]={name:"You (lead)"};D["people/p-crew"]={name:"Alex Rivera"};
   const steps=[{id:"s1",name:"Pull"},{id:"s2",name:"Dress"},{id:"s3",name:"Terminate"},{id:"s4",name:"Label"},{id:"s5",name:"Test"}],cables=[],marks={};let k=0;
   [["2.01","BMS",12],["2.01","Cameras",8],["2.01","WAPs",6],["2.02","BMS",10],["2.02","Cameras",8],["2.02","WAPs",6]].forEach(([r,t,n])=>{for(let i=1;i<=n;i++){const id="c"+(++k);cables.push({id,name:r+"-"+(100+k),rack:r,type:t,pull:r+" "+t+" · Row "+(10+Math.ceil(i/4)*2)});
@@ -47,7 +47,7 @@ function docRef(path){return{id:path.split("/").pop(),path,
   async set(v,o){if(o&&o.merge)DB[path]=merge(DB[path]||{},clone2(v));else DB[path]=strip(clone2(v));notify();},
   async update(v){if(!DB[path])throw Object.assign(new Error("No document"),{code:"not-found"});Object.keys(v).forEach(k=>setPath(DB[path],k,v[k]));notify();},
   async delete(){delete DB[path];notify();},
-  onSnapshot(ok){const f=()=>ok(snapDoc(path));subs.push(f);setTimeout(f,0);return()=>{const i=subs.indexOf(f);if(i>=0)subs.splice(i,1);};},
+  onSnapshot(ok,a2){if(ok&&typeof ok==="object"&&!ok.next)ok=a2;const f=()=>ok(snapDoc(path));subs.push(f);setTimeout(f,0);return()=>{const i=subs.indexOf(f);if(i>=0)subs.splice(i,1);};},
   collection:n=>colRef(path+"/"+n)};}
 const clone2=v=>{const walk=x=>{if(SENT(x))return x;if(Array.isArray(x))return x.map(walk);if(x&&typeof x==="object"){const o={};Object.keys(x).forEach(k=>o[k]=walk(x[k]));return o;}return x;};return walk(v);};
 let idn=0;const nid=()=>"p"+Date.now().toString(36)+(++idn).toString(36)+Math.random().toString(36).slice(2,6);
@@ -56,7 +56,7 @@ function colRef(name,filters,ord,lim){filters=filters||[];const q={
   add:async v=>{const id=nid();DB[name+"/"+id]=strip(clone2(v));notify();return docRef(name+"/"+id);},
   where:(f,op,v)=>colRef(name,filters.concat([[f,op,v]]),ord,lim),orderBy:(f,dir)=>colRef(name,filters,[f,dir],lim),limit:n=>colRef(name,filters,ord,n),limitToLast:n=>colRef(name,filters,ord,n),startAfter:()=>q,
   get:async()=>snap(),
-  onSnapshot(ok){const f=()=>ok(snap());subs.push(f);setTimeout(f,0);return()=>{const i=subs.indexOf(f);if(i>=0)subs.splice(i,1);};}};
+  onSnapshot(ok,a2){if(ok&&typeof ok==="object")ok=a2;const f=()=>ok(snap());subs.push(f);setTimeout(f,0);return()=>{const i=subs.indexOf(f);if(i>=0)subs.splice(i,1);};}};
   function snap(){let docs=Object.keys(DB).filter(k=>k.startsWith(name+"/")&&k.split("/").length===name.split("/").length+1).map(snapDoc).filter(d=>filters.every(([f,op,v])=>{const x=(d.data()||{})[f];return op==="=="?x===v:op==="!="?x!==v:op===">="?x>=v:op==="<="?x<=v:op===">"?x>v:op==="<"?x<v:op==="in"?v.includes(x):op==="array-contains"?Array.isArray(x)&&x.includes(v):true;}));
     if(ord){const [f,dir]=ord;docs.sort((a,b)=>{const x=(a.data()||{})[f],y=(b.data()||{})[f];return (x>y?1:x<y?-1:0)*(dir==="desc"?-1:1);});}if(lim)docs=docs.slice(0,lim);
     return{docs,size:docs.length,empty:!docs.length,metadata:{fromCache:false,hasPendingWrites:false},forEach:fn=>docs.forEach(fn),docChanges:()=>docs.map(d=>({type:"added",doc:d}))};}

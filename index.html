@@ -895,6 +895,38 @@ small.needwarn{color:var(--over)!important;font-weight:600}small.needok{color:va
 @media(max-width:560px){.bmain{grid-template-columns:minmax(0,1fr) 70px;grid-template-areas:"n b" "w w"}.bname{grid-area:n}.bwho{grid-area:w}.bmain .mbar{grid-area:b}}
 .hline{display:block;width:100%;text-align:left;background:none;border:0;border-left:3px solid var(--line);padding:5px 8px;color:var(--ink);font:inherit;font-size:.88rem;cursor:pointer;border-radius:0 8px 8px 0}
 .hline:hover{background:color-mix(in srgb,var(--ink) 5%,transparent)}.hline.warn{border-left-color:var(--likely)}.hline.bad{border-left-color:var(--over);font-weight:600}
+.gsum{margin-bottom:8px}
+@media(max-width:560px){.gsum{grid-template-columns:repeat(2,minmax(0,1fr))}.gt-row{grid-template-columns:132px minmax(520px,1fr)}.gt-lbl{padding:4px 6px}}
+@media(min-width:760px){.crewgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:8px}.crewgrid>.card{margin:0}}
+@media(min-width:900px){.hrsgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:start}.hrsgrid>*{margin:0!important}}
+.gt-tools{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-bottom:8px}
+.gt-key{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;font-size:.78rem;color:var(--muted)}.gt-key i{display:inline-block;width:14px;height:8px;border-radius:3px;margin-right:-6px}
+.k-locked{background:var(--locked)}.k-likely{background:var(--likely)}.k-idea{background:var(--idea)}.k-late{background:repeating-linear-gradient(45deg,var(--over) 0 3px,transparent 3px 6px);border:1px solid var(--over)}.k-due{width:3px!important;background:var(--over)}
+.gantt{border:1px solid var(--line);border-radius:14px;background:var(--panel);overflow-x:auto;overflow-y:hidden}
+.gt-row{display:grid;grid-template-columns:200px minmax(560px,1fr);border-bottom:1px solid color-mix(in srgb,var(--line) 60%,transparent);min-height:40px}
+.gt-row.sub{min-height:32px}.gt-row.sub .gt-lbl{padding-left:26px}.gt-row.warn .gt-lbl strong{color:var(--over)}
+.gt-headrow{position:sticky;top:0;z-index:2;background:var(--panel);min-height:26px}
+.gt-lbl{position:sticky;left:0;z-index:1;display:flex;gap:6px;align-items:center;padding:4px 10px;background:var(--panel);border:0;border-right:1px solid var(--line);color:var(--ink);font:inherit;text-align:left;cursor:pointer;min-width:0}
+.gt-ln{display:flex;flex-direction:column;min-width:0}.gt-ln strong,.gt-ln small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.gt-ln strong{font-size:.88rem}.gt-ln small{font-size:.72rem;color:var(--muted)}
+.gt-tog{color:var(--muted);width:12px}
+.gt-lane{position:relative;min-width:0}
+.gt-scale{position:relative;height:26px}.gt-wk{position:absolute;top:0;bottom:0;padding:5px 6px;font-size:.72rem;color:var(--muted);border-left:1px solid var(--line);white-space:nowrap;overflow:hidden}
+.gt-shade{position:absolute;inset:0;pointer-events:none}.gt-shade i{position:absolute;top:0;bottom:0;background:color-mix(in srgb,var(--ink) 5%,transparent)}.gt-shade i.hol{background:color-mix(in srgb,var(--over) 10%,transparent)}
+.gt-today{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);opacity:.8;pointer-events:none;z-index:1}
+.gt-bar{position:absolute;top:8px;bottom:8px;border-radius:7px;border:0;padding:0;overflow:hidden;cursor:pointer;color:#fff;font:600 .72rem var(--f-body);display:flex;align-items:center;min-width:6px;z-index:2}
+.gt-bar.c-locked{background:color-mix(in srgb,var(--locked) 55%,var(--panel))}.gt-bar.c-likely{background:color-mix(in srgb,var(--likely) 55%,var(--panel));color:var(--ink)}.gt-bar.c-idea{background:color-mix(in srgb,var(--idea) 40%,var(--panel));color:var(--ink);outline:1px dashed var(--idea)}
+.gt-bar.sub{top:9px;bottom:9px;background:color-mix(in srgb,var(--accent) 30%,var(--panel));color:var(--ink)}.gt-bar.done{opacity:.55}
+.gt-bar.gc{top:12px;bottom:12px;background:color-mix(in srgb,var(--muted) 45%,var(--panel));cursor:default}.gt-bar.gc.ms{width:10px!important;transform:rotate(45deg);top:14px;bottom:auto;height:10px;border-radius:2px;margin-left:-5px}
+.gt-fill{position:absolute;left:0;top:0;bottom:0;background:var(--ok);opacity:.85}.gt-bar.c-locked .gt-fill{background:var(--locked)}
+.gt-bt{position:relative;padding:0 6px;white-space:nowrap;text-shadow:0 1px 1px rgba(0,0,0,.25)}
+.gt-ghost{position:absolute;top:10px;bottom:10px;border-radius:0 7px 7px 0;background:repeating-linear-gradient(45deg,color-mix(in srgb,var(--over) 55%,transparent) 0 4px,transparent 4px 8px);border:1px solid var(--over);z-index:1}
+.gt-fc{position:absolute;top:6px;bottom:6px;width:2px;background:var(--ok);z-index:3}
+.gt-due{position:absolute;top:4px;width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:8px solid var(--likely);margin-left:-5px;z-index:3}.gt-due.past{border-top-color:var(--over)}
+.gt-sec{padding:6px 10px;font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:color-mix(in srgb,var(--ink) 4%,transparent);position:sticky;left:0}
+.needrow{min-height:84px}.needrow .gt-lane{height:84px}.gt-need{position:absolute;left:0;right:0;top:6px;height:74px}
+.gt-col{position:absolute;top:0;bottom:0;border:0;padding:0 1px;background:none;cursor:pointer}.gt-col i{position:absolute;left:1px;right:1px;bottom:0;border-radius:2px 2px 0 0}
+.n-firm{background:color-mix(in srgb,var(--locked) 60%,transparent)}.n-extra{background:color-mix(in srgb,var(--over) 60%,transparent)}.n-idea{background:color-mix(in srgb,var(--idea) 45%,transparent)}
+.n-cap{position:absolute;left:0;right:0;height:2px;background:var(--ok)}.gt-col.short{background:color-mix(in srgb,var(--over) 12%,transparent)}
 </style>
 </head>
 <body>
@@ -1495,7 +1527,7 @@ function subnav(cur,opts,set){return h("div",{class:"subnav",role:"group"},opts.
 
 /* ---------- render ---------- */
 function render(){memo={};renderTabs();renderNotifPill();const v=$("#view");
-  if(tab==="chat"&&chatEl&&v.contains(chatEl)&&teamLoaded&&myId&&!expiredUid(myId)){markTabSeen("chat");drawChat();return;}document.querySelector(".wrap").classList.toggle("wide",tab==="home"||tab==="board");const y=window.scrollY;v.textContent="";
+  if(tab==="chat"&&chatEl&&v.contains(chatEl)&&teamLoaded&&myId&&!expiredUid(myId)){markTabSeen("chat");drawChat();return;}document.querySelector(".wrap").classList.toggle("wide",tab!=="chat");const y=window.scrollY;v.textContent="";
   const tabsEl=$("#tabs");
   if(!myId){tabsEl.hidden=true;return;}
   if(noBoard){tabsEl.hidden=true;renderWelcome(v);return;}
@@ -1520,10 +1552,11 @@ function dateNav(step){
   return h("div",{class:"nav"},h("button",{class:"iconbtn",type:"button","aria-label":"Previous",onclick:()=>move(-1)},"‹"),h("span",{class:"lbl"},label),h("button",{class:"iconbtn",type:"button","aria-label":"Next",onclick:()=>move(1)},"›"),h("button",{class:"btn ghost small",type:"button",onclick:()=>{cursor=today();render();}},"Today"));
 }
 function renderBoard(v){
-  if(!["live","month","week","day"].includes(mode))mode="live";
+  if(!["live","month","week","day","plan"].includes(mode))mode="live";
   const setMode=k=>{mode=k;picked=null;try{localStorage.setItem("cl_mode",k)}catch(e){}};
-  v.append(h("div",{class:"sechead"},subnav(mode,[["live","Now"],["day","Day"],["week","Week"],["month","Month"]],setMode),mode==="live"?h("span",{class:"status"},fmt(today(),{weekday:"long",month:"short",day:"numeric"})+" · "+hoursTxt(TODAY())+(holidayOn(TODAY())?" · "+holidayOn(TODAY()).name:"")):dateNav({month:"m",week:7,day:1}[mode])));
+  v.append(h("div",{class:"sechead"},subnav(mode,[["live","Now"],["day","Day"],["week","Week"],["month","Month"],MGR()?["plan","Plan"]:null],setMode),mode==="plan"?dateNav(7):mode==="live"?h("span",{class:"status"},fmt(today(),{weekday:"long",month:"short",day:"numeric"})+" · "+hoursTxt(TODAY())+(holidayOn(TODAY())?" · "+holidayOn(TODAY()).name:"")):dateNav({month:"m",week:7,day:1}[mode])));
   if(mode==="live"){renderLive(v);return;}
+  if(mode==="plan"){if(MGR())renderGantt(v);else{mode="live";renderLive(v);}return;}
   if(mode==="month")renderMonth(v);
   else if(mode==="day")v.append(h("div",{class:"days"},dayRow(iso(cursor))));
   else{const m=monday(cursor);v.append(h("div",{class:"days"},[0,1,2,3,4,5].map(i=>dayRow(iso(addDays(m,i))))));
@@ -2831,6 +2864,95 @@ function renderDay(v){const d=TODAY(),att=ATT[d]||{},hd=att.huddle,wr=att.wrap,r
   if(!heads.children.length)heads.append(h("div",{class:"status"},"Nothing coming up. You're ahead."));
   side.append(bcard("Heads up",()=>daySheet("Plan ahead",()=>secPlan(d)),heads,{chip:heads.querySelectorAll(".warn,.bad").length?heads.querySelectorAll(".warn,.bad").length+" to look at":""}));
   v.append(h("div",{class:"bento"},bcard("Who's on what",()=>daySheet("Assignments",()=>secAssign(d),true),ab,{chip:ap?"🚨 All hands":(empty.length?empty.length+" need crew":"All covered")+(di.idle.length?" · "+di.idle.length+" free":""),cls:"bmainc"+(empty.length||outOn_.length?" warn":"")}),side));}
+/* ===== PLAN (Gantt): jobs and their tasks on a timeline, forecast finish from crew pace, a crew-needed vs available lane,
+   and an optional outside schedule (GC / MS Project / P6 export as .csv or MS Project .xml) kept in team/crew gcSched ===== */
+let ganttWeeks=8,ganttOpen={},ganttGC=true;
+try{ganttWeeks=+localStorage.getItem("cl_gweeks")||8;}catch(e){}
+function gcSched(){return Array.isArray(crewDoc.gcSched)?crewDoc.gcSched:[];}
+function ganttNeed(d,M){let firm=0,idea=0,extra=0;
+  S.jobs.forEach(j=>{if(!j.start||isQuick(j)||j.doneOn)return;const e=jobEnd(j);const f=j.start<=TODAY()?jobForecast(j,M):null,fe=f&&f.finish&&f.finish>e?f.finish:e;
+    if(d<j.start||d>fe)return;const n=+j.techs||0;if(d>e){extra+=Math.max(1,f.crewNow||n);return;}
+    if((j.conf||"likely")==="idea")idea+=n;else firm+=n;
+    if(f&&f.people&&f.people>n&&d>=TODAY())extra+=f.people-n;});
+  return {firm,idea,extra,need:firm+extra,avail:dayInfo(d).avail};}
+function renderGantt(v){const M=computeMetrics(30),start=addDays(monday(cursor),-7),days=ganttWeeks*7,end=addDays(start,days-1),s0=iso(start),e0=iso(end),T=TODAY();
+  const pos=d=>Math.max(0,Math.min(100,(parseD(d)-start)/864e5/days*100));
+  const span=(a,b)=>{const x=pos(a),y=Math.max(x+100/days,Math.min(100,((parseD(b)-start)/864e5+1)/days*100));return "left:"+x+"%;width:"+(y-x)+"%";};
+  const inWin=(a,b)=>a<=e0&&b>=s0;
+  // header: weeks + today line
+  const head=h("div",{class:"gt-scale"});for(let i=0;i<ganttWeeks;i++){const w=addDays(start,i*7);head.append(h("span",{class:"gt-wk",style:"left:"+(i/ganttWeeks*100)+"%;width:"+(100/ganttWeeks)+"%"},fmt(w,{month:"short",day:"numeric"})));}
+  const shade=h("div",{class:"gt-shade"});for(let i=0;i<days;i++){const d=iso(addDays(start,i));if(!isWeekday(d))shade.append(h("i",{class:holidayOn(d)?"hol":"",style:"left:"+(i/days*100)+"%;width:"+(100/days)+"%",title:holidayOn(d)?holidayOn(d).name:""}));}
+  const todayL=T>=s0&&T<=e0?h("div",{class:"gt-today",style:"left:"+pos(T)+"%"}):null;
+  const lane=(cls,kids)=>h("div",{class:"gt-lane "+(cls||"")},shade.cloneNode(true),todayL?todayL.cloneNode(true):null,kids);
+  const rows=h("div",{class:"gt-rows"});
+  const row=(label,sub,laneKids,o)=>{o=o||{};rows.append(h("div",{class:"gt-row"+(o.cls?" "+o.cls:"")},
+    h("button",{type:"button",class:"gt-lbl",onclick:o.go||null,title:label},o.tog!=null?h("span",{class:"gt-tog"},o.tog?"▾":"▸"):null,h("span",{class:"gt-ln"},h("strong",{},label),sub?h("small",{},sub):null)),lane("",laneKids)));};
+  const jobs=realJobs().filter(j=>j.start&&(!j.doneOn||j.doneOn>=s0)).filter(j=>inWin(j.start,jobForecast(j,M)?.finish>jobEnd(j)?jobForecast(j,M).finish:jobEnd(j))).sort(byPri);
+  let behind=0;
+  jobs.forEach(j=>{const e=jobEnd(j),f=!j.doneOn&&j.start<=T?jobForecast(j,M):null,pct=jobPct(j),late=f&&f.finish&&f.finish>e;if(late)behind++;
+    const bar=h("button",{type:"button",class:"gt-bar c-"+(j.conf||"likely")+(j.doneOn?" done":"")+(late?" late":""),style:span(j.start,j.doneOn||e),title:j.name+" · "+fmtS(j.start)+" – "+fmtS(e)+(pct!=null?" · "+pct+"%":""),onclick:()=>{taskJob=j.id;setTab("tasks",true);}},
+      pct!=null?h("i",{class:"gt-fill",style:"width:"+pct+"%"}):null,h("span",{class:"gt-bt"},(j.techs?"👷"+j.techs+" ":"")+(pct!=null?pct+"%":"")));
+    const kids=[bar];
+    if(late)kids.push(h("span",{class:"gt-ghost",style:span(iso(addDays(parseD(e),1)),f.finish),title:"At today's pace it finishes "+fmtS(f.finish,{weekday:"short",month:"short",day:"numeric"})}));
+    if(f&&f.finish&&!late)kids.push(h("span",{class:"gt-fc",style:"left:"+pos(f.finish)+"%",title:"Forecast finish "+fmtS(f.finish)}));
+    tasksOf(j).filter(t=>t.due&&!t.doneOn).forEach(t=>kids.push(h("span",{class:"gt-due"+(t.due<T?" past":""),style:"left:"+pos(t.due)+"%",title:t.name+" due "+fmtS(t.due)})));
+    const open=!!ganttOpen[j.id],tk=tasksOf(j);
+    row(j.name,(late?"⚠ "+f.late+" days behind · ":"")+fmtS(j.start,{month:"short",day:"numeric"})+" – "+fmtS(e,{month:"short",day:"numeric"}),kids,{tog:tk.length?open:null,cls:late?"warn":"",go:()=>{if(tk.length){ganttOpen[j.id]=!open;render();}else{taskJob=j.id;setTab("tasks",true);}}});
+    if(open)tk.forEach(t=>{const pr=taskProg(j,t),tp=t.doneOn?100:pr?pr.pct:null,te=t.doneOn||t.due||e,ts=j.start;
+      row(t.name,(t.doneOn?"✓ Done":(t.crew||[]).length?crewNames(t.crew):"No one on it")+(t.due?" · due "+fmtS(t.due,{month:"short",day:"numeric"}):""),
+        [h("button",{type:"button",class:"gt-bar sub"+(t.doneOn?" done":""),style:span(ts,te),onclick:()=>{taskJob=j.id;setTab("tasks",true);}},tp!=null?h("i",{class:"gt-fill",style:"width:"+tp+"%"}):null,h("span",{class:"gt-bt"},tp!=null?tp+"%":""))],{cls:"sub"});});});
+  if(!jobs.length)rows.append(h("div",{class:"status",style:"padding:12px"},"No jobs in these weeks."));
+  // outside schedule
+  const gc=gcSched().filter(x=>x.start&&inWin(x.start,x.end||x.start));
+  if(gc.length&&ganttGC){rows.append(h("div",{class:"gt-sec"},"Outside schedule"+(crewDoc.gcName?" · "+crewDoc.gcName:"")));
+    gc.slice(0,60).forEach(x=>row(x.name,fmtS(x.start,{month:"short",day:"numeric"})+(x.end&&x.end!==x.start?" – "+fmtS(x.end,{month:"short",day:"numeric"}):""),[h("span",{class:"gt-bar gc"+(x.end===x.start||!x.end?" ms":""),style:span(x.start,x.end||x.start),title:x.name})],{cls:"gc"}));}
+  // crew needed vs available
+  const need=h("div",{class:"gt-need"}),short=[];let mx=1;const nd=[];
+  for(let i=0;i<days;i++){const d=iso(addDays(start,i));if(!isWeekday(d)){nd.push(null);continue;}const n=ganttNeed(d,M);nd.push(n);mx=Math.max(mx,n.need+n.idea,n.avail);}
+  nd.forEach((n,i)=>{if(!n)return;const d=iso(addDays(start,i)),sh=n.need>n.avail&&d>=T;if(sh)short.push([d,n.need-n.avail]);
+    need.append(h("button",{type:"button",class:"gt-col"+(sh?" short":""),style:"left:"+(i/days*100)+"%;width:"+(100/days)+"%",title:fmtS(d,{weekday:"short",month:"short",day:"numeric"})+": need "+n.need+(n.idea?" (+"+n.idea+" maybe)":"")+", have "+n.avail+(n.extra?" · includes "+n.extra+" extra to catch up":""),onclick:()=>{mode="day";cursor=parseD(d);render();}},
+      h("i",{class:"n-firm",style:"height:"+((n.firm)/mx*100)+"%"}),n.extra?h("i",{class:"n-extra",style:"height:"+(n.extra/mx*100)+"%;bottom:"+(n.firm/mx*100)+"%"}):null,n.idea?h("i",{class:"n-idea",style:"height:"+(n.idea/mx*100)+"%;bottom:"+((n.firm+n.extra)/mx*100)+"%"}):null,
+      h("b",{class:"n-cap",style:"bottom:"+(n.avail/mx*100)+"%"})));});
+  rows.append(h("div",{class:"gt-row needrow"},h("div",{class:"gt-lbl"},h("span",{class:"gt-ln"},h("strong",{},"Crew needed"),h("small",{},"bars = needed · line = available"))),lane("needlane",need)));
+  // summary on top
+  const firstShort=short[0];
+  const sum=h("div",{class:"gltiles gsum"},
+    tile({ic:"📅",big:String(jobs.filter(j=>!j.doneOn).length),label:"Jobs in view",sub:ganttWeeks+" weeks"}),
+    tile({ic:"⏱",big:String(behind),label:"Behind",sub:behind?"See red tails":"On pace",st:behind?"bad":"ok"}),
+    tile({ic:"👷",big:firstShort?"+"+Math.max(...short.map(x=>x[1])):"✓",label:firstShort?"Short on crew":"Crew covered",sub:firstShort?"from "+fmtS(firstShort[0],{weekday:"short",month:"short",day:"numeric"}):"next "+ganttWeeks+" weeks",st:firstShort?"warn":"ok",go:firstShort?()=>{mode="day";cursor=parseD(firstShort[0]);render();}:null}),
+    tile({ic:"📥",big:String(gcSched().length||"＋"),label:"Outside schedule",sub:gcSched().length?(crewDoc.gcName||"Imported")+" · tap to update":"Import GC schedule",go:()=>gcImportSheet()}));
+  const zoom=h("div",{class:"gt-tools"},subnav(String(ganttWeeks),[["4","4 wk"],["8","8 wk"],["12","12 wk"],["26","6 mo"]],k=>{ganttWeeks=+k;try{localStorage.setItem("cl_gweeks",k);}catch(e){}}),
+    h("span",{class:"gt-key"},h("i",{class:"k-locked"}),"Locked",h("i",{class:"k-likely"}),"Likely",h("i",{class:"k-idea"}),"Maybe",h("i",{class:"k-late"}),"Late tail",h("i",{class:"k-due"}),"Task due"),
+    gcSched().length?h("label",{class:"check"},h("input",{type:"checkbox",checked:ganttGC,onchange:e=>{ganttGC=e.target.checked;render();}}),"Show outside schedule"):null);
+  v.append(sum,zoom,h("div",{class:"gantt"},h("div",{class:"gt-row gt-headrow"},h("div",{class:"gt-lbl"},""),h("div",{class:"gt-lane"},head)),rows));}
+/* import an outside schedule: CSV (Name/Task, Start, Finish/End) from MS Project, P6, Smartsheet, Excel, or MS Project XML. Read on this device only. */
+function parseCSV(t){const rows=[];let r=[],f="",q=false;for(let i=0;i<t.length;i++){const c=t[i];if(q){if(c==='"'){if(t[i+1]==='"'){f+='"';i++;}else q=false;}else f+=c;}else if(c==='"')q=true;else if(c===","||c==="\t"){r.push(f);f="";}else if(c==="\n"||c==="\r"){if(c==="\r"&&t[i+1]==="\n")i++;r.push(f);rows.push(r);r=[];f="";}else f+=c;}if(f||r.length){r.push(f);rows.push(r);}return rows.filter(x=>x.some(y=>y.trim()));}
+function toISO(s){s=String(s||"").trim();if(!s)return "";let m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);if(m)return m[1]+"-"+m[2]+"-"+m[3];
+  m=s.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);if(m){const y=m[3].length===2?"20"+m[3]:m[3];return y+"-"+m[1].padStart(2,"0")+"-"+m[2].padStart(2,"0");}
+  m=s.match(/(\d{1,2})[\- ]([A-Za-z]{3})[A-Za-z]*[\- ](\d{2,4})/);if(m){const mo="janfebmaraprmayjunjulaugsepoctnovdec".indexOf(m[2].toLowerCase())/3+1;if(mo>0){const y=m[3].length===2?"20"+m[3]:m[3];return y+"-"+String(mo).padStart(2,"0")+"-"+m[1].padStart(2,"0");}}
+  const d=new Date(s);return isNaN(d)?"":iso(d);}
+function parseSchedule(text,name){let out=[];
+  if(/<Project[\s>]/.test(text)&&/<Task>/.test(text)){const doc=new DOMParser().parseFromString(text,"text/xml");
+    doc.querySelectorAll("Tasks > Task").forEach(t=>{const g=k=>(t.querySelector(":scope > "+k)||{}).textContent||"";if(g("Summary")==="1"&&g("OutlineLevel")==="0")return;
+      const n=g("Name").trim();if(n)out.push({name:n,start:toISO(g("Start")),end:toISO(g("Finish")),lvl:+g("OutlineLevel")||1});});}
+  else{const rows=parseCSV(text);if(rows.length<2)return [];const hd=rows[0].map(x=>x.trim().toLowerCase());
+    const col=re=>hd.findIndex(x=>re.test(x));const ni=col(/^(task ?name|name|activity ?name|description|task|activity)$/),si=col(/start/),ei=col(/finish|end|complete by|due/);
+    if(ni<0||si<0)throw new Error("Couldn't find the Name and Start columns. Export with columns like Task Name, Start, Finish.");
+    rows.slice(1).forEach(r=>{const n=(r[ni]||"").trim();if(n)out.push({name:n,start:toISO(r[si]),end:toISO(ei>=0?r[ei]:r[si])});});}
+  return out.filter(x=>x.start).map(x=>({name:x.name.slice(0,80),start:x.start,end:x.end&&x.end>=x.start?x.end:x.start}));}
+function gcImportSheet(){const cur=gcSched();let parsed=null;const info=h("div",{class:"status"});
+  const filter=h("input",{type:"text",id:"gcF",placeholder:"Only keep lines with… (e.g. DC2, IDF, low voltage)",value:crewDoc.gcFilter||""});
+  const file=h("input",{type:"file",accept:".csv,.txt,.xml,text/csv,text/xml",onchange:async e=>{const f=e.target.files[0];if(!f)return;try{parsed=parseSchedule(await f.text(),f.name);info.textContent=parsed.length+" lines found in "+f.name+".";if(!val("gcName"))$("#gcName").value=f.name.replace(/\.\w+$/,"");}catch(err){parsed=null;info.textContent=err.message||"Couldn't read that file.";}}});
+  openSheet("Outside schedule",[h("p",{class:"full status",style:"margin:0"},"Bring in the GC's or owner's schedule so it sits on the same timeline as your jobs. In MS Project or P6, export to Excel/CSV (Task Name, Start, Finish), or save MS Project as XML. The file is read on this device; only the line names and dates are saved to your board."),
+    h("div",{class:"full field"},h("label",{},"Schedule file"),file),info,
+    field({id:"gcName",label:"Name",value:crewDoc.gcName||"",placeholder:"e.g. GC 3-week lookahead",full:true}),
+    h("div",{class:"full field"},h("label",{for:"gcF"},"Keep only lines that mention (optional, comma separated)"),filter),
+    cur.length?h("div",{class:"full status"},"Now showing "+cur.length+" lines"+(crewDoc.gcAt?" · updated "+fmtS(iso(new Date(crewDoc.gcAt))):"")+"."):null,
+    cur.length?h("button",{type:"button",class:"full btn ghost",onclick:()=>{if(!confirm("Remove the outside schedule?"))return;saveCrew({gcSched:[],gcName:"",gcAt:0});closeSheet();toast("Removed");render();}},"Remove outside schedule"):null],
+    async()=>{let list=parsed;if(!list){if(!cur.length){formErr("Pick a schedule file.");return false;}list=cur;}
+      const words=val("gcF").split(",").map(x=>x.trim().toLowerCase()).filter(Boolean);if(words.length)list=list.filter(x=>words.some(w=>x.name.toLowerCase().includes(w)));
+      list=list.sort((a,b)=>a.start<b.start?-1:1).slice(0,400);
+      saveCrew({gcSched:list,gcName:val("gcName"),gcFilter:val("gcF"),gcAt:Date.now()});toast(list.length+" lines on the timeline");render();});}
 /* ===== CALENDAR (leads / supers): meetings, reminders, due dates, job starts/ends, time off · "Add to Outlook" via .ics ===== */
 let calMonth=null,calSel=null;
 const KIND_IC={meeting:"📅",reminder:"🔔",due:"⏰",start:"🚀",end:"🏁",off:"🌴",holiday:"🎉",task:"⏰"};
@@ -3532,7 +3654,8 @@ function renderCrew(v){
   v.append(h("div",{class:"sechead"},subnav(crewSeg,[["techs","Techs"],["hours","Hours",MGR()?holidayPrompts().length:0,true],MGR()?["report","Report"]:null,MGR()?["stats","Stats"]:null,MGR()?["team","Team",nWait]:null],k=>crewSeg=k),act));
   if(crewSeg==="report"){renderReport(v);return;}
   if(crewSeg==="stats"){renderMetrics(v);return;}
-  if(crewSeg==="hours"){renderHours(v);return;}
+  if(crewSeg==="hours"){const hv=h("div");renderHours(hv);const L=h("div",{class:"stack"}),R=h("div",{class:"stack"});let seen=false;
+    [...hv.children].forEach(c=>{if(!seen){L.append(c);if(/Standard hours/.test(c.textContent))seen=true;}else R.append(c);});v.append(h("div",{class:"hrsgrid"},L,R));return;}
   if(crewSeg==="team"){
     if(importData===null)loadImport();const miss=importMissing();
     if(miss.n)v.append(h("div",{class:"panel stack",style:"margin-bottom:12px"},h("strong",{},"Add from the crew roster"),
@@ -3551,7 +3674,7 @@ function renderCrew(v){
     return;}
   const info=dayInfo(t);
   if(techs.length)v.append(h("p",{class:"status",style:"margin:0 0 8px"},techs.length+" techs · "+info.avail+" in today"+(info.off.length?" · "+info.off.length+" off":"")));
-  const box=h("div",{class:"stack"});v.append(box);
+  const box=h("div",{class:"stack crewgrid"});v.append(box);
   if(!S.techs.length)box.append(h("div",{class:"empty"},h("strong",{},"No techs added yet"),MGR()?"Add each tech, or bring in your roster from the Team tab.":"The crew list is empty."));
   [...techs,...S.techs.filter(x=>x.active===false||(x.active!==false&&helperDone(x)))].forEach(tc=>{
     const offNow=isWeekday(t)?offRec(tc.id,t):null,a=offNow?null:assignOn(tc.id,t);
@@ -7245,6 +7368,7 @@ function startData(){if(dataOn||!teamLoaded)return;if(!isOwner&&myRole()==="pend
       if(col==="people")resolveNames();if(col==="asks")asksLoaded=true;if(col==="messages")msgsLoaded=true;if(col==="asks"||col==="jobs"||col==="people"||col==="messages")checkAlerts();schedule();},
     err=>{clearTimeout(timer);if(err&&err.code==="permission-denied"){dataOn=false;schedule();return;}$("#status").textContent="Lost connection. Reload to try again.";}));});
   startAtt();
+  unsubs.push(db.doc("team/config").onSnapshot({includeMetadataChanges:true},s=>{if(!s.metadata.fromCache){clearTimeout(timer);$("#status").textContent="Live";}},()=>{}));
 }
 async function startSession(u){
   myId=u.uid;canWrite=true;
@@ -7260,7 +7384,7 @@ async function startSession(u){
   const sid=myId,retry=(ref,ok,denied)=>{const go=()=>{if(myId!==sid)return;unsubs.push(ref.onSnapshot(ok,err=>{denied();if(err&&err.code==="permission-denied")setTimeout(go,20000);}));};go();};
   retry(db.doc("team/roles"),s=>{roles=s.exists?((s.data()||{}).roles||{}):{};gotRoles=true;
     if(!s.metadata.fromCache&&isOwner&&!roles[myId])saveRole(myId,{role:"lead",techId:""});ready();},()=>{gotRoles=true;ready();});
-  retry(db.doc("team/crew"),s=>{const d=s.exists?(s.data()||{}):{};crewDoc={members:d.members||{},declined:d.declined||{},hours:d.hours||null,holidays:Array.isArray(d.holidays)?d.holidays:[],hoursPlan:Array.isArray(d.hoursPlan)?d.hoursPlan:[],dismissedPlans:d.dismissedPlans||[],links:d.links||{},rechargeHrs:d.rechargeHrs||2,tools:Array.isArray(d.tools)?d.tools:[],stepTools:d.stepTools&&typeof d.stepTools==="object"?d.stepTools:{},crewKits:Array.isArray(d.crewKits)?d.crewKits:[],toolsHidden:Array.isArray(d.toolsHidden)?d.toolsHidden:[],order:Array.isArray(d.order)?d.order:[]};gotCrew=true;ready();},()=>{gotCrew=true;ready();});
+  retry(db.doc("team/crew"),s=>{const d=s.exists?(s.data()||{}):{};crewDoc={members:d.members||{},declined:d.declined||{},hours:d.hours||null,holidays:Array.isArray(d.holidays)?d.holidays:[],hoursPlan:Array.isArray(d.hoursPlan)?d.hoursPlan:[],dismissedPlans:d.dismissedPlans||[],links:d.links||{},rechargeHrs:d.rechargeHrs||2,tools:Array.isArray(d.tools)?d.tools:[],stepTools:d.stepTools&&typeof d.stepTools==="object"?d.stepTools:{},crewKits:Array.isArray(d.crewKits)?d.crewKits:[],toolsHidden:Array.isArray(d.toolsHidden)?d.toolsHidden:[],order:Array.isArray(d.order)?d.order:[],gcSched:Array.isArray(d.gcSched)?d.gcSched:[],gcName:d.gcName||"",gcFilter:d.gcFilter||"",gcAt:d.gcAt||0};gotCrew=true;ready();},()=>{gotCrew=true;ready();});
   unsubs.push(pr.onSnapshot(s=>{me_=s.exists?(s.data()||{}):{};if(me_.name)$("#whoMe").textContent=me_.name;schedule();},()=>{}));
 }
 
