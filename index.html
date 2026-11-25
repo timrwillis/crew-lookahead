@@ -1236,14 +1236,17 @@ function curPhase(j){const ph=phasesOf(j);for(const p of ph){const tk=tasksOf(j)
 const blockedOn=(j,t,d)=>!(t.startedOn&&d>=t.startedOn)&&waitsOn(j,t,d).length>0;
 // A task marked done today drops off right away; history still shows it for that day once the day passes.
 const taskOpen=(t,d)=>!t.doneOn||d<t.doneOn||(d===t.doneOn&&d<TODAY());
-function membersOn(j,d){const set=new Set(crewOn(j,d));tasksOf(j).forEach(t=>{if(taskOpen(t,d)&&!heldOn(t,d)&&!blockedOn(j,t,d))crewOn(t,d).forEach(x=>set.add(x));});return [...set];}
+/* a tech picking up work: marks._claim_<techId> {taskId,at,by} (crew can only write marks). Counts for that day until a lead's app turns it into a real assignment (applyClaims). */
+const claimOf=(j,tid,d)=>{const c=(j.marks||{})["_claim_"+tid];return c&&c.at&&iso(new Date(c.at))===d?c:null;};
+const claimersOf=(j,d)=>Object.keys(j.marks||{}).filter(k=>k.startsWith("_claim_")).map(k=>k.slice(7)).filter(tid=>claimOf(j,tid,d));
+function membersOn(j,d){const set=new Set(crewOn(j,d));claimersOf(j,d).forEach(x=>{const c=claimOf(j,x,d),t=c.taskId?tasksOf(j).find(y=>y.id===c.taskId):null;if(!c.taskId||(t&&taskOpen(t,d)&&!heldOn(t,d)))set.add(x);});tasksOf(j).forEach(t=>{if(taskOpen(t,d)&&!heldOn(t,d)&&!blockedOn(j,t,d))crewOn(t,d).forEach(x=>set.add(x));});return [...set];}
 // Within a job, a tech works the first unfinished task they're on.
-const taskFor=(j,tid,d)=>{const c=tasksOf(j).filter(t=>taskOpen(t,d)&&!heldOn(t,d)&&!blockedOn(j,t,d)&&crewOn(t,d).includes(tid));
+const taskFor=(j,tid,d)=>{{const cl=claimOf(j,tid,d);if(cl&&cl.taskId){const t=tasksOf(j).find(x=>x.id===cl.taskId);if(t&&taskOpen(t,d)&&!heldOn(t,d)&&!blockedOn(j,t,d))return t;}}const c=tasksOf(j).filter(t=>taskOpen(t,d)&&!heldOn(t,d)&&!blockedOn(j,t,d)&&crewOn(t,d).includes(tid));
   return c.length>1?c.reduce((b,t)=>(+((t.crewAt||{})[tid])||0)>(+((b.crewAt||{})[tid])||0)?t:b,c[0]):c[0]||null;};
 function assignOn(tid,d){const k="a"+tid+d;if(k in memo)return memo[k];let r=null;
   if(!offRec(tid,d)){const c=jobsOn(d).filter(j=>!heldOn(j,d)&&membersOn(j,d).includes(tid));
     if(c.length>1){const at=j=>{let a=+((j.crewAt||{})[tid])||0;if(crewOn(j,d).includes(tid)===false)a=0;tasksOf(j).forEach(t=>{if(taskOpen(t,d)&&!heldOn(t,d)&&crewOn(t,d).includes(tid))a=Math.max(a,+((t.crewAt||{})[tid])||0);});
-        if(crewOn(j,d).includes(tid))a=Math.max(a,+((j.crewAt||{})[tid])||0);return a;};
+        if(crewOn(j,d).includes(tid))a=Math.max(a,+((j.crewAt||{})[tid])||0);{const cl=claimOf(j,tid,d);if(cl)a=Math.max(a,+cl.at||0);}return a;};
       r=c.reduce((b,j)=>at(j)>at(b)?j:b,c[0]);}else r=c[0]||null;}
   return memo[k]=r;}
 const workingOn=(j,d)=>membersOn(j,d).filter(t=>assignOn(t,d)===j);
@@ -1995,6 +1998,41 @@ function prioCard(d){const list=prioList(d);if(!list.length)return null;const ap
     h("div",{style:"display:flex;justify-content:space-between;gap:8px;align-items:baseline;flex-wrap:wrap"},h("strong",{},"Today's priorities"),
       mine?h("button",{type:"button",class:"linkbtn",onclick:()=>saveOrder([])},"Reset to the app's order"):h("span",{class:"status"},"Ranked by the app · ▲▼ to set your own")),
     ...rows,h("div",{class:"status"},"Ranks use job priority, due dates, how far behind, what's waiting on it and crew size. Your ▲▼ order wins and carries to the next days. 🚨 = all hands on it."));}
+/* ===== WHAT'S NEXT FOR A TECH: the app picks the best open work (all hands first, then the lead's order, then where people are needed) ===== */
+function nextPicks(me,d,skip){if(!me)return [];
+  return prioList(d).filter(it=>{const x=it.x;if(skip&&skip(x))return false;if(x.ids.includes(me.id))return false;if(x.task&&(x.task.doneOn||(tstate(x.job,x.task)||{}).state==="done"))return false;if(jobFin(x.job)&&!x.task)return false;if(isQuick(x.job)&&!quickActive(x.job))return false;const pr=taskProg(x.job,x.task);return !(pr&&pr.pct>=100);})
+    .map(it=>{const x=it.x,need=x.task?needTotal(x.task):0,n=x.ids.length,why=[];let s=it.s+orderBonus(x)+(it.push?1000:0);
+      if(it.push)why.push("all hands");if(!n){s+=30;why.push("no one on it");}else if(need&&n<need){s+=20;why.push("needs "+(need-n)+" more");}else s-=n*5;
+      if(it.rank>=0)why.push("high on "+TIM()+"'s list");why.push(...it.why);return {x,s,why:[...new Set(why)].slice(0,3)};})
+    .sort((a,b)=>b.s-a.s);}
+async function claimTask(x,doneLabel){const me=myTech();if(!me)return;const ms=mgrUids(),lbl=targetLabel(x.job,x.task);
+  try{await db.collection("jobs").doc(x.job.id).update({["marks._claim_"+me.id]:{taskId:x.task?x.task.id:"",at:Date.now(),by:myId||""},updatedAt:Date.now()});
+    if(x.task){try{await setTaskState(x.job,x.task,{state:"working",at:Date.now(),by:myId||""});}catch(e){}}
+    const msg=me.name+(doneLabel?" finished "+doneLabel+" and":"")+" picked up "+lbl;logEvent(msg,{ev:"working",jobId:x.job.id,techId:me.id});
+    if(ms.length)logEvent(msg+". Move them if you need them somewhere else.",{ev:"notice",notify:ms,title:"Picked up next task",jobId:x.job.id});
+    memo={};schedule();toast("You're on "+(x.task?x.task.name:x.job.name));}
+  catch(err){writeErr(err);}}
+function pickRow(pk,doneLabel,big){const x=pk.x,c=x.ids.length;
+  return h("div",{class:big?"wcard next":"arow",style:big?"margin:0":""},
+    h("span",{style:"display:grid;gap:2px"},big?h("div",{class:"wlbl"},"Best next task for you"):null,h("strong",{class:big?"wtitle sm":""},x.task?x.task.name:x.job.name),
+      h("small",{class:"status"},[x.task?x.job.name:"",c?"with "+crewNames(x.ids):"",pk.why.join(" · ")].filter(Boolean).join(" · "))),
+    big?null:h("button",{type:"button",class:"btn small",onclick:async()=>{closeSheet();await claimTask(x,doneLabel);}},"Take it"));}
+function picksView(doneLabel,skip){const me=myTech(),d=TODAY(),pk=nextPicks(me,d,skip),ms=mgrUids();
+  const ask=async()=>{closeSheet();const msg=me.name+(doneLabel?" finished "+doneLabel+" and":" is")+" needs a next task.";if(ms.length)logEvent(msg,{ev:"notice",notify:ms,title:"Needs next task"});logEvent(msg,{ev:"done"});toast("Sent to your lead and super");};
+  if(!pk.length)return [h("div",{class:"wcard",style:"margin:0"},h("div",{class:"wtitle sm"},"No open tasks right now"),h("div",{class:"status"},"Let your lead and super know you're free.")),h("button",{type:"button",class:"btn bigbtn",onclick:ask},"📣 Ask for my next task")];
+  const rest=pk.slice(1,8);
+  return [pickRow(pk[0],doneLabel,true),h("button",{type:"button",class:"btn bigbtn",onclick:async()=>{closeSheet();await claimTask(pk[0].x,doneLabel);}},"▶ Start this"),
+    rest.length?h("details",{},h("summary",{class:"linkbtn",style:"cursor:pointer"},"Other open tasks ("+rest.length+")"),h("div",{class:"stack",style:"gap:6px;margin-top:6px"},rest.map(r=>pickRow(r,doneLabel,false)))):null,
+    h("button",{type:"button",class:"btn ghost",onclick:ask},"📣 Ask "+TIM()+" instead")].filter(Boolean);}
+// a lead's or the super's app turns tech pick-ups into real assignments (and alerts already went out when they picked)
+let claimBusy=false;
+function applyClaims(){if(!MGR()||claimBusy)return;const d=TODAY(),moves=[],extra={},ap=activePush();let snap=null;
+  S.jobs.forEach(j=>Object.keys(j.marks||{}).forEach(k=>{if(!k.startsWith("_claim_"))return;const tid=k.slice(7),c=j.marks[k];
+    (extra[j.id]=extra[j.id]||{})["marks."+k]=firebase.firestore.FieldValue.delete();
+    if(!c||!c.at||iso(new Date(c.at))!==d||!techById(tid))return;const tg=placeTarget([j.id,c.taskId||""]);if(!tg)return;moves.push({tid,to:[tg]});
+    if(ap&&isPushTarget(ap,tg)&&!(ap.p.snap||{})[tid]){snap=snap||Object.assign({},ap.p.snap||{});snap[tid]=[];}}));
+  if(!Object.keys(extra).length)return;if(snap)(extra[ap.job.id]=extra[ap.job.id]||{}).push=Object.assign({},ap.p,{snap});
+  claimBusy=true;moveSet(moves,extra).catch(writeErr).finally(()=>{setTimeout(()=>{claimBusy=false;},3000);});}
 function cableLine(j,task){const cs=cablesOf(j);if(!cs.length||!stepsOf(j).length)return null;
   const st=stepForTask(j,task),pr=jobProgress(j);
   const n=st?stepCount(j,st.id):pr.done,tot=st?cs.length:pr.total,lbl=st?st.name+" "+n+"/"+tot:"Cables "+pr.pct+"%";
@@ -2026,7 +2064,7 @@ function renderLive(v){
   if(qWait.length)v.append(h("div",{class:"stack",style:"margin-bottom:12px"},h("div",{class:"month"},"Quick tasks waiting ("+qWait.length+")"),qWait.map(quickCard)));
   if(picked&&MGR())v.append(h("div",{class:"hint"},h("span",{},"Moving ",h("strong",{},techName(picked)),". Tap where they're going."),h("button",{class:"btn small",type:"button",onclick:()=>{picked=null;render();}},"Cancel")));
   const fl=myAlertFlags();if(fl.length)v.append(h("div",{class:"stack",style:"margin-bottom:12px"},fl.map(flagCard)));
-  const targets=liveTargets(d),info=dayInfo(d),ap=activePush();checkPushExpiry();
+  const targets=liveTargets(d),info=dayInfo(d),ap=activePush();checkPushExpiry();applyClaims();
   {const pb=pushBanner(d);if(pb)v.append(h("div",{style:"margin-bottom:10px"},pb));}
   const grid=h("div",{class:"board"});
   if(!targets.length)grid.append(h("div",{class:"empty"},h("strong",{},"Nothing active today"),MGR()?"Add a job on the Jobs tab, or resume something on hold.":"Check back once a lead sets up today's work."));
@@ -2776,7 +2814,7 @@ function flowCard(n,title,state,body,opts){opts=opts||{};
 function daySheet(title,build,wide){const box=h("div",{class:"full stack"});const draw=()=>{box.textContent="";const n=build();if(n)box.append(n);};draw();openView(title,[box]);liveSheet=draw;if(wide)$(".sheet").classList.add("wide");}
 function secRoll(d,all){const r=rollCall(d);return h("div",{class:"stack",style:"gap:8px"},rollBar(d),rollList(d,!all,0,true));}
 function secAssign(d){const r=rollCall(d),di=dayInfo(d),ap=activePush(),tg=liveTargets(d),outOn_=r.out.filter(t=>assignOn(t.id,d));
-  const ab=h("div",{class:"stack",style:"gap:8px"});checkPushExpiry();
+  const ab=h("div",{class:"stack",style:"gap:8px"});checkPushExpiry();applyClaims();
   {const pb=pushBanner(d);if(pb)ab.append(pb);}
   {const pc=prioCard(d);if(pc)ab.append(h("details",{class:"priobox"},h("summary",{},ap?"Today's priorities":"Today's priorities · what to push"),pc));}
   outOn_.forEach(t=>ab.append(h("div",{class:"arow warn"},h("span",{},h("strong",{},t.name+" is out"),h("small",{},"Was on "+assignLabel(t.id,d))),h("button",{type:"button",class:"btn ghost small",onclick:()=>moveTech(t.id,null).then(()=>toast(t.name+" taken off"))},"Take off"))));
@@ -3295,9 +3333,10 @@ function whatsNext(doneLabel,nx){const me=myTech(),d=TODAY();if(!me)return;
       const msg=me.name+" started "+label;logEvent(msg,{ev:"working",jobId:nx.j.id});if(ms.length)logEvent(msg,{ev:"notice",notify:ms,title:"Started next task",jobId:nx.j.id});toast("Started "+label);}catch(err){writeErr(err);}};
   openView("Nice work. What's next?",[h("div",{class:"full stack"},
     h("p",{class:"status",style:"margin:0"},"✓ "+doneLabel+" is done and your lead and super were told."),
+    ...(nx?[]:picksView(doneLabel,null)),
     nx?h("div",{class:"wcard next",style:"margin:0"},h("div",{class:"wlbl"},"Lined up for you"),h("div",{class:"wtitle sm"},nx.t?nx.t.name:nx.j.name),h("div",{class:"status"},[nx.t?nx.j.name:"Whole job",nx.j.site,(()=>{const c=workingOn(nx.j,d).filter(x=>x!==me.id&&(!nx.t||(taskFor(nx.j,x,d)||{}).id===nx.t.id));return c.length?"with "+crewNames(c):"";})()].filter(Boolean).join(" · ")))
-      :h("div",{class:"wcard",style:"margin:0"},h("div",{class:"wtitle sm"},"Nothing lined up for you yet"),h("div",{class:"status"},"Let your lead and super know you're free.")),
-    nx?h("button",{type:"button",class:"btn bigbtn",onclick:async()=>{closeSheet();await accept();}},"▶ Accept and start"):h("button",{type:"button",class:"btn bigbtn",onclick:async()=>{closeSheet();await ping("");}},"📣 Ask for my next task"),
+      :null,
+    nx?h("button",{type:"button",class:"btn bigbtn",onclick:async()=>{closeSheet();await accept();}},"▶ Accept and start"):null,
     nx?h("button",{type:"button",class:"btn ghost",onclick:async()=>{closeSheet();await ping("has "+label+" lined up but wants to check");}},"📣 Ask lead / super instead"):null,
     h("button",{type:"button",class:"linkbtn",onclick:closeSheet},"Not now"))]);}
 function renderMyWork(v){const d=TODAY(),me=myTech(),t=today();
@@ -3315,13 +3354,13 @@ function renderMyWork(v){const d=TODAY(),me=myTech(),t=today();
       v.append(h("div",{class:"wcard next"},h("div",{class:"wlbl"},"Next work day · "+fmt(x,{weekday:"long",month:"short",day:"numeric"})),h("div",{class:"wtitle"},a?(tk?tk.name:a.name):"No assignment yet"),a&&tk?h("div",{class:"status"},a.name):null));break;}
     workFooter(v);return;}
   let j=assignOn(me.id,d),tk=j?taskFor(j,me.id,d):null;
-  if(j&&jobFin(j)){const fj=j,nx=nextJobAfter(me,j,d);v.append(h("div",{class:"status",style:"margin:0 0 8px"},"✓ "+fj.name+" is marked complete and waiting for your lead to close it."));
+  if(j&&jobFin(j)&&!claimOf(j,me.id,d)){const fj=j,nx=nextJobAfter(me,j,d);v.append(h("div",{class:"status",style:"margin:0 0 8px"},"✓ "+fj.name+" is marked complete and waiting for your lead to close it."));
     j=nx&&nx.j.id!==fj.id?nx.j:null;tk=j?taskFor(j,me.id,d):null;
-    if(!j){v.append(h("div",{class:"wcard"},h("div",{class:"wlbl"},"Right now"),h("div",{class:"wtitle"},"Nothing lined up"),h("p",{class:"status"},"Let your lead and super know you're free."),
-      CAN_POST()?h("button",{type:"button",class:"btn",onclick:()=>whatsNext(fj.name,null)},"📣 Ask for my next task"):null));workFooter(v);return;}}
+    if(!j){v.append(h("div",{class:"stack",style:"gap:8px"},...(CAN_POST()?picksView(fj.name,null):[h("div",{class:"wcard"},h("div",{class:"wtitle"},"Nothing lined up"))])));workFooter(v);return;}}
   if(!j){const w=waitingItems(d).find(x=>x.crew.includes(me.id));
     v.append(h("div",{class:"wcard"},h("div",{class:"wlbl"},w?"Up next for you":"Right now"),h("div",{class:"wtitle"},w?targetLabel(w.job,w.task):"No task assigned"),
-      h("p",{class:"status"},w?"Waiting: "+waitTxt(w).toLowerCase()+". Your lead will start you when it's ready.":"Check in with your lead for your next task.")));workFooter(v);return;}
+      h("p",{class:"status"},w?"Waiting: "+waitTxt(w).toLowerCase()+". Your lead will start you when it's ready.":"Here's what needs people right now.")));
+    if(!w&&CAN_POST())v.append(h("div",{class:"stack",style:"gap:8px;margin-top:8px"},...picksView("",null)));workFooter(v);return;}
   const st=tstate(j,tk),state=heldOn(tk||j,d)?"held":st?st.state:"";
   const crew=workingOn(j,d).filter(x=>x!==me.id&&(taskFor(j,x,d)||{}).id===(tk||{}).id);
   const step=tk?stepForTask(j,tk):null,left=step?cablesOf(j).filter(c=>!markOf(j,c.id,step.id)):[];
